@@ -1,4 +1,5 @@
 import XCTest
+import AppKit
 @testable import DevDeck
 
 final class HostMetricsTests: XCTestCase {
@@ -26,5 +27,11 @@ final class HostMetricsTests: XCTestCase {
         XCTAssertEqual(s.compressorBytes(pageSize: 16384), 4 * 1_073_741_824)
         XCTAssertEqual(HostMetricsSample.formatRate(pagesPerSec: 4096, pageSize: 16384), "64.0 MB/s")
         XCTAssertEqual(HostMetricsSample.formatRate(pagesPerSec: 0, pageSize: 16384), "0 MB/s")
+    }
+
+    func testPressureBadgeColor() {
+        XCTAssertNil(TrayIcon.badgeColor(for: .normal), "no badge under normal pressure")
+        XCTAssertEqual(TrayIcon.badgeColor(for: .warning), NSColor.systemYellow)
+        XCTAssertEqual(TrayIcon.badgeColor(for: .critical), NSColor.systemRed)
     }
 }
