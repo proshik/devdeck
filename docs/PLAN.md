@@ -164,7 +164,7 @@ it **cannot see** individual `rustc` processes, their count, or the current crat
 
 ### Tier 1 — From the Host, Cheap, No VM Entry (do first)
 - [x] **[P5] Memory pressure level** (normal/warn/critical) — kernel verdict, predicts thrashing
-  before stalls. `kern.memorystatus_vm_pressure_level` + push `DispatchSource.makeMemoryPressureSource`. → menu bar icon. — ✅ DONE 2026-06-14
+  before stalls. Polled `kern.memorystatus_vm_pressure_level` (timer-refreshed, not a push source). → menu bar icon. — ✅ DONE 2026-06-14
 - [ ] **[P5] Swap-out/in rate** (pages/sec) — distinguishes "full but stable" from "actively
   thrashing"; static "Swap N GB" lags. `host_statistics64(HOST_VM_INFO64)` `swapins/swapouts`, delta/dt. → main window. (pure `swapRatePagesPerSec` done; live display deferred)
 - [x] **[P5] Hypervisor RSS vs VM limit + peak per run** — ✅ DONE (`772c45c`). Process

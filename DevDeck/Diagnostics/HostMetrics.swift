@@ -12,6 +12,8 @@ enum MemoryPressureLevel: Int, Equatable {
 
 /// Pages/sec swap rate from two cumulative counter samples. Negative deltas
 /// (counter reset / reboot) clamp to 0.
+/// TODO(deferred): the sampler doesn't yet retain a previous sample + timestamp, so the live
+/// swap-rate display isn't wired up. This pure helper + its test exist for that follow-up.
 func swapRatePagesPerSec(prevIn: UInt64, prevOut: UInt64,
                          curIn: UInt64, curOut: UInt64,
                          dtSeconds: Double) -> (inPerSec: Double, outPerSec: Double) {
