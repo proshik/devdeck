@@ -34,4 +34,10 @@ final class HostMetricsTests: XCTestCase {
         XCTAssertEqual(TrayIcon.badgeColor(for: .warning), NSColor.systemYellow)
         XCTAssertEqual(TrayIcon.badgeColor(for: .critical), NSColor.systemRed)
     }
+
+    func testCurrentPressureLevelReadsAValidValue() {
+        // The standalone sysctl read must not crash and must map to a known level.
+        let level = currentMemoryPressureLevel()
+        XCTAssertTrue([.normal, .warning, .critical].contains(level))
+    }
 }

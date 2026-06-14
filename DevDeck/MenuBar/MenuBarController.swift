@@ -30,11 +30,13 @@ final class MenuBarController: NSObject {
             button.target = self
         }
 
+        // The pressure badge is a system indicator: read the level directly (cheap sysctl) so it
+        // works even when no command is running. (`cachedHostSample` only exists during a run.)
         iconTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 guard let self, let button = self.statusItem.button else { return }
-                let color = TrayIcon.badgeColor(for: self.manager.cachedHostSample?.pressure ?? .normal)
-                button.image = TrayIcon.image(pressureColor: color)
+                let level = self.manager.isHostMonitoringEnabled() ? currentMemoryPressureLevel() : .normal
+                button.image = TrayIcon.image(pressureColor: TrayIcon.badgeColor(for: level))
                 button.image?.accessibilityDescription = "DevDeck"
             }
         }
