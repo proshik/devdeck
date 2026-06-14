@@ -163,24 +163,24 @@ it **cannot see** individual `rustc` processes, their count, or the current crat
 (final codegen + fat-LTO + linking at the end of the DAG).
 
 ### Tier 1 — From the Host, Cheap, No VM Entry (do first)
-- [ ] **[P5] Memory pressure level** (normal/warn/critical) — kernel verdict, predicts thrashing
-  before stalls. `kern.memorystatus_vm_pressure_level` + push `DispatchSource.makeMemoryPressureSource`. → menu bar icon.
+- [x] **[P5] Memory pressure level** (normal/warn/critical) — kernel verdict, predicts thrashing
+  before stalls. `kern.memorystatus_vm_pressure_level` + push `DispatchSource.makeMemoryPressureSource`. → menu bar icon. — ✅ DONE 2026-06-14
 - [ ] **[P5] Swap-out/in rate** (pages/sec) — distinguishes "full but stable" from "actively
-  thrashing"; static "Swap N GB" lags. `host_statistics64(HOST_VM_INFO64)` `swapins/swapouts`, delta/dt. → main window.
+  thrashing"; static "Swap N GB" lags. `host_statistics64(HOST_VM_INFO64)` `swapins/swapouts`, delta/dt. → main window. (pure `swapRatePagesPerSec` done; live display deferred)
 - [x] **[P5] Hypervisor RSS vs VM limit + peak per run** — ✅ DONE (`772c45c`). Process
   `com.apple.Virtualization.VirtualMachine` (footprint) vs limit from `colima list --json`; live
   line in popover + peak per run in log with a `colima --memory` hint; flag
   `Config.settings.vmMemoryMonitoring` + "Settings"; probe off the main thread.
   Real dev-build peak: **6.2/10 GiB (headroom 38%)** → colima --memory can be lowered to ~8.
   Spec: `docs/superpowers/specs/2026-06-10-vm-memory-monitoring-design.md`.
-- [ ] **[P5] OOM/non-zero exit detection + crate name** — cheap and unambiguous: `signal: 9` /
-  `could not compile X` → X = the monster crate. `terminationStatus==9` + regex over the log tail (exit code already available). → log.
-- [ ] **[P4] Peak memory per build → to log** — teaches "build peaks at X GB". `DiagnosticLog` already records
-  start/finish — add a summary. → log per run.
-- [ ] **[P4] Compressor saturation** — early warning between "RAM full" and "swap started".
-  `host_statistics64` `compressor_page_count` + `vm.compressor.pages_compressed`. → main window.
-- [ ] **[P3] Effective `-j` vs RAM limit** — justification for `CARGO_BUILD_JOBS=3` (rule: "limit_GB / 2
-  per rustc"). Parse `-j`/env of the command, default = VM cores. → main window.
+- [x] **[P5] OOM/non-zero exit detection + crate name** — cheap and unambiguous: `signal: 9` /
+  `could not compile X` → X = the monster crate. `terminationStatus==9` + regex over the log tail (exit code already available). → log. — ✅ DONE 2026-06-14
+- [x] **[P4] Peak memory per build → to log** — teaches "build peaks at X GB". `DiagnosticLog` already records
+  start/finish — add a summary. → log per run. — ✅ DONE 2026-06-14
+- [x] **[P4] Compressor saturation** — early warning between "RAM full" and "swap started".
+  `host_statistics64` `compressor_page_count` + `vm.compressor.pages_compressed`. → main window. — ✅ DONE 2026-06-14
+- [x] **[P3] Effective `-j` vs RAM limit** — justification for `CARGO_BUILD_JOBS=3` (rule: "limit_GB / 2
+  per rustc"). Parse `-j`/env of the command, default = VM cores. → main window. — ✅ DONE 2026-06-14
 
 ### Tier 2 — Probe Inside the VM (`minikube ssh`) ✅ DONE 2026-06-11
 - [x] Number of concurrent `rustc` processes + their total RSS — `ps -e -o rss=,comm=` in the node, maximums per run.
