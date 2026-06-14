@@ -313,6 +313,16 @@ final class ProcessManager {
                 DiagnosticLog.shared.log("Chain failed: “\(name)” code \(code)", level: .warn)
                 notifier.post(.commandFailed(name: name, code: code))
                 scanOOMIfNeeded(after: name, code: code)
+                if isHostMonitoringEnabled() {
+                    let tail = logs[chainID]?.elements.suffix(40).map(\.text).joined(separator: "\n") ?? ""
+                    let verdict = detectOOM(exitCode: code, logTail: tail)
+                    if verdict.isOOM {
+                        let crate = verdict.crate.map { " · crate `\($0)`" } ?? ""
+                        DiagnosticLog.shared.log("Likely OOM in chain “\(name)” (signal 9 / SIGKILL)\(crate)", level: .warn)
+                    } else if let c = verdict.crate {
+                        DiagnosticLog.shared.log("Chain “\(name)” failed at crate `\(c)`", level: .warn)
+                    }
+                }
             }
         case .cancelled:
             active[chainID] = nil
@@ -682,6 +692,16 @@ final class ProcessManager {
                 states[commandID] = (code == 0) ? .succeeded : .failed(code: code)
                 DiagnosticLog.shared.log("Finished: \(tag) code \(code)", level: code == 0 ? .info : .warn)
                 if code != 0 { scanOOMIfNeeded(after: name, code: code) }
+                if code != 0, isHostMonitoringEnabled() {
+                    let tail = logs[commandID]?.elements.suffix(40).map(\.text).joined(separator: "\n") ?? ""
+                    let verdict = detectOOM(exitCode: code, logTail: tail)
+                    if verdict.isOOM {
+                        let crate = verdict.crate.map { " · crate `\($0)`" } ?? ""
+                        DiagnosticLog.shared.log("Likely OOM: \(tag) (signal 9 / SIGKILL)\(crate)", level: .warn)
+                    } else if let c = verdict.crate {
+                        DiagnosticLog.shared.log("Build failed at crate `\(c)`: \(tag)", level: .warn)
+                    }
+                }
                 if isDaemon {
                     // the daemon exited on its own, without a stop request → dropped (or failed to start)
                     notifier.post(wasDaemonRunning
