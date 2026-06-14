@@ -1,0 +1,29 @@
+# macOS
+.DS_Store
+
+# JetBrains IDE
+.idea/
+
+# Superpowers brainstorm mockups
+.superpowers/
+
+# Xcode — user data and build artifacts
+xcuserdata/
+*.xcuserstate
+*.xcscmblueprint
+*.xccheckout
+
+# Build / derived artifacts
+build/
+DerivedData/
+*.moved-aside
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# Swift Package Manager (for future use)
+.build/
+.swiftpm/
+
+# App config is created in ~/Library/Application Support/DevDeck — not stored in the repo

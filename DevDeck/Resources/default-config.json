@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "commands": [
+    {
+      "id": "d9795434-0043-4c0e-830e-0458424c4856",
+      "name": "Example: list files",
+      "command": "ls -la ~"
+    },
+    {
+      "id": "9e37d150-396c-4da5-a277-d434f9e086d1",
+      "name": "Example: macOS version",
+      "command": "sw_vers"
+    },
+    {
+      "id": "0de565d1-c303-4904-a6eb-a49ea161a222",
+      "name": "Example: sudo (purge)",
+      "command": "purge",
+      "needsSudo": true
+    },
+    {
+      "id": "1ba134b4-55c8-414c-94bb-8e39cab56a47",
+      "name": "Example: daemon (clock)",
+      "command": "while true; do date; sleep 5; done",
+      "isDaemon": true
+    }
+  ],
+  "chains": [
+    {
+      "id": "56b6049f-5cb4-4424-958d-0eb17408e058",
+      "name": "Example: chain",
+      "commandIDs": [
+        "d9795434-0043-4c0e-830e-0458424c4856",
+        "9e37d150-396c-4da5-a277-d434f9e086d1"
+      ],
+      "stopOnError": true
+    }
+  ]
+}
