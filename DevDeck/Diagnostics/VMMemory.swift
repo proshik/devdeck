@@ -32,6 +32,15 @@ struct VMMemoryInfo: Equatable {
         let v = mem.uint64Value
         return v > 0 ? v : nil
     }
+
+    /// CPU count from `colima list --json` (`cpus`). nil on failure.
+    static func parseColimaCpus(_ json: String) -> Int? {
+        guard let data = json.data(using: .utf8),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let cpus = obj["cpus"] as? NSNumber else { return nil }
+        let v = cpus.intValue
+        return v > 0 ? v : nil
+    }
 }
 
 // MARK: - LiveVMMemoryProbe
