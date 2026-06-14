@@ -10,6 +10,16 @@ enum MemoryPressureLevel: Int, Equatable {
     init(raw: Int32) { self = MemoryPressureLevel(rawValue: Int(raw)) ?? .normal }
 }
 
+/// Cheap standalone read of the current kernel memory-pressure level — no other probing.
+/// Used by the menu bar badge, which must reflect pressure even when no build is running
+/// (the per-run sampler's `cachedHostSample` is only populated during an active run).
+func currentMemoryPressureLevel() -> MemoryPressureLevel {
+    var level: Int32 = 1
+    var size = MemoryLayout<Int32>.size
+    _ = sysctlbyname("kern.memorystatus_vm_pressure_level", &level, &size, nil, 0)
+    return MemoryPressureLevel(raw: level)
+}
+
 /// Pages/sec swap rate from two cumulative counter samples. Negative deltas
 /// (counter reset / reboot) clamp to 0.
 /// TODO(deferred): the sampler doesn't yet retain a previous sample + timestamp, so the live
@@ -55,10 +65,7 @@ protocol HostMetricsProbing: Sendable {
 struct LiveHostMetricsProbe: HostMetricsProbing {
     func sample(buildPID: Int32?) -> HostMetricsSample {
         let total = ProcessInfo.processInfo.physicalMemory
-
-        var level: Int32 = 1
-        var size = MemoryLayout<Int32>.size
-        _ = sysctlbyname("kern.memorystatus_vm_pressure_level", &level, &size, nil, 0)
+        let pressure = currentMemoryPressureLevel()
 
         var stats = vm_statistics64_data_t()
         var count = mach_msg_type_number_t(
@@ -71,7 +78,7 @@ struct LiveHostMetricsProbe: HostMetricsProbing {
 
         let footprint = buildPID.map { ProcessTree.physFootprint($0) } ?? 0
         return HostMetricsSample(
-            pressure: MemoryPressureLevel(raw: level),
+            pressure: pressure,
             swapInsPages: ok ? UInt64(stats.swapins) : 0,
             swapOutsPages: ok ? UInt64(stats.swapouts) : 0,
             compressorPages: ok ? UInt64(stats.compressor_page_count) : 0,
