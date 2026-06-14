@@ -30,4 +30,20 @@ final class BuildDiagnosticsTests: XCTestCase {
         XCTAssertFalse(v.isOOM)
         XCTAssertNil(v.crate)
     }
+
+    func testAdviseJobsAppliesLimitOverTwoRule() {
+        let gib: UInt64 = 1_073_741_824
+        let a = adviseJobs(command: "just dev-build", env: [:], vmCpus: 6, limitBytes: 6 * gib)
+        XCTAssertEqual(a.effectiveJobs, 6, "default -j = VM cores")
+        XCTAssertEqual(a.advisedJobs, 3, "limit_GB / 2")
+        XCTAssertTrue(a.overBudget)
+    }
+
+    func testAdviseJobsReadsExplicitFlagAndEnv() {
+        let gib: UInt64 = 1_073_741_824
+        XCTAssertEqual(adviseJobs(command: "cargo build -j 2", env: [:], vmCpus: 6, limitBytes: 6 * gib).effectiveJobs, 2)
+        XCTAssertEqual(adviseJobs(command: "just x", env: ["CARGO_BUILD_JOBS": "4"], vmCpus: 6, limitBytes: 6 * gib).effectiveJobs, 4)
+        let ok = adviseJobs(command: "cargo build -j 3", env: [:], vmCpus: 6, limitBytes: 6 * gib)
+        XCTAssertFalse(ok.overBudget, "3 jobs fit within 6 GiB")
+    }
 }

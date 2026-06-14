@@ -18,4 +18,10 @@ final class VMMemoryTests: XCTestCase {
         XCTAssertEqual(VMMemoryInfo.parseColimaLimitBytes(json), 10_737_418_240)
         XCTAssertNil(VMMemoryInfo.parseColimaLimitBytes("not json"))
     }
+
+    func testParseColimaCpus() {
+        let json = #"{"name":"default","status":"Running","memory":10737418240,"cpus":6}"#
+        XCTAssertEqual(VMMemoryInfo.parseColimaCpus(json), 6)
+        XCTAssertNil(VMMemoryInfo.parseColimaCpus("not json"))
+    }
 }
