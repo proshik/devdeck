@@ -1,5 +1,10 @@
 # Tier 1 — Host Memory Monitoring Implementation Plan
 
+> **STATUS: ✅ COMPLETED 2026-06-14** on branch `feat/tier1-host-memory` (Tasks 1–9 + a post-smoke
+> badge fix). Full suite green (167 tests). Deferred follow-ups (tracked, not blockers): live
+> swap-rate display in the UI (pure `swapRatePagesPerSec` done) and live colima cpus/limit in the
+> `-j` advisory (currently fixed defaults). See `docs/PLAN.md` Status / Tier 1 for the roadmap view.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add cheap, host-side memory signals so heavy Rust builds (running behind nested colima→minikube→pod limits) can be diagnosed and right-sized — predict thrashing, catch OOM, and record per-build peaks — without entering the VM.

@@ -26,9 +26,11 @@ The project lives in a separate directory alongside myproject: `/Users/proshik/d
 ## Status
 
 MVP (Stage 0–5) and post-MVP improvements — **closed and committed**, tests green.
-Memory monitoring: Tier 1 (colima, `772c45c`) and **Tier 2 (minikube from inside the VM + OOM detection,
-2026-06-11)** — done. Remaining Tier 1 tail items (pressure/swap-rate/compressor/`-j`) and
-"cheapest first step" — on hold.
+Memory monitoring: **all three tiers done.** Tier 1 host-side signals (colima `772c45c`; pressure
+badge, per-build peak RSS, compressor, OOM/crate detection, `-j` advisory — 2026-06-14) and
+**Tier 2 (minikube from inside the VM + OOM detection, 2026-06-11)**. The only Tier 1 tail still
+open is the **live swap-rate display** (pure `swapRatePagesPerSec` done; UI deferred); the `-j`
+advisory uses fixed colima defaults (live colima cpus/limit deferred).
 
 ---
 
@@ -214,14 +216,15 @@ it **cannot see** individual `rustc` processes, their count, or the current crat
 - [ ] ~~`purgeable`~~ (≈0 under load), ~~legacy `vm.memory_pressure`~~ (jumps 0↔13),
   ~~rate page-faults~~ (high even under normal conditions).
 
-### Cheapest First Step (building on current code)
-- [ ] On each run tick, sample the build process footprint + host pressure level + swap rate.
-- [ ] Accumulate peak between `.started` and `.terminated` (PID already flows through `RunnerOutput.started`,
-  currently ignored in `apply`; `ProcessManager.apply` hooks exist).
-- [ ] Write a summary to log: "peak RSS X GB, swap Y, pressure Z" (`DiagnosticLog`, `TimelineView` 1-sec tick).
-- [ ] On exit, detect OOM-kill and highlight the crate.
-- [ ] Explicitly pin `minikube --memory` so the ceiling is known.
-  (Tier 2 — probe into the VM — as a separate pass.)
+### Cheapest First Step (building on current code) — ✅ DONE 2026-06-14
+- [x] On each run tick, sample the build process footprint + host pressure level. (Swap rate: pure
+  helper done, live display deferred.) — host sampler in `ProcessManager`, `HostMetricsProbing`.
+- [x] Accumulate peak between `.started` and `.terminated` — `.started(pid)` now captured in both
+  `apply` and `applyChainTerminal`; `hostPeak` accumulated by the sampler.
+- [x] Write a summary to log: "build RSS X GB · pressure Z · compressor N%" (`flushHostStats`).
+- [x] On exit, detect OOM-kill and highlight the crate (`detectOOM`, `signal: 9` / `could not compile`).
+- [x] The build ceiling is known via Tier 2 (`minikube --memory` pinned there).
+  Implementation plan: `docs/superpowers/plans/2026-06-14-tier1-host-memory-monitoring.md`.
 
 ---
 
