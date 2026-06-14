@@ -6,9 +6,18 @@ versioning follows [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **Tier 1 — Host memory monitoring** (toggle in Settings, default on):
+  - Memory pressure level (normal / warning / critical) displayed as a colored badge on the menu bar icon
+    (`kern.memorystatus_vm_pressure_level` + `DispatchSource.makeMemoryPressureSource`).
+  - Per-run build-process peak RSS written to the diagnostic log together with a pressure + compressor summary.
+  - OOM / SIGKILL detection: `terminationStatus == 9` + regex over the log tail extracts the offending crate
+    name and records it to the log.
+  - `-j` vs RAM-limit advisory in the command editor (rule: `limit_GB / 2` per rustc job).
+  - Compressor saturation shown in the popover (`host_statistics64 compressor_page_count`).
+
 ### Planned
-- Tier 1 tail items: host memory pressure in the menu bar icon, swap-rate, compressor saturation,
-  detection of "signal: 9 + crate name" from the build log. See `docs/PLAN.md`.
+- Swap-out/in rate live display (pure `swapRatePagesPerSec` calculation is done; UI display deferred).
 
 ## [0.2.0] — 2026-06-11
 
