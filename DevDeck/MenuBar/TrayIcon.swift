@@ -41,4 +41,32 @@ enum TrayIcon {
         image.isTemplate = true
         return image
     }
+
+    /// Badge color for a pressure level; nil under normal pressure (no badge).
+    static func badgeColor(for level: MemoryPressureLevel) -> NSColor? {
+        switch level {
+        case .normal: return nil
+        case .warning: return .systemYellow
+        case .critical: return .systemRed
+        }
+    }
+
+    /// The tray glyph, optionally with a colored pressure dot in the top-right corner.
+    /// With a badge the image is non-template (the dot keeps its color); the glyph is drawn
+    /// in `labelColor` so it still adapts to the menu bar appearance.
+    static func image(pressureColor: NSColor?) -> NSImage {
+        guard let pressureColor else { return image() }   // normal → existing template glyph
+        let base = image()
+        let composed = NSImage(size: base.size, flipped: false) { rect in
+            NSColor.labelColor.set()
+            base.draw(in: rect)   // template glyph tinted with the current label color
+            let d: CGFloat = 6
+            let dot = NSRect(x: rect.maxX - d, y: rect.maxY - d, width: d, height: d)
+            pressureColor.setFill()
+            NSBezierPath(ovalIn: dot).fill()
+            return true
+        }
+        composed.isTemplate = false
+        return composed
+    }
 }
