@@ -157,6 +157,13 @@ final class CommandStore {
         persist(updated)
     }
 
+    func setHostMonitoring(_ on: Bool) {
+        guard config.settings.hostMemoryMonitoring != on else { return }
+        var updated = config
+        updated.settings.hostMemoryMonitoring = on
+        persist(updated)
+    }
+
     /// Save; a write failure goes into `error` (the UI shows a banner) instead of throwing out.
     private func persist(_ newConfig: Config) {
         do {

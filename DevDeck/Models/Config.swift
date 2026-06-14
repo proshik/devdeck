@@ -5,20 +5,23 @@ import Foundation
 struct Settings: Codable, Equatable {
     var vmMemoryMonitoring: Bool
     var minikubeMemoryMonitoring: Bool
+    var hostMemoryMonitoring: Bool
 
-    init(vmMemoryMonitoring: Bool = true, minikubeMemoryMonitoring: Bool = true) {
+    init(vmMemoryMonitoring: Bool = true, minikubeMemoryMonitoring: Bool = true, hostMemoryMonitoring: Bool = true) {
         self.vmMemoryMonitoring = vmMemoryMonitoring
         self.minikubeMemoryMonitoring = minikubeMemoryMonitoring
+        self.hostMemoryMonitoring = hostMemoryMonitoring
     }
 
     enum CodingKeys: String, CodingKey {
-        case vmMemoryMonitoring, minikubeMemoryMonitoring
+        case vmMemoryMonitoring, minikubeMemoryMonitoring, hostMemoryMonitoring
     }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         vmMemoryMonitoring = try c.decodeIfPresent(Bool.self, forKey: .vmMemoryMonitoring) ?? true
         minikubeMemoryMonitoring = try c.decodeIfPresent(Bool.self, forKey: .minikubeMemoryMonitoring) ?? true
+        hostMemoryMonitoring = try c.decodeIfPresent(Bool.self, forKey: .hostMemoryMonitoring) ?? true
     }
 }
 

@@ -26,6 +26,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Read the memory-monitoring flags live from the config — no copy when they change.
         manager.isVMMonitoringEnabled = { [weak store] in store?.config.settings.vmMemoryMonitoring ?? false }
         manager.isMinikubeMonitoringEnabled = { [weak store] in store?.config.settings.minikubeMemoryMonitoring ?? false }
+        manager.isHostMonitoringEnabled = { [weak store] in store?.config.settings.hostMemoryMonitoring ?? false }
         menuBar = MenuBarController(store: store, manager: manager, appModel: appModel)
     }
 

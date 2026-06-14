@@ -85,6 +85,15 @@ final class ProcessManager {
     /// The last minikube snapshot; present only during a run (nil between runs).
     private(set) var cachedMinikubeSample: MinikubeSample?
 
+    // MARK: host sampler (Tier 1)
+    @ObservationIgnored private let hostProbe: any HostMetricsProbing
+    @ObservationIgnored var isHostMonitoringEnabled: () -> Bool
+    @ObservationIgnored private var hostPeak: [UUID: UInt64] = [:]       // build footprint peak per run
+    @ObservationIgnored private var hostStats: [UUID: HostMetricsSample] = [:]  // last sample (pressure/compressor)
+    @ObservationIgnored private var buildPIDs: [UUID: Int32] = [:]       // PID captured from .started
+    /// Last host snapshot for the popover (live), updated by the sampler.
+    private(set) var cachedHostSample: HostMetricsSample?
+
     init(
         runner: any CommandRunner,
         notifier: any Notifier = NoopNotifier(),
@@ -96,7 +105,9 @@ final class ProcessManager {
         vmMonitoringEnabled: @escaping () -> Bool = { true },
         minikubeProbe: any MinikubeProbing = LiveMinikubeProbe(),
         oomInspector: any OOMInspecting = LiveOOMInspector(),
-        minikubeMonitoringEnabled: @escaping () -> Bool = { false }
+        minikubeMonitoringEnabled: @escaping () -> Bool = { false },
+        hostProbe: any HostMetricsProbing = LiveHostMetricsProbe(),
+        hostMonitoringEnabled: @escaping () -> Bool = { true }
     ) {
         self.runner = runner
         self.notifier = notifier
@@ -109,6 +120,8 @@ final class ProcessManager {
         self.minikubeProbe = minikubeProbe
         self.oomInspector = oomInspector
         self.isMinikubeMonitoringEnabled = minikubeMonitoringEnabled
+        self.hostProbe = hostProbe
+        self.isHostMonitoringEnabled = hostMonitoringEnabled
     }
 
     /// Prod default: the real zsh/sudo router + a live app controller.
@@ -280,7 +293,8 @@ final class ProcessManager {
         assert(Thread.isMainThread, "applyChainTerminal must run on the main thread")
         guard active[chainID]?.token == token else { return }
         switch event {
-        case .started:
+        case .started(let pid):
+            if let pid { buildPIDs[chainID] = pid }
             startVMSamplerIfNeeded()   // the chain is already .running; the sampler is needed from the first event
         case .line(let text, let stream):
             appendLog(chainID, text, stream)
@@ -475,6 +489,23 @@ final class ProcessManager {
 
     func vmPeakBytes(for id: UUID) -> UInt64? { vmPeak[id]?.usedBytes }
 
+    /// One host sample for run id (called from tests). Synchronous.
+    func recordHostSample(for id: UUID) {
+        guard isHostMonitoringEnabled() else { return }
+        let s = hostProbe.sample(buildPID: buildPIDs[id])
+        accumulateHostPeak(s, for: id)
+    }
+
+    func hostPeakFootprint(for id: UUID) -> UInt64? { hostPeak[id] }
+
+    /// The build PID captured from the last `.started` event for a run (nil when not yet received).
+    func buildPID(for id: UUID) -> Int32? { buildPIDs[id] }
+
+    private func accumulateHostPeak(_ s: HostMetricsSample, for id: UUID) {
+        hostStats[id] = s
+        if s.buildFootprintBytes > (hostPeak[id] ?? 0) { hostPeak[id] = s.buildFootprintBytes }
+    }
+
     /// A single minikube sample for run id (called from tests). Synchronous.
     func recordMinikubeSample(for id: UUID) {
         guard isMinikubeMonitoringEnabled(), let s = minikubeProbe.sample() else { return }
@@ -492,6 +523,18 @@ final class ProcessManager {
         }
     }
 
+    /// Build PID to footprint for host metrics: prefer a currently-running command/chain's
+    /// captured PID, with a stable tiebreak (sorted by id). nil if none captured yet.
+    private var primaryBuildPID: Int32? {
+        let runningIDs = active.keys.filter { id in
+            if states[id] == .running { return true }
+            if case .running = chainStates[id] { return true }
+            return false
+        }.sorted { $0.uuidString < $1.uuidString }
+        if let id = runningIDs.first(where: { buildPIDs[$0] != nil }) { return buildPIDs[id] }
+        return buildPIDs.min(by: { $0.key.uuidString < $1.key.uuidString })?.value
+    }
+
     /// Runs worth probing minikube for: actively RUNNING commands and chains-in-terminal.
     /// Hanging daemons are excluded — otherwise the ssh probe would hammer for hours.
     private var minikubeTargetIDs: [UUID] {
@@ -506,6 +549,7 @@ final class ProcessManager {
     private func flushRunPeaks(_ id: UUID, name: String) {
         flushVMPeak(id, name: name)
         flushMinikubeStats(id, name: name)
+        flushHostStats(id, name: name)
     }
 
     /// Log and clear the per-run peak (on the terminal event).
@@ -531,6 +575,12 @@ final class ProcessManager {
         DiagnosticLog.shared.log(line)
     }
 
+    private func flushHostStats(_ id: UUID, name: String) {
+        hostPeak.removeValue(forKey: id)
+        hostStats.removeValue(forKey: id)
+        buildPIDs.removeValue(forKey: id)
+    }
+
     /// After a failed run (not a user stop) — detect OOM kills:
     /// kubectl (OOMKilled pods) + the node's dmesg. The blocking scan runs off the main thread.
     private func scanOOMIfNeeded(after name: String, code: Int32) {
@@ -553,7 +603,7 @@ final class ProcessManager {
 
     private func startVMSamplerIfNeeded() {
         guard vmSamplerTask == nil,
-              isVMMonitoringEnabled() || isMinikubeMonitoringEnabled() else { return }
+              isVMMonitoringEnabled() || isMinikubeMonitoringEnabled() || isHostMonitoringEnabled() else { return }
         vmSamplerTask = Task { @MainActor [weak self] in
             while let self, !self.active.isEmpty {
                 let vmProbe = self.isVMMonitoringEnabled() ? self.vmProbe : nil
@@ -566,10 +616,20 @@ final class ProcessManager {
                 if let s { for id in self.active.keys { self.accumulateVMPeak(s, for: id) } }
                 self.cachedMinikubeSample = mk
                 if let mk { for id in mkTargets where self.active[id] != nil { self.absorbMinikube(mk, for: id) } }
+                if self.isHostMonitoringEnabled() {
+                    let pid = self.primaryBuildPID
+                    let hostProbe = self.hostProbe
+                    let host = await Task.detached(priority: .utility) {
+                        hostProbe.sample(buildPID: pid)
+                    }.value
+                    self.cachedHostSample = host
+                    for id in self.active.keys { self.accumulateHostPeak(host, for: id) }
+                }
                 try? await Task.sleep(for: .seconds(1))
             }
             self?.vmSamplerTask = nil
             self?.cachedMinikubeSample = nil   // outside a run the minikube line isn't shown in the popover
+            self?.cachedHostSample = nil
         }
     }
 
@@ -584,7 +644,8 @@ final class ProcessManager {
 
         let tag = "“\(name)” [\(commandID.uuidString.prefix(8))]"
         switch event {
-        case .started:
+        case .started(let pid):
+            if let pid { buildPIDs[commandID] = pid }
             if isDaemon {
                 states[commandID] = .daemonRunning
                 DiagnosticLog.shared.log("Daemon up: \(tag)")
