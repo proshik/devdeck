@@ -43,4 +43,28 @@ final class ProcessManagerHostMemoryTests: XCTestCase {
         m.recordHostSample(for: id)
         XCTAssertNil(m.hostPeakFootprint(for: id))
     }
+
+    func testTerminateWritesHostSummaryToLog() async throws {
+        let gib: UInt64 = 1_073_741_824
+        let probe = FakeHostMetricsProbe([
+            HostMetricsSample(pressure: .warning, swapInsPages: 0, swapOutsPages: 0,
+                              compressorPages: 0, totalBytes: 16 * gib, buildFootprintBytes: 6 * gib),
+        ])
+        let fake = FakeCommandRunner()
+        let m = ProcessManager(runner: fake, hostProbe: probe, hostMonitoringEnabled: { true })
+        let c = Command(id: UUID(), name: "heavy-build", command: "just dev-build")
+        fake.eagerScripts[c.id] = [.started(pid: 7)]
+        m.run(c)
+        let ctrl = try XCTUnwrap(fake.controller(for: c.id))
+        await yieldUntil { m.buildPID(for: c.id) != nil }
+        m.recordHostSample(for: c.id)
+
+        let before = (try? String(contentsOf: DiagnosticLog.shared.fileURL, encoding: .utf8)) ?? ""
+        ctrl.terminate(0)
+        await yieldUntil { m.states[c.id] == .succeeded }
+        let after = try String(contentsOf: DiagnosticLog.shared.fileURL, encoding: .utf8)
+        let added = String(after.dropFirst(before.count))
+        XCTAssertTrue(added.contains("Host peak for \u{201c}heavy-build\u{201d}"), added)
+        XCTAssertTrue(added.contains("6.0 GB"), "build footprint peak in the summary: \(added)")
+    }
 }
