@@ -24,6 +24,10 @@ struct SettingsView: View {
                     get: { store.config.settings.minikubeMemoryMonitoring },
                     set: { store.setMinikubeMonitoring($0) }
                 ))
+                Toggle(L10n.hostMonitoringToggle, isOn: Binding(
+                    get: { store.config.settings.hostMemoryMonitoring },
+                    set: { store.setHostMonitoring($0) }
+                ))
             }
         }
         .formStyle(.grouped)

@@ -133,6 +133,25 @@ struct PopoverView: View {
                     }
                     .font(.system(size: 10))
                 }
+
+                if let host = manager.cachedHostSample {
+                    if host.pressure != .normal {
+                        HStack {
+                            Text(L10n.jobsLabel(host.pressure)).foregroundStyle(.secondary)
+                            Spacer()
+                        }
+                        .font(.system(size: 10))
+                    }
+                    let comp = Int((host.compressorFraction(pageSize: hostPageSize) * 100).rounded())
+                    if comp > 0 {
+                        HStack {
+                            Text(L10n.compressor).foregroundStyle(.secondary)
+                            Spacer()
+                            Text("\(comp)%").monospacedDigit().foregroundStyle(.secondary)
+                        }
+                        .font(.system(size: 10))
+                    }
+                }
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 9)

@@ -46,6 +46,13 @@ struct CommandEditorView: View {
                         Text(L10n.terminalTab).tag(TerminalLaunchMode.tab.rawValue)
                     }
                 }
+                if draft.command.contains("cargo") || draft.command.contains("dev-build") {
+                    let advice = adviseJobs(command: draft.command, env: assembledDraft.env,
+                                            vmCpus: 6, limitBytes: 6 * 1_073_741_824)
+                    Text(L10n.jobsAdvice(advice.effectiveJobs, advice.advisedJobs))
+                        .font(.caption)
+                        .foregroundStyle(advice.overBudget ? .orange : .secondary)
+                }
             }
 
             Section(L10n.envSection) {

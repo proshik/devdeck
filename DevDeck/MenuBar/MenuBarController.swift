@@ -6,8 +6,11 @@ import SwiftUI
 final class MenuBarController: NSObject {
     private let statusItem: NSStatusItem
     private let popover: NSPopover
+    private let manager: ProcessManager
+    private var iconTimer: Timer?
 
     init(store: CommandStore, manager: ProcessManager, appModel: AppModel) {
+        self.manager = manager
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         popover = NSPopover()
         super.init()
@@ -25,6 +28,15 @@ final class MenuBarController: NSObject {
             button.image?.accessibilityDescription = "DevDeck"
             button.action = #selector(togglePopover)
             button.target = self
+        }
+
+        iconTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                guard let self, let button = self.statusItem.button else { return }
+                let color = TrayIcon.badgeColor(for: self.manager.cachedHostSample?.pressure ?? .normal)
+                button.image = TrayIcon.image(pressureColor: color)
+                button.image?.accessibilityDescription = "DevDeck"
+            }
         }
     }
 
