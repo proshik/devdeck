@@ -9,7 +9,7 @@ versioning follows [SemVer](https://semver.org/).
 ### Added
 - **Tier 1 — Host memory monitoring** (toggle in Settings, default on):
   - Memory pressure level (normal / warning / critical) displayed as a colored badge on the menu bar icon
-    (`kern.memorystatus_vm_pressure_level` + `DispatchSource.makeMemoryPressureSource`).
+    (polled from `kern.memorystatus_vm_pressure_level`, refreshed on a timer).
   - Per-run build-process peak RSS written to the diagnostic log together with a pressure + compressor summary.
   - OOM / SIGKILL detection: `terminationStatus == 9` + regex over the log tail extracts the offending crate
     name and records it to the log.
