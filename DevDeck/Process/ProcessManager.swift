@@ -576,9 +576,23 @@ final class ProcessManager {
     }
 
     private func flushHostStats(_ id: UUID, name: String) {
-        hostPeak.removeValue(forKey: id)
-        hostStats.removeValue(forKey: id)
-        buildPIDs.removeValue(forKey: id)
+        defer { hostPeak.removeValue(forKey: id); hostStats.removeValue(forKey: id); buildPIDs.removeValue(forKey: id) }
+        guard let peak = hostPeak[id], peak > 0 else { return }
+        let last = hostStats[id]
+        let peakGB = String(format: "%.1f GB", Double(peak) / 1_073_741_824.0)
+        var line = "Host peak for \u{201c}\(name)\u{201d}: build RSS \(peakGB)"
+        if let last {
+            let pressure: String
+            switch last.pressure {
+            case .normal: pressure = "normal"
+            case .warning: pressure = "warning"
+            case .critical: pressure = "critical"
+            }
+            line += " · pressure \(pressure)"
+            let compFrac = Int((last.compressorFraction(pageSize: hostPageSize) * 100).rounded())
+            if compFrac > 0 { line += " · compressor \(compFrac)%" }
+        }
+        DiagnosticLog.shared.log(line, level: last?.pressure == .critical ? .warn : .info)
     }
 
     /// After a failed run (not a user stop) — detect OOM kills:
