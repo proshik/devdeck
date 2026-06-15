@@ -40,11 +40,18 @@ final class MenuBarController: NSObject {
             button.action = #selector(togglePopover)
             button.target = self
 
-            // Pin the dot to the top-right of the button so it survives status-bar relayout.
+            // Pin the dot to the top-right corner of the 18×18 glyph via constraints, so it
+            // resolves at layout time (button.bounds isn't final yet during init) and the
+            // glyph is centered in the taller status-bar button.
             let d = badgeView.frame.width
-            badgeView.frame.origin = NSPoint(x: button.bounds.maxX - d - 1, y: button.bounds.maxY - d - 2)
-            badgeView.autoresizingMask = [.minXMargin, .minYMargin]
+            badgeView.translatesAutoresizingMaskIntoConstraints = false
             button.addSubview(badgeView)
+            NSLayoutConstraint.activate([
+                badgeView.widthAnchor.constraint(equalToConstant: d),
+                badgeView.heightAnchor.constraint(equalToConstant: d),
+                badgeView.trailingAnchor.constraint(equalTo: button.centerXAnchor, constant: 9),
+                badgeView.topAnchor.constraint(equalTo: button.centerYAnchor, constant: -9),
+            ])
         }
 
         // The pressure badge is a system indicator: read the level directly (cheap sysctl) so it
