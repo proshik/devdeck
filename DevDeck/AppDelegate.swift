@@ -28,6 +28,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         manager.isMinikubeMonitoringEnabled = { [weak store] in store?.config.settings.minikubeMemoryMonitoring ?? false }
         manager.isHostMonitoringEnabled = { [weak store] in store?.config.settings.hostMemoryMonitoring ?? false }
         menuBar = MenuBarController(store: store, manager: manager, appModel: appModel)
+
+        // Global hotkey (⌃⌥D) toggles the popover; enabled per the persisted setting.
+        HotKeyManager.shared.onTrigger = { [weak menuBar] in menuBar?.toggle() }
+        HotKeyManager.shared.setEnabled(store.config.settings.globalHotkeyEnabled)
     }
 
     /// The main window's red close button does NOT quit the app — it lives in the menu bar.
