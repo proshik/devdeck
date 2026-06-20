@@ -5,6 +5,7 @@ import AppKit
 struct CommandEditorView: View {
     @Environment(CommandStore.self) private var store
     @Environment(AppModel.self) private var appModel
+    @Environment(ProcessManager.self) private var manager
 
     let command: Command
 
@@ -47,11 +48,13 @@ struct CommandEditorView: View {
                     }
                 }
                 if draft.command.contains("cargo") || draft.command.contains("dev-build") {
+                    let cfg = effectiveVMConfig(manager.vmBuildConfig)
                     let advice = adviseJobs(command: draft.command, env: assembledDraft.env,
-                                            vmCpus: 6, limitBytes: 6 * 1_073_741_824)
+                                            vmCpus: cfg.cpus, limitBytes: cfg.limitBytes)
                     Text(L10n.jobsAdvice(advice.effectiveJobs, advice.advisedJobs))
                         .font(.caption)
                         .foregroundStyle(advice.overBudget ? .orange : .secondary)
+                        .task { manager.refreshVMBuildConfig() }
                 }
             }
 

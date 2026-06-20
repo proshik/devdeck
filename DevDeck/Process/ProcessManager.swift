@@ -84,6 +84,8 @@ final class ProcessManager {
     @ObservationIgnored private var minikubeStats: [UUID: MinikubeRunStats] = [:]
     /// The last minikube snapshot; present only during a run (nil between runs).
     private(set) var cachedMinikubeSample: MinikubeSample?
+    /// Live colima cpus + memory limit for the `-j` advisory; nil until resolved (then defaults apply).
+    private(set) var vmBuildConfig: VMBuildConfig?
 
     // MARK: host sampler (Tier 1)
     @ObservationIgnored private let hostProbe: any HostMetricsProbing
@@ -93,6 +95,10 @@ final class ProcessManager {
     @ObservationIgnored private var buildPIDs: [UUID: Int32] = [:]       // PID captured from .started
     /// Last host snapshot for the popover (live), updated by the sampler.
     private(set) var cachedHostSample: HostMetricsSample?
+    /// Previous host sample + its timestamp, kept to compute the swap-out rate between ticks.
+    @ObservationIgnored private var prevHostForRate: (sample: HostMetricsSample, time: Date)?
+    /// Live swap-out rate (pages/sec) for the popover; nil until two samples are seen, cleared between runs.
+    private(set) var cachedSwapOutRatePages: Double?
 
     init(
         runner: any CommandRunner,
@@ -477,6 +483,16 @@ final class ProcessManager {
     /// minikube snapshot for the popover — the sampler cache, present only during a run.
     func minikubeSample() -> MinikubeSample? { cachedMinikubeSample }
 
+    /// Resolve live colima cpus/limit for the `-j` advisory, OFF the main thread. Cached once known.
+    func refreshVMBuildConfig() {
+        if vmBuildConfig != nil { return }
+        let probe = vmProbe
+        Task { @MainActor [weak self] in
+            let cfg = await Task.detached(priority: .utility) { probe.buildConfig() }.value
+            if let cfg { self?.vmBuildConfig = cfg }
+        }
+    }
+
     /// Update cachedVMSample by running the blocking probe OFF the main thread.
     func refreshVMSample() async {
         guard isVMMonitoringEnabled() else { cachedVMSample = nil; return }
@@ -514,6 +530,18 @@ final class ProcessManager {
     private func accumulateHostPeak(_ s: HostMetricsSample, for id: UUID) {
         hostStats[id] = s
         if s.buildFootprintBytes > (hostPeak[id] ?? 0) { hostPeak[id] = s.buildFootprintBytes }
+    }
+
+    /// Compute the live swap-out rate from the previous sample and publish it for the popover.
+    /// The first call (no predecessor) only records the baseline and leaves the rate nil.
+    func updateSwapRate(cur: HostMetricsSample, now: Date) {
+        if let prev = prevHostForRate {
+            let dt = now.timeIntervalSince(prev.time)
+            let rate = swapRatePagesPerSec(prevIn: prev.sample.swapInsPages, prevOut: prev.sample.swapOutsPages,
+                                           curIn: cur.swapInsPages, curOut: cur.swapOutsPages, dtSeconds: dt)
+            cachedSwapOutRatePages = rate.outPerSec
+        }
+        prevHostForRate = (cur, now)
     }
 
     /// A single minikube sample for run id (called from tests). Synchronous.
@@ -647,6 +675,7 @@ final class ProcessManager {
                         hostProbe.sample(buildPID: pid)
                     }.value
                     self.cachedHostSample = host
+                    self.updateSwapRate(cur: host, now: Date())
                     for id in self.active.keys { self.accumulateHostPeak(host, for: id) }
                 }
                 try? await Task.sleep(for: .seconds(1))
@@ -654,6 +683,8 @@ final class ProcessManager {
             self?.vmSamplerTask = nil
             self?.cachedMinikubeSample = nil   // outside a run the minikube line isn't shown in the popover
             self?.cachedHostSample = nil
+            self?.cachedSwapOutRatePages = nil
+            self?.prevHostForRate = nil
         }
     }
 

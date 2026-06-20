@@ -137,8 +137,10 @@ struct PopoverView: View {
                 if let host = manager.cachedHostSample {
                     if host.pressure != .normal {
                         HStack {
-                            Text(L10n.jobsLabel(host.pressure)).foregroundStyle(.secondary)
+                            Text(L10n.pressure).foregroundStyle(.secondary)
                             Spacer()
+                            Text(L10n.pressureValue(host.pressure))
+                                .foregroundStyle(host.pressure == .critical ? .red : .orange)
                         }
                         .font(.system(size: 10))
                     }
@@ -148,6 +150,18 @@ struct PopoverView: View {
                             Text(L10n.compressor).foregroundStyle(.secondary)
                             Spacer()
                             Text("\(comp)%").monospacedDigit().foregroundStyle(.secondary)
+                        }
+                        .font(.system(size: 10))
+                    }
+                    // Live swap-out rate: distinguishes "full but stable" from "actively thrashing".
+                    // Gate at ~0.1 MB/s so sub-rounding noise doesn't show as "0.0 MB/s".
+                    if let rate = manager.cachedSwapOutRatePages, rate * Double(hostPageSize) >= 100_000 {
+                        HStack {
+                            Text(L10n.swapRate).foregroundStyle(.secondary)
+                            Spacer()
+                            Text(HostMetricsSample.formatRate(pagesPerSec: rate, pageSize: hostPageSize))
+                                .monospacedDigit()
+                                .foregroundStyle(.orange)
                         }
                         .font(.system(size: 10))
                     }
