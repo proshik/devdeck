@@ -18,6 +18,8 @@ versioning follows [SemVer](https://semver.org/).
   - Compressor saturation shown in the popover (`host_statistics64 compressor_page_count`).
   - Live swap rate (out ↑ / in ↓) shown in the popover during a run — distinguishes
     "full but stable" from "actively thrashing"; computed from consecutive `host_statistics64` samples.
+- Proactive high-memory warning: a banner + log entry when colima or minikube cross 90% of their
+  memory limit during a run (debounced to once per layer per run).
 
 ### Changed
 - Host per-run log line renamed "Host peak" → "Host summary" and no longer prints a misleading

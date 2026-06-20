@@ -152,6 +152,9 @@ enum L10n {
     static func notifNameCode(_ name: String, _ code: Int32) -> String {
         t("\(name) — code \(code)", "\(name) — код \(code)")
     }
+    static func notifMemoryHigh(_ target: String) -> String {
+        t("\(target) memory is running low", "\(target): память на исходе")
+    }
 
     // MARK: - Process manager (user-visible log lines)
 

@@ -86,6 +86,11 @@ final class ProcessManager {
     private(set) var cachedMinikubeSample: MinikubeSample?
     /// Live colima cpus + memory limit for the `-j` advisory; nil until resolved (then defaults apply).
     private(set) var vmBuildConfig: VMBuildConfig?
+    /// Memory layers ("colima"/"minikube") already warned about this sampler session — debounce
+    /// to one notification per layer per run; cleared when the sampler stops.
+    @ObservationIgnored private var warnedThresholds: Set<String> = []
+    /// Fraction of a VM/node memory limit at which a proactive high-memory warning fires.
+    @ObservationIgnored private let memoryWarnThreshold = 0.90
 
     // MARK: host sampler (Tier 1)
     @ObservationIgnored private let hostProbe: any HostMetricsProbing
@@ -484,6 +489,19 @@ final class ProcessManager {
     /// minikube snapshot for the popover — the sampler cache, present only during a run.
     func minikubeSample() -> MinikubeSample? { cachedMinikubeSample }
 
+    /// Proactively warn (banner + log) when a VM/node memory layer crosses the danger threshold
+    /// during a run, so you don't have to watch the popover. Debounced to once per layer per run.
+    func checkMemoryThresholds(vm: VMMemoryInfo?, minikube: MinikubeSample?) {
+        if let vm, vm.fraction >= memoryWarnThreshold, warnedThresholds.insert("colima").inserted {
+            notifier.post(.memoryThreshold(target: "colima", detail: vm.format()))
+            DiagnosticLog.shared.log("colima memory high: \(vm.format())", level: .warn)
+        }
+        if let mk = minikube, mk.fraction >= memoryWarnThreshold, warnedThresholds.insert("minikube").inserted {
+            notifier.post(.memoryThreshold(target: "minikube", detail: mk.format()))
+            DiagnosticLog.shared.log("minikube memory high: \(mk.format())", level: .warn)
+        }
+    }
+
     /// Resolve live colima cpus/limit for the `-j` advisory, OFF the main thread. Cached once known.
     func refreshVMBuildConfig() {
         if vmBuildConfig != nil { return }
@@ -678,6 +696,7 @@ final class ProcessManager {
                 if let s { for id in self.active.keys { self.accumulateVMPeak(s, for: id) } }
                 self.cachedMinikubeSample = mk
                 if let mk { for id in mkTargets where self.active[id] != nil { self.absorbMinikube(mk, for: id) } }
+                self.checkMemoryThresholds(vm: s, minikube: mk)
                 if self.isHostMonitoringEnabled() {
                     let pid = self.primaryBuildPID
                     let hostProbe = self.hostProbe
@@ -696,6 +715,7 @@ final class ProcessManager {
             self?.cachedSwapOutRatePages = nil
             self?.cachedSwapInRatePages = nil
             self?.prevHostForRate = nil
+            self?.warnedThresholds.removeAll()
         }
     }
 
