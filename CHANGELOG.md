@@ -16,8 +16,14 @@ versioning follows [SemVer](https://semver.org/).
   - `-j` vs RAM-limit advisory in the command editor (rule: `limit_GB / 2` per rustc job), now grounded
     in live colima cpus/limit (parsed from `colima list --json`) with a fallback to conservative defaults.
   - Compressor saturation shown in the popover (`host_statistics64 compressor_page_count`).
-  - Live swap-out rate ("Swap rate X MB/s") shown in the popover during a run — distinguishes
+  - Live swap rate (out ↑ / in ↓) shown in the popover during a run — distinguishes
     "full but stable" from "actively thrashing"; computed from consecutive `host_statistics64` samples.
+
+### Changed
+- Host per-run log line renamed "Host peak" → "Host summary" and no longer prints a misleading
+  "build RSS 0.0 GB" for nested builds (rustc runs inside the VM, invisible to the host).
+- Pressure level shown in the popover as a right-aligned colored value (orange = warning, red = critical).
+- Menu bar pressure-dot position derives from the glyph size instead of a hardcoded offset.
 
 ## [0.2.0] — 2026-06-11
 

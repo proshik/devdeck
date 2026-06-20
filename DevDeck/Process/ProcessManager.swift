@@ -97,8 +97,9 @@ final class ProcessManager {
     private(set) var cachedHostSample: HostMetricsSample?
     /// Previous host sample + its timestamp, kept to compute the swap-out rate between ticks.
     @ObservationIgnored private var prevHostForRate: (sample: HostMetricsSample, time: Date)?
-    /// Live swap-out rate (pages/sec) for the popover; nil until two samples are seen, cleared between runs.
+    /// Live swap-out/in rate (pages/sec) for the popover; nil until two samples are seen, cleared between runs.
     private(set) var cachedSwapOutRatePages: Double?
+    private(set) var cachedSwapInRatePages: Double?
 
     init(
         runner: any CommandRunner,
@@ -540,6 +541,7 @@ final class ProcessManager {
             let rate = swapRatePagesPerSec(prevIn: prev.sample.swapInsPages, prevOut: prev.sample.swapOutsPages,
                                            curIn: cur.swapInsPages, curOut: cur.swapOutsPages, dtSeconds: dt)
             cachedSwapOutRatePages = rate.outPerSec
+            cachedSwapInRatePages = rate.inPerSec
         }
         prevHostForRate = (cur, now)
     }
@@ -615,10 +617,16 @@ final class ProcessManager {
 
     private func flushHostStats(_ id: UUID, name: String) {
         defer { hostPeak.removeValue(forKey: id); hostStats.removeValue(forKey: id); buildPIDs.removeValue(forKey: id) }
-        guard let peak = hostPeak[id], peak > 0 else { return }
+        let peak = hostPeak[id] ?? 0
         let last = hostStats[id]
-        let peakGB = String(format: "%.1f GB", Double(peak) / 1_073_741_824.0)
-        var line = "Host peak for \u{201c}\(name)\u{201d}: build RSS \(peakGB)"
+        guard peak > 0 || last != nil else { return }
+        let gib = 1_073_741_824.0
+        var parts: [String] = []
+        // For nested builds the host can't see rustc (it runs inside the VM), so a sub-0.1 GiB
+        // footprint is just the shell wrapper — omit the misleading "build RSS 0.0 GB".
+        if Double(peak) / gib >= 0.1 {
+            parts.append("build RSS " + String(format: "%.1f GB", Double(peak) / gib))
+        }
         if let last {
             let pressure: String
             switch last.pressure {
@@ -626,11 +634,13 @@ final class ProcessManager {
             case .warning: pressure = "warning"
             case .critical: pressure = "critical"
             }
-            line += " · pressure \(pressure)"
+            parts.append("pressure \(pressure)")
             let compFrac = Int((last.compressorFraction(pageSize: hostPageSize) * 100).rounded())
-            if compFrac > 0 { line += " · compressor \(compFrac)%" }
+            if compFrac > 0 { parts.append("compressor \(compFrac)%") }
         }
-        DiagnosticLog.shared.log(line, level: last?.pressure == .critical ? .warn : .info)
+        guard !parts.isEmpty else { return }
+        DiagnosticLog.shared.log("Host summary for \u{201c}\(name)\u{201d}: " + parts.joined(separator: " · "),
+                                 level: last?.pressure == .critical ? .warn : .info)
     }
 
     /// After a failed run (not a user stop) — detect OOM kills:
@@ -684,6 +694,7 @@ final class ProcessManager {
             self?.cachedMinikubeSample = nil   // outside a run the minikube line isn't shown in the popover
             self?.cachedHostSample = nil
             self?.cachedSwapOutRatePages = nil
+            self?.cachedSwapInRatePages = nil
             self?.prevHostForRate = nil
         }
     }
