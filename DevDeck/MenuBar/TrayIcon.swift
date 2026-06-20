@@ -3,8 +3,11 @@ import AppKit
 /// Menu bar icon: a mini "control panel" (console frame + horizontal faders).
 /// Drawn in code → crisp at any size; `isTemplate` → adapts to light/dark menu bar appearance.
 enum TrayIcon {
+    /// Glyph side in points. The pressure badge is pinned to this box's top-right corner.
+    static let glyphSize: CGFloat = 18
+
     static func image() -> NSImage {
-        let size = NSSize(width: 18, height: 18)
+        let size = NSSize(width: glyphSize, height: glyphSize)
         let image = NSImage(size: size, flipped: false) { rect in
             let body = rect.insetBy(dx: 1.5, dy: 1.5)
 

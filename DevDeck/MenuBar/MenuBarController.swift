@@ -40,17 +40,19 @@ final class MenuBarController: NSObject {
             button.action = #selector(togglePopover)
             button.target = self
 
-            // Pin the dot to the top-right corner of the 18×18 glyph via constraints, so it
+            // Pin the dot to the top-right corner of the glyph box via constraints, so it
             // resolves at layout time (button.bounds isn't final yet during init) and the
-            // glyph is centered in the taller status-bar button.
+            // glyph is centered in the taller status-bar button. Offsets derive from the glyph
+            // size so the dot follows the glyph if its dimensions ever change.
             let d = badgeView.frame.width
+            let half = TrayIcon.glyphSize / 2
             badgeView.translatesAutoresizingMaskIntoConstraints = false
             button.addSubview(badgeView)
             NSLayoutConstraint.activate([
                 badgeView.widthAnchor.constraint(equalToConstant: d),
                 badgeView.heightAnchor.constraint(equalToConstant: d),
-                badgeView.trailingAnchor.constraint(equalTo: button.centerXAnchor, constant: 9),
-                badgeView.topAnchor.constraint(equalTo: button.centerYAnchor, constant: -9),
+                badgeView.trailingAnchor.constraint(equalTo: button.centerXAnchor, constant: half),
+                badgeView.topAnchor.constraint(equalTo: button.centerYAnchor, constant: -half),
             ])
         }
 

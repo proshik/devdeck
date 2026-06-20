@@ -153,13 +153,23 @@ struct PopoverView: View {
                         }
                         .font(.system(size: 10))
                     }
-                    // Live swap-out rate: distinguishes "full but stable" from "actively thrashing".
-                    // Gate at ~0.1 MB/s so sub-rounding noise doesn't show as "0.0 MB/s".
-                    if let rate = manager.cachedSwapOutRatePages, rate * Double(hostPageSize) >= 100_000 {
+                    // Live swap rate (↑ out to disk, ↓ in from disk): distinguishes
+                    // "full but stable" from "actively thrashing". Gate at ~0.1 MB/s so
+                    // sub-rounding noise doesn't show as "0.0 MB/s".
+                    let outRate = manager.cachedSwapOutRatePages ?? 0
+                    let inRate = manager.cachedSwapInRatePages ?? 0
+                    let gate = 100_000.0
+                    let outActive = outRate * Double(hostPageSize) >= gate
+                    let inActive = inRate * Double(hostPageSize) >= gate
+                    let swapRateText = [
+                        outActive ? "↑" + HostMetricsSample.formatRate(pagesPerSec: outRate, pageSize: hostPageSize) : nil,
+                        inActive ? "↓" + HostMetricsSample.formatRate(pagesPerSec: inRate, pageSize: hostPageSize) : nil,
+                    ].compactMap { $0 }.joined(separator: " ")
+                    if !swapRateText.isEmpty {
                         HStack {
                             Text(L10n.swapRate).foregroundStyle(.secondary)
                             Spacer()
-                            Text(HostMetricsSample.formatRate(pagesPerSec: rate, pageSize: hostPageSize))
+                            Text(swapRateText)
                                 .monospacedDigit()
                                 .foregroundStyle(.orange)
                         }
