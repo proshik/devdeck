@@ -10,6 +10,11 @@ versioning follows [SemVer](https://semver.org/).
 - **Cluster health indicator**: a colored "Cluster: Healthy / Degraded / Down" line in the popover
   (colima `list --json` status + `minikube status`), refreshed while the popover is open; toggle in
   Settings (default on).
+- **Appearance mode** in Settings: Light / Dark / System (applied app-wide via `NSApp.appearance`,
+  persisted in UserDefaults).
+
+### Fixed
+- Define the `AccentColor` asset so control on-states (Settings toggles) are visible in dark mode.
 
 ## [0.3.0] — 2026-06-20
 

@@ -18,6 +18,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         DiagnosticLog.shared.installCrashHandlers()
+        AppearanceManager.shared.apply()   // apply the persisted Light/Dark/System choice app-wide
         notifier.requestAuthorization()   // native notifications for daemons/command errors
         store.start()
         DiagnosticLog.shared.log("DevDeck launch: \(store.config.commands.count) commands, \(store.config.chains.count) chains")

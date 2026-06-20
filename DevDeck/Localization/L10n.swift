@@ -140,6 +140,11 @@ enum L10n {
           "Память minikube изнутри VM (ssh-зонд) и OOM-детект")
     }
     static var languageSection: String { t("Language", "Язык") }
+    static var appearanceSection: String { t("Appearance", "Внешний вид") }
+    static var appearancePicker: String { t("Theme", "Тема") }
+    static var appearanceSystem: String { t("System", "Системный") }
+    static var appearanceLight: String { t("Light", "Светлый") }
+    static var appearanceDark: String { t("Dark", "Тёмный") }
     static var startupSection: String { t("Startup", "Запуск") }
     static var launchAtLoginToggle: String { t("Launch at login", "Запускать при входе") }
     static var globalHotkeyToggle: String { t("Global hotkey ⌃⌥D opens the deck", "Глобальный хоткей ⌃⌥D открывает деку") }
