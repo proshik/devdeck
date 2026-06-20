@@ -4,9 +4,12 @@ All notable changes to this project are documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning follows [SemVer](https://semver.org/).
 
-## [Unreleased]
+## [0.3.0] — 2026-06-20
 
 ### Added
+- **Launch at login** (`SMAppService`) — toggle in the new "Startup" settings section.
+- **Global hotkey ⌃⌥D** to open/close the deck from anywhere (Carbon `RegisterEventHotKey`,
+  no Accessibility permission); opt-in toggle in "Startup".
 - **Tier 1 — Host memory monitoring** (toggle in Settings, default on):
   - Memory pressure level (normal / warning / critical) displayed as a colored badge on the menu bar icon
     (polled from `kern.memorystatus_vm_pressure_level`, refreshed on a timer).
@@ -69,6 +72,7 @@ First MVP — complete local dev cycle from the menu bar.
   safe handling of malformed JSON; initial `default-config.json` with examples.
 - `.dmg` packaging script (`scripts/build-dmg.sh`).
 
-[Unreleased]: https://example.com/devdeck/compare/v0.2.0...HEAD
-[0.2.0]: https://example.com/devdeck/compare/v0.1.0...v0.2.0
-[0.1.0]: https://example.com/devdeck/releases/tag/v0.1.0
+[Unreleased]: https://github.com/proshik/devdeck/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/proshik/devdeck/compare/v0.2.0...v0.3.0
+[0.2.0]: https://github.com/proshik/devdeck/compare/v0.1.0...v0.2.0
+[0.1.0]: https://github.com/proshik/devdeck/releases/tag/v0.1.0
