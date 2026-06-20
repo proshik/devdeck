@@ -74,7 +74,9 @@ struct PopoverView: View {
             footer
         }
         .frame(width: 380)
-        .frame(maxHeight: 850)
+        // minHeight (not maxHeight) actually grows the popover: it sizes to content, so a cap alone
+        // does nothing when the content is shorter. The inner ScrollView fills the extra space.
+        .frame(minHeight: 675, maxHeight: 950)
         .focusEffectDisabled()   // don't draw a focus ring on the first button when the popover opens
         .task {
             while !Task.isCancelled {
