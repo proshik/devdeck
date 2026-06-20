@@ -73,8 +73,8 @@ struct PopoverView: View {
             Divider()
             footer
         }
-        .frame(width: 360)
-        .frame(maxHeight: 560)
+        .frame(width: 420)
+        .frame(maxHeight: 640)
         .focusEffectDisabled()   // don't draw a focus ring on the first button when the popover opens
         .task {
             while !Task.isCancelled {

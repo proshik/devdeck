@@ -30,12 +30,18 @@ struct MainWindowView: View {
                     }
                     .onMove { store.moveChains($0, to: $1) }
                 }
-                Section {
-                    Label(L10n.settings, systemImage: "gearshape")
-                        .tag(MainSelection.settings)
-                }
             }
             .frame(minWidth: 220)
+            // Settings pinned to the bottom of the sidebar — always visible, separated from the
+            // scrolling commands/daemons/chains list.
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                VStack(spacing: 0) {
+                    Divider()
+                    settingsButton(selected: appModel.selection == .settings)
+                        .padding(8)
+                }
+                .background(.bar)
+            }
             .toolbar {
                 ToolbarItem {
                     Menu {
@@ -85,6 +91,24 @@ struct MainWindowView: View {
     private func sidebarRow(_ command: Command, icon: String) -> some View {
         Label(command.name.isEmpty ? L10n.untitled : command.name, systemImage: icon)
             .tag(MainSelection.command(command.id))
+    }
+
+    /// Pinned Settings entry styled to mimic a selected sidebar row.
+    private func settingsButton(selected: Bool) -> some View {
+        Button {
+            appModel.selection = .settings
+        } label: {
+            Label(L10n.settings, systemImage: "gearshape")
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, 5)
+                .padding(.horizontal, 8)
+                .contentShape(Rectangle())
+                .background(
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(selected ? Color.accentColor.opacity(0.22) : .clear)
+                )
+        }
+        .buttonStyle(.plain)
     }
 
     private func addCommand(daemon: Bool = false) {
