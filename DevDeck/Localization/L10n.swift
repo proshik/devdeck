@@ -232,6 +232,19 @@ enum L10n {
     }
     static var swapRate: String { t("Swap rate", "Swap-rate") }
     static var compressor: String { t("Compressor", "Компрессор") }
+    static var clusterHealthToggle: String {
+        t("Cluster health (colima + minikube status in the deck)",
+          "Здоровье кластера (статус colima + minikube в деке)")
+    }
+    static var cluster: String { t("Cluster", "Кластер") }
+    static func clusterHealthValue(_ level: ClusterHealthLevel) -> String {
+        switch level {
+        case .healthy: return t("Healthy", "В норме")
+        case .degraded: return t("Degraded", "Деградация")
+        case .down: return t("Down", "Не работает")
+        case .unknown: return t("Unknown", "Неизвестно")
+        }
+    }
     static func jobsAdvice(_ effective: Int, _ advised: Int) -> String {
         t("Build uses \(effective) jobs; safe for this RAM limit: \(advised)",
           "Сборка: \(effective) задач; безопасно для лимита RAM: \(advised)")

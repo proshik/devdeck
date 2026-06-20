@@ -16,6 +16,13 @@ struct PopoverView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             memoryHeader
+                .task {
+                    // Refresh colima/minikube health while the popover is open; idle when closed.
+                    while !Task.isCancelled {
+                        await manager.refreshClusterHealth()
+                        try? await Task.sleep(for: .seconds(15))
+                    }
+                }
             Divider()
 
             if let error = store.error {
@@ -99,6 +106,16 @@ struct PopoverView: View {
                     }
                 }
                 .frame(height: 4)
+
+                if let health = manager.cachedClusterHealth {
+                    HStack {
+                        Text(L10n.cluster).foregroundStyle(.secondary)
+                        Spacer()
+                        Text(L10n.clusterHealthValue(health.level))
+                            .foregroundStyle(clusterColor(health.level))
+                    }
+                    .font(.system(size: 10))
+                }
 
                 if memory.swapUsedBytes > 0 {
                     HStack {
@@ -184,6 +201,15 @@ struct PopoverView: View {
 
     private func pressureColor(_ fraction: Double) -> Color {
         fraction < 0.70 ? .green : (fraction < 0.85 ? .yellow : .red)
+    }
+
+    private func clusterColor(_ level: ClusterHealthLevel) -> Color {
+        switch level {
+        case .healthy: return .green
+        case .degraded: return .orange
+        case .down: return .red
+        case .unknown: return .gray
+        }
     }
 
     // MARK: splitting and counters
