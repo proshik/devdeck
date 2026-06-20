@@ -13,6 +13,11 @@ versioning follows [SemVer](https://semver.org/).
 - **Appearance mode** in Settings: Light / Dark / System (applied app-wide via `NSApp.appearance`,
   persisted in UserDefaults).
 
+### Changed
+- Main window sidebar: Settings is pinned to the bottom (always visible, separated by a divider)
+  instead of scrolling at the end of the commands/daemons/chains list.
+- Larger menu bar popover (360×560 → 420×640).
+
 ### Fixed
 - Define the `AccentColor` asset so control on-states (Settings toggles) are visible in dark mode.
 
