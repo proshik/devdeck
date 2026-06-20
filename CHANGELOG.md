@@ -13,11 +13,11 @@ versioning follows [SemVer](https://semver.org/).
   - Per-run build-process peak RSS written to the diagnostic log together with a pressure + compressor summary.
   - OOM / SIGKILL detection: `terminationStatus == 9` + regex over the log tail extracts the offending crate
     name and records it to the log.
-  - `-j` vs RAM-limit advisory in the command editor (rule: `limit_GB / 2` per rustc job).
+  - `-j` vs RAM-limit advisory in the command editor (rule: `limit_GB / 2` per rustc job), now grounded
+    in live colima cpus/limit (parsed from `colima list --json`) with a fallback to conservative defaults.
   - Compressor saturation shown in the popover (`host_statistics64 compressor_page_count`).
-
-### Planned
-- Swap-out/in rate live display (pure `swapRatePagesPerSec` calculation is done; UI display deferred).
+  - Live swap-out rate ("Swap rate X MB/s") shown in the popover during a run — distinguishes
+    "full but stable" from "actively thrashing"; computed from consecutive `host_statistics64` samples.
 
 ## [0.2.0] — 2026-06-11
 

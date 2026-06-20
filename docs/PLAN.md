@@ -26,11 +26,11 @@ The project lives in a separate directory alongside myproject: `/Users/proshik/d
 ## Status
 
 MVP (Stage 0–5) and post-MVP improvements — **closed and committed**, tests green.
-Memory monitoring: **all three tiers done.** Tier 1 host-side signals (colima `772c45c`; pressure
+Memory monitoring: **all three tiers done.** Tier 1 host-side signals (colima pre-squash; pressure
 badge, per-build peak RSS, compressor, OOM/crate detection, `-j` advisory — 2026-06-14) and
-**Tier 2 (minikube from inside the VM + OOM detection, 2026-06-11)**. The only Tier 1 tail still
-open is the **live swap-rate display** (pure `swapRatePagesPerSec` done; UI deferred); the `-j`
-advisory uses fixed colima defaults (live colima cpus/limit deferred).
+**Tier 2 (minikube from inside the VM + OOM detection, 2026-06-11)**. Closed 2026-06-20: the
+**live swap-rate display** (popover line "Swap rate X MB/s", gated to active thrashing) and the
+**`-j` advisory grounded in live colima cpus/limit** (`colima list --json`, fallback to defaults).
 
 ---
 
@@ -112,22 +112,22 @@ advisory uses fixed colima defaults (live colima cpus/limit deferred).
 - [x] Section collapsed state persisted across opens and restarts (`@AppStorage`).
 - [x] Popover size 300×440 → 360×560.
 
-### Native Notifications ✅ (`7203d12`)
+### Native Notifications ✅ (pre-squash)
 - [x] `UserNotifications`: daemon came up / died on its own / failed to start (with sound), command/chain failure.
 - [x] Manual stop and success — silent; adopted daemon — silent "Adopted".
 
-### Adopting Orphaned Daemons After Restart ✅ (`d001810`)
+### Adopting Orphaned Daemons After Restart ✅ (pre-squash)
 - [x] On startup, search for an orphaned process (`ppid==1`) with a matching command → display "adopted".
 - [x] Stop — kill the process tree (`ProcessTree.terminate`); re-running over an adopted daemon kills the old one.
 - [x] Implemented via command-string matching (more reliable than a saved PID / `state.json`).
 
-### Launching Commands/Chains in Ghostty Terminal ✅ (`0bb968b` + chains)
+### Launching Commands/Chains in Ghostty Terminal ✅ (pre-squash + chains)
 - [x] `openInTerminal` flag on command and chain; Window/Tab mode (shared `@AppStorage`).
 - [x] Window — `NSWorkspace.openApplication`; Tab — native Ghostty AppleScript (`new tab` + surface `command`), no Accessibility (requires "Automation").
 - [x] Tracking via pid/exit sentinels (same `.started/.terminated`), stop — `killTree`, protective start timeout.
 - [x] Full chain as a single script in one tab (`ChainScript`): steps with markers, `stopOnError` via `&&`, sudo in tab, daemons in background.
 
-### Production-Ready ✅ (`3eb3549`)
+### Production-Ready ✅ (pre-squash)
 - [x] README, LICENSE (MIT), CHANGELOG; packaging into `.dmg` (`scripts/build-dmg.sh`, `justfile`); min. macOS 15.
 
 ---
@@ -140,9 +140,12 @@ advisory uses fixed colima defaults (live colima cpus/limit deferred).
 - [x] Daemon → persistent green; ■ stops it.
 - [x] Chain → steps execute in sequence; error → stop, step turns red.
 - [x] `xcodebuild test` → tests green.
-- [ ] `sudo purge` → native password dialog → executes (not yet confirmed live).
-- [ ] `kubectl port-forward` → `lsof -i :PORT` confirms port (not yet confirmed live).
-- [ ] Full quit scenario with a live daemon: "Leave in Background" → port alive, "Kill" → port free (not yet confirmed live).
+- [x] `sudo purge` → native password dialog → executes. Confirmed live 2026-06-20 (sudo path, `code 0` twice;
+  empty `LogView` is expected — `purge` writes no stdout; success is in the diagnostic log).
+- [x] `kubectl port-forward` → `lsof -i :PORT` confirms port. Confirmed live 2026-06-20 (`lsof` shows kubectl
+  LISTEN on 8080, popover shows daemon running; ■ stop logged "Stop adopted daemon").
+- [x] Full quit scenario with a live daemon: "Leave in Background" → port alive. Confirmed live 2026-06-20
+  (daemon PID survived quit, re-adopted on relaunch). "Kill" uses the same `killTree` as ■ stop.
 
 ---
 
@@ -167,9 +170,9 @@ it **cannot see** individual `rustc` processes, their count, or the current crat
 ### Tier 1 — From the Host, Cheap, No VM Entry (do first)
 - [x] **[P5] Memory pressure level** (normal/warn/critical) — kernel verdict, predicts thrashing
   before stalls. Polled `kern.memorystatus_vm_pressure_level` (timer-refreshed, not a push source). → menu bar icon. — ✅ DONE 2026-06-14
-- [ ] **[P5] Swap-out/in rate** (pages/sec) — distinguishes "full but stable" from "actively
-  thrashing"; static "Swap N GB" lags. `host_statistics64(HOST_VM_INFO64)` `swapins/swapouts`, delta/dt. → main window. (pure `swapRatePagesPerSec` done; live display deferred)
-- [x] **[P5] Hypervisor RSS vs VM limit + peak per run** — ✅ DONE (`772c45c`). Process
+- [x] **[P5] Swap-out/in rate** (pages/sec) — distinguishes "full but stable" from "actively
+  thrashing"; static "Swap N GB" lags. `host_statistics64(HOST_VM_INFO64)` `swapins/swapouts`, delta/dt. → popover ("Swap rate X MB/s", gated to active thrashing). — ✅ DONE 2026-06-20 (`updateSwapRate` retains prev sample+timestamp)
+- [x] **[P5] Hypervisor RSS vs VM limit + peak per run** — ✅ DONE (pre-squash). Process
   `com.apple.Virtualization.VirtualMachine` (footprint) vs limit from `colima list --json`; live
   line in popover + peak per run in log with a `colima --memory` hint; flag
   `Config.settings.vmMemoryMonitoring` + "Settings"; probe off the main thread.
@@ -180,9 +183,10 @@ it **cannot see** individual `rustc` processes, their count, or the current crat
 - [x] **[P4] Peak memory per build → to log** — teaches "build peaks at X GB". `DiagnosticLog` already records
   start/finish — add a summary. → log per run. — ✅ DONE 2026-06-14
 - [x] **[P4] Compressor saturation** — early warning between "RAM full" and "swap started".
-  `host_statistics64` `compressor_page_count` + `vm.compressor.pages_compressed`. → main window. — ✅ DONE 2026-06-14
+  `host_statistics64` `compressor_page_count` + `vm.compressor.pages_compressed`. → popover. — ✅ DONE 2026-06-14
 - [x] **[P3] Effective `-j` vs RAM limit** — justification for `CARGO_BUILD_JOBS=3` (rule: "limit_GB / 2
-  per rustc"). Parse `-j`/env of the command, default = VM cores. → main window. — ✅ DONE 2026-06-14
+  per rustc"). Parse `-j`/env of the command, default = VM cores. → command editor. — ✅ DONE 2026-06-14;
+  grounded in live colima cpus/limit 2026-06-20 (`VMMemoryProbing.buildConfig` + `effectiveVMConfig` fallback).
 
 ### Tier 2 — Probe Inside the VM (`minikube ssh`) ✅ DONE 2026-06-11
 - [x] Number of concurrent `rustc` processes + their total RSS — `ps -e -o rss=,comm=` in the node, maximums per run.
@@ -217,8 +221,8 @@ it **cannot see** individual `rustc` processes, their count, or the current crat
   ~~rate page-faults~~ (high even under normal conditions).
 
 ### Cheapest First Step (building on current code) — ✅ DONE 2026-06-14
-- [x] On each run tick, sample the build process footprint + host pressure level. (Swap rate: pure
-  helper done, live display deferred.) — host sampler in `ProcessManager`, `HostMetricsProbing`.
+- [x] On each run tick, sample the build process footprint + host pressure level + swap-out rate
+  (live in the popover since 2026-06-20). — host sampler in `ProcessManager`, `HostMetricsProbing`.
 - [x] Accumulate peak between `.started` and `.terminated` — `.started(pid)` now captured in both
   `apply` and `applyChainTerminal`; `hostPeak` accumulated by the sampler.
 - [x] Write a summary to log: "build RSS X GB · pressure Z · compressor N%" (`flushHostStats`).
@@ -230,6 +234,6 @@ it **cannot see** individual `rustc` processes, their count, or the current crat
 
 ## Possible Extensions (NOT in MVP)
 
-- [x] ~~Adopting daemons by PID after restart~~ — done (command-string matching, not `state.json`). `d001810`
+- [x] ~~Adopting daemons by PID after restart~~ — done (command-string matching, not `state.json`). pre-squash
 - [ ] Buttons for myproject-loop: `just dev-status`, `just dev-logs <svc>`, `just dev-forward`.
 - [ ] Hotkeys, launch at login (`SMAppService`), cluster health indicator in the menu bar icon.
