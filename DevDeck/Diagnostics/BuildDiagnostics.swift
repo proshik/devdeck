@@ -23,6 +23,12 @@ func adviseJobs(command: String, env: [String: String], vmCpus: Int, limitBytes:
     return BuildJobsAdvice(effectiveJobs: effective, advisedJobs: advised)
 }
 
+/// Effective (cpus, limitBytes) for the `-j` advisory: live colima config when known,
+/// else conservative defaults (6 cpus / 6 GiB) so the advisory still renders without colima.
+func effectiveVMConfig(_ live: VMBuildConfig?) -> (cpus: Int, limitBytes: UInt64) {
+    (live?.cpus ?? 6, live?.limitBytes ?? 6 * 1_073_741_824)
+}
+
 // MARK: - OOMVerdict
 
 struct OOMVerdict: Equatable {

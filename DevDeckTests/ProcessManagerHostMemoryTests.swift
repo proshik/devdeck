@@ -36,6 +36,29 @@ final class ProcessManagerHostMemoryTests: XCTestCase {
         XCTAssertNil(m.hostPeakFootprint(for: c.id), "host peak is cleared on termination")
     }
 
+    func testSwapRateComputedFromConsecutiveSamples() {
+        let gib: UInt64 = 1_073_741_824
+        let m = ProcessManager(runner: FakeCommandRunner(),
+                               hostProbe: FakeHostMetricsProbe([]), hostMonitoringEnabled: { true })
+        let t0 = Date(timeIntervalSince1970: 1000)
+        let s0 = HostMetricsSample(pressure: .normal, swapInsPages: 100, swapOutsPages: 200,
+                                   compressorPages: 0, totalBytes: 16 * gib, buildFootprintBytes: 0)
+        m.updateSwapRate(cur: s0, now: t0)
+        XCTAssertNil(m.cachedSwapOutRatePages, "first sample has no predecessor → no rate yet")
+
+        // +60 swap-outs over 2 s → 30 pages/s.
+        let s1 = HostMetricsSample(pressure: .normal, swapInsPages: 100, swapOutsPages: 260,
+                                   compressorPages: 0, totalBytes: 16 * gib, buildFootprintBytes: 0)
+        m.updateSwapRate(cur: s1, now: t0.addingTimeInterval(2))
+        XCTAssertEqual(try XCTUnwrap(m.cachedSwapOutRatePages), 30, accuracy: 0.001)
+
+        // Counter reset (cur < prev) clamps to 0, never negative.
+        let s2 = HostMetricsSample(pressure: .normal, swapInsPages: 100, swapOutsPages: 10,
+                                   compressorPages: 0, totalBytes: 16 * gib, buildFootprintBytes: 0)
+        m.updateSwapRate(cur: s2, now: t0.addingTimeInterval(3))
+        XCTAssertEqual(try XCTUnwrap(m.cachedSwapOutRatePages), 0, accuracy: 0.001)
+    }
+
     func testDisabledFlagSkipsHostSampling() {
         let m = ProcessManager(runner: FakeCommandRunner(),
                                hostProbe: FakeHostMetricsProbe([]), hostMonitoringEnabled: { false })

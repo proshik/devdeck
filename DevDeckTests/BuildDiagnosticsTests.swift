@@ -39,6 +39,17 @@ final class BuildDiagnosticsTests: XCTestCase {
         XCTAssertTrue(a.overBudget)
     }
 
+    func testEffectiveVMConfigPrefersLiveThenFallsBack() {
+        let gib: UInt64 = 1_073_741_824
+        let live = effectiveVMConfig(VMBuildConfig(cpus: 8, limitBytes: 10 * gib))
+        XCTAssertEqual(live.cpus, 8)
+        XCTAssertEqual(live.limitBytes, 10 * gib)
+
+        let fb = effectiveVMConfig(nil)
+        XCTAssertEqual(fb.cpus, 6, "fallback to conservative colima default cpus")
+        XCTAssertEqual(fb.limitBytes, 6 * gib, "fallback to conservative colima default limit")
+    }
+
     func testAdviseJobsReadsExplicitFlagAndEnv() {
         let gib: UInt64 = 1_073_741_824
         XCTAssertEqual(adviseJobs(command: "cargo build -j 2", env: [:], vmCpus: 6, limitBytes: 6 * gib).effectiveJobs, 2)

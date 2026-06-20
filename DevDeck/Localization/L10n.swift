@@ -215,20 +215,19 @@ enum L10n {
         t("Host memory: pressure, swap rate, build peak, OOM detection",
           "Память хоста: давление, swap-rate, пик сборки, OOM-детект")
     }
-    static var pressureNormal: String { t("Pressure: normal", "Давление: норма") }
-    static var pressureWarning: String { t("Pressure: warning", "Давление: тревога") }
-    static var pressureCritical: String { t("Pressure: critical", "Давление: критично") }
+    static var pressure: String { t("Pressure", "Давление") }
+    /// The pressure level as a standalone value word (shown right-aligned, colored by level).
+    static func pressureValue(_ level: MemoryPressureLevel) -> String {
+        switch level {
+        case .normal: return t("Normal", "Норма")
+        case .warning: return t("Warning", "Тревога")
+        case .critical: return t("Critical", "Критично")
+        }
+    }
     static var swapRate: String { t("Swap rate", "Swap-rate") }
     static var compressor: String { t("Compressor", "Компрессор") }
     static func jobsAdvice(_ effective: Int, _ advised: Int) -> String {
         t("Build uses \(effective) jobs; safe for this RAM limit: \(advised)",
           "Сборка: \(effective) задач; безопасно для лимита RAM: \(advised)")
-    }
-    static func jobsLabel(_ pressureKey: MemoryPressureLevel) -> String {
-        switch pressureKey {
-        case .normal: return pressureNormal
-        case .warning: return pressureWarning
-        case .critical: return pressureCritical
-        }
     }
 }

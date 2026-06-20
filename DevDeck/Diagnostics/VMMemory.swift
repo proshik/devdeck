@@ -5,6 +5,19 @@ import Foundation
 /// A snapshot of VM memory. Behind a protocol → ProcessManager/popover are tested with a fake.
 protocol VMMemoryProbing: Sendable {
     func sample() -> VMMemoryInfo?
+    /// Live VM build config (cpus + memory limit) for the `-j` advisory. nil when colima isn't running/known.
+    func buildConfig() -> VMBuildConfig?
+}
+
+extension VMMemoryProbing {
+    // Fakes don't supply a build config; only the live probe queries colima.
+    func buildConfig() -> VMBuildConfig? { nil }
+}
+
+/// colima cpus + memory limit, used to ground the `-j` build-jobs advisory in live values.
+struct VMBuildConfig: Equatable {
+    let cpus: Int
+    let limitBytes: UInt64
 }
 
 // MARK: - VMMemoryInfo
@@ -51,6 +64,7 @@ final class LiveVMMemoryProbe: VMMemoryProbing, @unchecked Sendable {
     private let lock = NSLock()
     private var cachedPID: Int32?
     private var cachedLimit: UInt64?
+    private var cachedCpus: Int?
 
     func sample() -> VMMemoryInfo? {
         lock.lock(); defer { lock.unlock() }
@@ -59,6 +73,14 @@ final class LiveVMMemoryProbe: VMMemoryProbing, @unchecked Sendable {
         let used = ProcessTree.physFootprint(pid)
         guard used > 0 else { return nil }
         return VMMemoryInfo(usedBytes: used, limitBytes: limit)
+    }
+
+    /// cpus + limit from a single `colima list --json` read (both cached). nil if either is unavailable.
+    func buildConfig() -> VMBuildConfig? {
+        lock.lock(); defer { lock.unlock() }
+        resolveConfig()
+        guard let limit = cachedLimit, let cpus = cachedCpus else { return nil }
+        return VMBuildConfig(cpus: cpus, limitBytes: limit)
     }
 
     private func resolvePID() -> Int32? {
@@ -72,11 +94,17 @@ final class LiveVMMemoryProbe: VMMemoryProbing, @unchecked Sendable {
     }
 
     private func resolveLimit() -> UInt64? {
-        if let limit = cachedLimit { return limit }
-        guard let json = ProcessTree.run("/opt/homebrew/bin/colima", ["list", "--json"])
-                ?? ProcessTree.run("/usr/bin/env", ["colima", "list", "--json"]) else { return nil }
-        let line = json.split(whereSeparator: \.isNewline).first.map(String.init) ?? json
-        cachedLimit = VMMemoryInfo.parseColimaLimitBytes(line)
+        resolveConfig()
         return cachedLimit
+    }
+
+    /// Read `colima list --json` once and cache both the memory limit and the cpu count.
+    private func resolveConfig() {
+        if cachedLimit != nil && cachedCpus != nil { return }
+        guard let json = ProcessTree.run("/opt/homebrew/bin/colima", ["list", "--json"])
+                ?? ProcessTree.run("/usr/bin/env", ["colima", "list", "--json"]) else { return }
+        let line = json.split(whereSeparator: \.isNewline).first.map(String.init) ?? json
+        if cachedLimit == nil { cachedLimit = VMMemoryInfo.parseColimaLimitBytes(line) }
+        if cachedCpus == nil { cachedCpus = VMMemoryInfo.parseColimaCpus(line) }
     }
 }
