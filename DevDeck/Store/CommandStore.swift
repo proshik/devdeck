@@ -164,6 +164,13 @@ final class CommandStore {
         persist(updated)
     }
 
+    func setGlobalHotkey(_ on: Bool) {
+        guard config.settings.globalHotkeyEnabled != on else { return }
+        var updated = config
+        updated.settings.globalHotkeyEnabled = on
+        persist(updated)
+    }
+
     /// Save; a write failure goes into `error` (the UI shows a banner) instead of throwing out.
     private func persist(_ newConfig: Config) {
         do {

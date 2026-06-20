@@ -72,6 +72,9 @@ final class MenuBarController: NSObject {
         }
     }
 
+    /// Public entry point for the global hotkey.
+    func toggle() { togglePopover() }
+
     @objc private func togglePopover() {
         guard let button = statusItem.button else { return }
         if popover.isShown {
