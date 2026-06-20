@@ -8,6 +8,31 @@ final class ProcessManagerNotificationTests: XCTestCase {
         Command(id: UUID(), name: name, command: "echo", isDaemon: daemon)
     }
 
+    // MARK: memory thresholds
+
+    func testMemoryThresholdNotifiesOncePerLayer() {
+        let gib: UInt64 = 1_073_741_824
+        let notifier = FakeNotifier()
+        let m = ProcessManager(runner: FakeCommandRunner(), notifier: notifier)
+
+        // colima at 92% (> 90%) → one warning; below threshold → none.
+        m.checkMemoryThresholds(vm: VMMemoryInfo(usedBytes: 92 * gib / 10, limitBytes: 10 * gib), minikube: nil)
+        m.checkMemoryThresholds(vm: VMMemoryInfo(usedBytes: 5 * gib, limitBytes: 10 * gib), minikube: nil)
+        // Second high reading must NOT re-notify (debounced per run).
+        m.checkMemoryThresholds(vm: VMMemoryInfo(usedBytes: 95 * gib / 10, limitBytes: 10 * gib), minikube: nil)
+
+        XCTAssertEqual(notifier.posted.count, 1)
+        if case .memoryThreshold(let target, _) = notifier.posted.first {
+            XCTAssertEqual(target, "colima")
+        } else {
+            XCTFail("expected a memoryThreshold notification, got \(notifier.posted)")
+        }
+
+        // A different layer (minikube) crossing the threshold warns independently.
+        m.checkMemoryThresholds(vm: nil, minikube: MinikubeSample(anonBytes: 38 * gib / 10, limitBytes: 4 * gib, rustcCount: 2, rustcRSSBytes: gib))
+        XCTAssertEqual(notifier.posted.count, 2)
+    }
+
     // MARK: daemons
 
     func testDaemonStartNotifies() async {

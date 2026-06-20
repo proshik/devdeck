@@ -46,6 +46,10 @@ final class LiveNotifier: Notifier {
             content.title = L10n.notifCommandFailed
             content.body = L10n.notifNameCode(name, code)
             content.sound = .default
+        case .memoryThreshold(let target, let detail):
+            content.title = L10n.notifMemoryHigh(target)
+            content.body = detail
+            content.sound = .default
         }
 
         let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
