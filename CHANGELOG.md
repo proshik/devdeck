@@ -4,6 +4,13 @@ All notable changes to this project are documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning follows [SemVer](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+- **Cluster health indicator**: a colored "Cluster: Healthy / Degraded / Down" line in the popover
+  (colima `list --json` status + `minikube status`), refreshed while the popover is open; toggle in
+  Settings (default on).
+
 ## [0.3.0] — 2026-06-20
 
 ### Added

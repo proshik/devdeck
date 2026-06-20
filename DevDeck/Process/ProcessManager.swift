@@ -106,6 +106,12 @@ final class ProcessManager {
     private(set) var cachedSwapOutRatePages: Double?
     private(set) var cachedSwapInRatePages: Double?
 
+    // MARK: cluster health (colima + minikube)
+    @ObservationIgnored private let clusterProbe: any ClusterHealthProbing
+    @ObservationIgnored var isClusterHealthEnabled: () -> Bool
+    /// Last cluster-health snapshot for the popover; refreshed while the popover is open.
+    private(set) var cachedClusterHealth: ClusterHealth?
+
     init(
         runner: any CommandRunner,
         notifier: any Notifier = NoopNotifier(),
@@ -119,7 +125,9 @@ final class ProcessManager {
         oomInspector: any OOMInspecting = LiveOOMInspector(),
         minikubeMonitoringEnabled: @escaping () -> Bool = { false },
         hostProbe: any HostMetricsProbing = LiveHostMetricsProbe(),
-        hostMonitoringEnabled: @escaping () -> Bool = { true }
+        hostMonitoringEnabled: @escaping () -> Bool = { true },
+        clusterProbe: any ClusterHealthProbing = LiveClusterHealthProbe(),
+        clusterHealthEnabled: @escaping () -> Bool = { false }
     ) {
         self.runner = runner
         self.notifier = notifier
@@ -134,6 +142,8 @@ final class ProcessManager {
         self.isMinikubeMonitoringEnabled = minikubeMonitoringEnabled
         self.hostProbe = hostProbe
         self.isHostMonitoringEnabled = hostMonitoringEnabled
+        self.clusterProbe = clusterProbe
+        self.isClusterHealthEnabled = clusterHealthEnabled
     }
 
     /// Prod default: the real zsh/sudo router + a live app controller.
@@ -500,6 +510,14 @@ final class ProcessManager {
             notifier.post(.memoryThreshold(target: "minikube", detail: mk.format()))
             DiagnosticLog.shared.log("minikube memory high: \(mk.format())", level: .warn)
         }
+    }
+
+    /// Probe colima + minikube health OFF the main thread and publish it for the popover.
+    /// No-op (and clears the cache) when disabled. Called while the popover is open.
+    func refreshClusterHealth() async {
+        guard isClusterHealthEnabled() else { cachedClusterHealth = nil; return }
+        let probe = clusterProbe
+        cachedClusterHealth = await Task.detached(priority: .utility) { probe.sample() }.value
     }
 
     /// Resolve live colima cpus/limit for the `-j` advisory, OFF the main thread. Cached once known.

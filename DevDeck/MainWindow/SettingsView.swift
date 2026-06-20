@@ -43,6 +43,10 @@ struct SettingsView: View {
                     get: { store.config.settings.hostMemoryMonitoring },
                     set: { store.setHostMonitoring($0) }
                 ))
+                Toggle(L10n.clusterHealthToggle, isOn: Binding(
+                    get: { store.config.settings.clusterHealthMonitoring },
+                    set: { store.setClusterHealth($0) }
+                ))
             }
         }
         .formStyle(.grouped)
