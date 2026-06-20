@@ -5,6 +5,7 @@ import ServiceManagement
 struct SettingsView: View {
     @Environment(CommandStore.self) private var store
     @State private var localization = LocalizationManager.shared
+    @State private var appearance = AppearanceManager.shared
 
     var body: some View {
         Form {
@@ -14,6 +15,15 @@ struct SettingsView: View {
                         Text(language.displayName).tag(language)
                     }
                 }
+            }
+
+            Section(L10n.appearanceSection) {
+                Picker(L10n.appearancePicker, selection: $appearance.appearance) {
+                    ForEach(AppAppearance.allCases) { mode in
+                        Text(mode.displayName).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
             }
 
             Section(L10n.startupSection) {
