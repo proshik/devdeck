@@ -1,0 +1,107 @@
+name: Release
+
+# Manual "Run workflow" button from the master/main branch.
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "Version bump"
+        type: choice
+        options: [patch, minor, major]
+        default: patch
+
+permissions:
+  contents: write
+
+env:
+  REPO_OWNER: proshik
+  REPO_NAME: devdeck
+  TAP_REPO: proshik/homebrew-tap
+
+jobs:
+  release:
+    runs-on: macos-15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # needed for git rev-list --count HEAD (monotonic build number)
+
+      - name: Cache SwiftPM
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/org.swift.swiftpm
+          key: spm-${{ hashFiles('DevDeck.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved') }}
+
+      - name: Compute version + build number
+        id: ver
+        run: |
+          CUR=$(awk -F' = ' '/MARKETING_VERSION = /{gsub(/[ ;]/,"",$2); print $2; exit}' DevDeck.xcodeproj/project.pbxproj)
+          IFS=. read -r MA MI PA <<< "$CUR"
+          case "${{ inputs.bump }}" in
+            major) MA=$((MA+1)); MI=0; PA=0 ;;
+            minor) MI=$((MI+1)); PA=0 ;;
+            patch) PA=$((PA+1)) ;;
+          esac
+          VER="$MA.$MI.$PA"
+          BUILD=$(git rev-list --count HEAD)
+          echo "version=$VER"  >> "$GITHUB_OUTPUT"
+          echo "build=$BUILD"  >> "$GITHUB_OUTPUT"
+          echo "Releasing $VER (build $BUILD)"
+
+      - name: Set version in project
+        run: |
+          VER="${{ steps.ver.outputs.version }}"
+          BUILD="${{ steps.ver.outputs.build }}"
+          sed -i '' "s/MARKETING_VERSION = [0-9][0-9.]*;/MARKETING_VERSION = ${VER};/g" DevDeck.xcodeproj/project.pbxproj
+          sed -i '' "s/CURRENT_PROJECT_VERSION = [0-9][0-9]*;/CURRENT_PROJECT_VERSION = ${BUILD};/g" DevDeck.xcodeproj/project.pbxproj
+
+      - name: Build + ad-hoc-sign DMG
+        run: ./scripts/build-dmg.sh
+
+      - name: Sign appcast (Sparkle EdDSA) + update appcast.xml
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        run: |
+          VER="${{ steps.ver.outputs.version }}"
+          BIN="$(find build/DerivedData -path '*artifacts/sparkle/Sparkle/bin' -type d | head -1)"
+          test -n "$BIN" || { echo "Sparkle bin not found"; exit 1; }
+          umask 077
+          printf '%s' "$SPARKLE_PRIVATE_KEY" > sparkle_key.pem
+          mkdir -p dist
+          cp "build/DevDeck-${VER}.dmg" dist/
+          cp appcast.xml dist/appcast.xml   # preserve prior items
+          "$BIN/generate_appcast" \
+            --ed-key-file sparkle_key.pem \
+            --download-url-prefix "https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/download/v${VER}/" \
+            -o dist/appcast.xml dist/
+          cp dist/appcast.xml appcast.xml
+          rm -f sparkle_key.pem
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VER="${{ steps.ver.outputs.version }}"
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add DevDeck.xcodeproj/project.pbxproj appcast.xml
+          git commit -m "release: ${VER}"
+          git push origin HEAD:${GITHUB_REF_NAME}
+          gh release create "v${VER}" "build/DevDeck-${VER}.dmg" \
+            --title "v${VER}" --generate-notes --target "$(git rev-parse HEAD)"
+
+      - name: Update Homebrew tap cask
+        env:
+          TAP_REPO_TOKEN: ${{ secrets.TAP_REPO_TOKEN }}
+        run: |
+          VER="${{ steps.ver.outputs.version }}"
+          SHA="$(shasum -a 256 "build/DevDeck-${VER}.dmg" | awk '{print $1}')"
+          git clone "https://x-access-token:${TAP_REPO_TOKEN}@github.com/${TAP_REPO}.git" tap
+          sed -i '' "s/version \".*\"/version \"${VER}\"/" tap/Casks/devdeck.rb
+          sed -i '' "s/sha256 \".*\"/sha256 \"${SHA}\"/" tap/Casks/devdeck.rb
+          cd tap
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git commit -am "devdeck ${VER}"
+          git push

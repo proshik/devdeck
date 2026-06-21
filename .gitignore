@@ -26,4 +26,8 @@ DerivedData/
 .build/
 .swiftpm/
 
+# Sparkle EdDSA private key — must never be committed (lives in the SPARKLE_PRIVATE_KEY CI secret)
+*private-key*.pem
+*private_key*.pem
+
 # App config is created in ~/Library/Application Support/DevDeck — not stored in the repo
