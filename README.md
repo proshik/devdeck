@@ -40,27 +40,47 @@ Launch, stop, and monitor local dev commands and long-running daemons
 
 ## Install
 
+### Homebrew (recommended)
+
 ```sh
-brew tap proshik/tap
 brew install --cask proshik/tap/devdeck
 ```
 
-On Homebrew 6.0+ a third-party tap must be trusted once before its casks load — if prompted,
-run `brew trust proshik/tap` and re-run the install.
+This adds the [`proshik/tap`](https://github.com/proshik/homebrew-tap) tap automatically and installs
+the latest release. The icon appears in the menu bar (no Dock icon — it's an `LSUIElement` app).
 
-DevDeck is **not notarized** (free distribution), so Homebrew quarantines the download and Gatekeeper
-blocks the first launch. Clear it once:
+- **Homebrew 6.0+** asks you to trust a third-party tap once. If you see "untrusted tap", run
+  `brew trust proshik/tap` and re-run the install.
+- **First launch — Gatekeeper.** DevDeck is **not notarized** (free distribution), so Homebrew
+  quarantines the download and macOS blocks the first launch. Clear it once:
+
+  ```sh
+  xattr -dr com.apple.quarantine "$(brew --prefix)/Caskroom/devdeck"/*/DevDeck.app
+  ```
+
+  (or right-click `DevDeck.app` → **Open** → **Open**). You only do this once.
+
+### Updating
+
+Updates are delivered **in-app via Sparkle** — no `brew upgrade` needed (the cask is
+`auto_updates`). In **Settings → Updates**:
+
+- **Automatic on** → new versions download and install themselves;
+- **Automatic off** → the popover shows a small ⤓ indicator with "current → latest (N behind)";
+  click it to update.
+
+Sparkle-installed updates are not quarantined, so the first-launch step above is never repeated.
+
+### Uninstall
 
 ```sh
-xattr -dr com.apple.quarantine "$(brew --prefix)/Caskroom/devdeck"/*/DevDeck.app 2>/dev/null \
-  || xattr -dr com.apple.quarantine /Applications/DevDeck.app
+brew uninstall --cask proshik/tap/devdeck
+brew untap proshik/tap          # optional: remove the tap too
 ```
 
-(or right-click `DevDeck.app` → **Open**). After that, **updates are delivered in-app via Sparkle** and
-are not quarantined — no need to repeat this. Toggle automatic updates in **Settings → Updates**; when
-off, the popover shows a small indicator when a newer version is available.
+### Without Homebrew
 
-No Homebrew? Grab the `.dmg` from [Releases](https://github.com/proshik/devdeck/releases) — see
+Grab the `.dmg` from [Releases](https://github.com/proshik/devdeck/releases) and follow
 [Installing on another machine](#installing-on-another-machine-unsigned) below.
 
 ## Requirements
