@@ -36,6 +36,28 @@ Launch, stop, and monitor local dev commands and long-running daemons
 - **JSON config**, editable both by hand and from the UI; external edits are picked up by a FileWatcher,
   broken JSON → an error in the UI while the last valid version is kept in memory.
 - **Bilingual UI (EN / RU)** — switch the interface language live in Settings, no restart required.
+- **In-app auto-update (Sparkle)** — get new versions automatically, or see when one is available.
+
+## Install
+
+```sh
+brew install --cask proshik/tap/devdeck
+```
+
+DevDeck is **not notarized** (free distribution), so Homebrew quarantines the download and Gatekeeper
+blocks the first launch. Clear it once:
+
+```sh
+xattr -dr com.apple.quarantine "$(brew --prefix)/Caskroom/devdeck"/*/DevDeck.app 2>/dev/null \
+  || xattr -dr com.apple.quarantine /Applications/DevDeck.app
+```
+
+(or right-click `DevDeck.app` → **Open**). After that, **updates are delivered in-app via Sparkle** and
+are not quarantined — no need to repeat this. Toggle automatic updates in **Settings → Updates**; when
+off, the popover shows a small indicator when a newer version is available.
+
+No Homebrew? Grab the `.dmg` from [Releases](https://github.com/proshik/devdeck/releases) — see
+[Installing on another machine](#installing-on-another-machine-unsigned) below.
 
 ## Requirements
 
