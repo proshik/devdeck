@@ -6,6 +6,10 @@
 	objectVersion = 71;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		DD0000000000000000000032 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = DD0000000000000000000031 /* Sparkle */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		DD000000000000000000002A /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -41,6 +45,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				DD0000000000000000000032 /* Sparkle in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -91,6 +96,9 @@
 				DD0000000000000000000006 /* DevDeck */,
 			);
 			name = DevDeck;
+			packageProductDependencies = (
+				DD0000000000000000000031 /* Sparkle */,
+			);
 			productName = DevDeck;
 			productReference = DD0000000000000000000005 /* DevDeck.app */;
 			productType = "com.apple.product-type.application";
@@ -145,6 +153,9 @@
 			);
 			mainGroup = DD0000000000000000000002;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				DD0000000000000000000030 /* XCRemoteSwiftPackageReference "Sparkle" */,
+			);
 			productRefGroup = DD0000000000000000000003 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
@@ -439,6 +450,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		DD0000000000000000000030 /* XCRemoteSwiftPackageReference "Sparkle" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/sparkle-project/Sparkle";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.6.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		DD0000000000000000000031 /* Sparkle */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = DD0000000000000000000030 /* XCRemoteSwiftPackageReference "Sparkle" */;
+			productName = Sparkle;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = DD0000000000000000000001 /* Project object */;
 }

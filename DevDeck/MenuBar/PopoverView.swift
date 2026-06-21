@@ -6,6 +6,7 @@ struct PopoverView: View {
     @Environment(CommandStore.self) private var store
     @Environment(ProcessManager.self) private var manager
     @Environment(AppModel.self) private var appModel
+    @Environment(UpdateController.self) private var updates
     @Environment(\.openWindow) private var openWindow
 
     // Section collapse state is remembered across popover opens and app restarts.
@@ -256,6 +257,14 @@ struct PopoverView: View {
             Button(L10n.openDevDeck) { openMainWindow() }
                 .buttonStyle(.plain)
             Spacer(minLength: 10)
+            if updates.updateAvailable {
+                Button { updates.checkForUpdatesUserInitiated() } label: {
+                    Image(systemName: "arrow.down.circle.fill")
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.orange)
+                .help(L10n.updateAvailableHelp(updates.latestVersion ?? ""))
+            }
             Button { revealLog() } label: {
                 Image(systemName: "doc.text")
             }

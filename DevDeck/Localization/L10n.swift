@@ -145,6 +145,19 @@ enum L10n {
     static var appearanceSystem: String { t("System", "Системный") }
     static var appearanceLight: String { t("Light", "Светлый") }
     static var appearanceDark: String { t("Dark", "Тёмный") }
+    static var updatesSection: String { t("Updates", "Обновления") }
+    static var autoUpdateToggle: String {
+        t("Automatically download and install updates", "Автоматически загружать и устанавливать обновления")
+    }
+    static var upToDate: String { t("DevDeck is up to date", "DevDeck обновлён") }
+    static var checkForUpdates: String { t("Check now", "Проверить") }
+    static func updateAvailableRow(_ current: String, _ latest: String, behind: Int) -> String {
+        t("Update available: \(current) → \(latest) (\(behind) behind)",
+          "Доступно обновление: \(current) → \(latest) (отстаёте на \(behind))")
+    }
+    static func updateAvailableHelp(_ latest: String) -> String {
+        t("Update available: \(latest). Click to install.", "Доступно обновление: \(latest). Нажмите, чтобы установить.")
+    }
     static var startupSection: String { t("Startup", "Запуск") }
     static var launchAtLoginToggle: String { t("Launch at login", "Запускать при входе") }
     static var globalHotkeyToggle: String { t("Global hotkey ⌃⌥D opens the deck", "Глобальный хоткей ⌃⌥D открывает деку") }
