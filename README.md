@@ -41,8 +41,12 @@ Launch, stop, and monitor local dev commands and long-running daemons
 ## Install
 
 ```sh
+brew tap proshik/tap
 brew install --cask proshik/tap/devdeck
 ```
+
+On Homebrew 6.0+ a third-party tap must be trusted once before its casks load — if prompted,
+run `brew trust proshik/tap` and re-run the install.
 
 DevDeck is **not notarized** (free distribution), so Homebrew quarantines the download and Gatekeeper
 blocks the first launch. Clear it once:
