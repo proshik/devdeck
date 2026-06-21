@@ -1,9 +1,17 @@
-<?xml version="1.0" encoding="utf-8"?>
-<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" xmlns:dc="http://purl.org/dc/elements/1.1/">
-  <channel>
-    <title>DevDeck</title>
-    <link>https://raw.githubusercontent.com/proshik/devdeck/main/appcast.xml</link>
-    <description>DevDeck updates feed</description>
-    <language>en</language>
-  </channel>
+<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" xmlns:dc="http://purl.org/dc/elements/1.1/" version="2.0">
+    <channel>
+        <title>DevDeck</title>
+        <link>https://raw.githubusercontent.com/proshik/devdeck/main/appcast.xml</link>
+        <description>DevDeck updates feed</description>
+        <language>en</language>
+        <item>
+            <title>0.3.1</title>
+            <pubDate>Sun, 21 Jun 2026 11:38:29 +0000</pubDate>
+            <sparkle:version>33</sparkle:version>
+            <sparkle:shortVersionString>0.3.1</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+            <enclosure url="https://github.com/proshik/devdeck/releases/download/v0.3.1/DevDeck-0.3.1.dmg" length="2386602" type="application/octet-stream" sparkle:edSignature="1KnHDK74fedlDXneM1Nmk94xRIlPcjWn279l8sOCGTwe25FeP0nD8YO8g6s+nFlluEHwfki3N4ahcoqKzD6eBA=="/>
+        </item>
+    </channel>
 </rss>
