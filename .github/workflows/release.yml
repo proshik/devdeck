@@ -67,7 +67,8 @@ jobs:
           BIN="$(find build/DerivedData -path '*artifacts/sparkle/Sparkle/bin' -type d | head -1)"
           test -n "$BIN" || { echo "Sparkle bin not found"; exit 1; }
           umask 077
-          printf '%s' "$SPARKLE_PRIVATE_KEY" > sparkle_key.pem
+          # Strip any stray whitespace/newlines from the secret (base64 has none) before signing.
+          printf '%s' "$SPARKLE_PRIVATE_KEY" | tr -d '[:space:]' > sparkle_key.pem
           mkdir -p dist
           cp "build/DevDeck-${VER}.dmg" dist/
           cp appcast.xml dist/appcast.xml   # preserve prior items
