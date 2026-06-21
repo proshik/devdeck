@@ -171,6 +171,13 @@ final class CommandStore {
         persist(updated)
     }
 
+    func setAutoUpdate(_ on: Bool) {
+        guard config.settings.autoUpdateEnabled != on else { return }
+        var updated = config
+        updated.settings.autoUpdateEnabled = on
+        persist(updated)
+    }
+
     func setClusterHealth(_ on: Bool) {
         guard config.settings.clusterHealthMonitoring != on else { return }
         var updated = config

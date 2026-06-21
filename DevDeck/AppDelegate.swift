@@ -8,6 +8,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let notifier = LiveNotifier()
     let manager: ProcessManager
     let appModel = AppModel()
+    let updateController = UpdateController()
 
     private var menuBar: MenuBarController?
 
@@ -29,7 +30,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         manager.isMinikubeMonitoringEnabled = { [weak store] in store?.config.settings.minikubeMemoryMonitoring ?? false }
         manager.isHostMonitoringEnabled = { [weak store] in store?.config.settings.hostMemoryMonitoring ?? false }
         manager.isClusterHealthEnabled = { [weak store] in store?.config.settings.clusterHealthMonitoring ?? false }
-        menuBar = MenuBarController(store: store, manager: manager, appModel: appModel)
+        // Start Sparkle with the persisted auto-update preference; populates the indicator when off.
+        updateController.configure(autoUpdateEnabled: store.config.settings.autoUpdateEnabled)
+        menuBar = MenuBarController(store: store, manager: manager, appModel: appModel, updateController: updateController)
 
         // Global hotkey (⌃⌥D) toggles the popover; enabled per the persisted setting.
         HotKeyManager.shared.onTrigger = { [weak menuBar] in menuBar?.toggle() }

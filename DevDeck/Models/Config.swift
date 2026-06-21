@@ -8,19 +8,21 @@ struct Settings: Codable, Equatable {
     var hostMemoryMonitoring: Bool
     var globalHotkeyEnabled: Bool
     var clusterHealthMonitoring: Bool
+    var autoUpdateEnabled: Bool
 
     init(vmMemoryMonitoring: Bool = true, minikubeMemoryMonitoring: Bool = true,
          hostMemoryMonitoring: Bool = true, globalHotkeyEnabled: Bool = false,
-         clusterHealthMonitoring: Bool = true) {
+         clusterHealthMonitoring: Bool = true, autoUpdateEnabled: Bool = true) {
         self.vmMemoryMonitoring = vmMemoryMonitoring
         self.minikubeMemoryMonitoring = minikubeMemoryMonitoring
         self.hostMemoryMonitoring = hostMemoryMonitoring
         self.globalHotkeyEnabled = globalHotkeyEnabled
         self.clusterHealthMonitoring = clusterHealthMonitoring
+        self.autoUpdateEnabled = autoUpdateEnabled
     }
 
     enum CodingKeys: String, CodingKey {
-        case vmMemoryMonitoring, minikubeMemoryMonitoring, hostMemoryMonitoring, globalHotkeyEnabled, clusterHealthMonitoring
+        case vmMemoryMonitoring, minikubeMemoryMonitoring, hostMemoryMonitoring, globalHotkeyEnabled, clusterHealthMonitoring, autoUpdateEnabled
     }
 
     init(from decoder: Decoder) throws {
@@ -30,6 +32,7 @@ struct Settings: Codable, Equatable {
         hostMemoryMonitoring = try c.decodeIfPresent(Bool.self, forKey: .hostMemoryMonitoring) ?? true
         globalHotkeyEnabled = try c.decodeIfPresent(Bool.self, forKey: .globalHotkeyEnabled) ?? false
         clusterHealthMonitoring = try c.decodeIfPresent(Bool.self, forKey: .clusterHealthMonitoring) ?? true
+        autoUpdateEnabled = try c.decodeIfPresent(Bool.self, forKey: .autoUpdateEnabled) ?? true
     }
 }
 

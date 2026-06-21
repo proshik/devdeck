@@ -4,6 +4,7 @@ import ServiceManagement
 /// Global app settings (memory monitoring lives in config.json; language in UserDefaults).
 struct SettingsView: View {
     @Environment(CommandStore.self) private var store
+    @Environment(UpdateController.self) private var updates
     @State private var localization = LocalizationManager.shared
     @State private var appearance = AppearanceManager.shared
 
@@ -57,6 +58,27 @@ struct SettingsView: View {
                     get: { store.config.settings.clusterHealthMonitoring },
                     set: { store.setClusterHealth($0) }
                 ))
+            }
+
+            Section(L10n.updatesSection) {
+                Toggle(L10n.autoUpdateToggle, isOn: Binding(
+                    get: { store.config.settings.autoUpdateEnabled },
+                    set: {
+                        store.setAutoUpdate($0)
+                        updates.setAutoUpdateEnabled($0)
+                    }
+                ))
+                HStack {
+                    if updates.updateAvailable, let latest = updates.latestVersion {
+                        Text(L10n.updateAvailableRow(updates.currentVersion, latest, behind: updates.releasesBehind))
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text(L10n.upToDate).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Button(L10n.checkForUpdates) { updates.checkForUpdatesUserInitiated() }
+                }
+                .font(.callout)
             }
         }
         .formStyle(.grouped)
