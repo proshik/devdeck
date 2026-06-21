@@ -13,7 +13,7 @@ cask "devdeck" do
   homepage "https://github.com/proshik/devdeck"
 
   auto_updates true                 # self-updates in-app via Sparkle; brew won't fight it
-  depends_on macos: ">= :sequoia"   # macOS 15+
+  depends_on macos: :sequoia        # macOS 15+
 
   app "DevDeck.app"
 
