@@ -6,6 +6,14 @@
         <description>DevDeck updates feed</description>
         <language>en</language>
         <item>
+            <title>0.3.2</title>
+            <pubDate>Wed, 01 Jul 2026 20:41:29 +0000</pubDate>
+            <sparkle:version>37</sparkle:version>
+            <sparkle:shortVersionString>0.3.2</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+            <enclosure url="https://github.com/proshik/devdeck/releases/download/v0.3.2/DevDeck-0.3.2.dmg" length="2385941" type="application/octet-stream" sparkle:edSignature="tQu+HfvV/bGVQ3IN1UeY54eAnEFsjG+0+WWR1/ObLSXoqBo2amLOu7vETnVWmP23s5UiBjnNDEpVM+YvoORuDA=="/>
+        </item>
+        <item>
             <title>0.3.1</title>
             <pubDate>Sun, 21 Jun 2026 11:38:29 +0000</pubDate>
             <sparkle:version>33</sparkle:version>
