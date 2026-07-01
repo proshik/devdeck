@@ -87,11 +87,21 @@ struct PopoverView: View {
         }
     }
 
-    /// Header: system memory, refreshed once a second while the popover is open.
+    /// Two-column layout for the metric cells below the memory bar.
+    private static let metricColumns = [
+        GridItem(.flexible(), spacing: 12, alignment: .leading),
+        GridItem(.flexible(), spacing: 12, alignment: .leading),
+    ]
+    /// Colour for a metric cell with no data (value is left blank).
+    private static let placeholderColor = Color.secondary.opacity(0.45)
+
+    /// Header: system memory bar plus a fixed 2-per-row grid of every metric. Every metric label is
+    /// always present — the value is simply left blank when there's no data — so the block has a
+    /// constant height and the divider and command list below never jump as metrics come and go.
     private var memoryHeader: some View {
         TimelineView(.periodic(from: .now, by: 1)) { _ in
             let memory = SystemMemory.current()
-            VStack(alignment: .leading, spacing: 5) {
+            VStack(alignment: .leading, spacing: 7) {
                 HStack {
                     Text(L10n.memory).foregroundStyle(.secondary)
                     Spacer()
@@ -110,72 +120,39 @@ struct PopoverView: View {
                 }
                 .frame(height: 4)
 
-                if let health = manager.cachedClusterHealth {
-                    HStack {
-                        Text(L10n.cluster).foregroundStyle(.secondary)
-                        Spacer()
-                        Text(L10n.clusterHealthValue(health.level))
-                            .foregroundStyle(clusterColor(health.level))
-                    }
-                    .font(.system(size: 10))
-                }
+                LazyVGrid(columns: Self.metricColumns, alignment: .leading, spacing: 5) {
+                    let health = manager.cachedClusterHealth
+                    metricCell(L10n.cluster,
+                               health.map { L10n.clusterHealthValue($0.level) } ?? "",
+                               color: health.map { clusterColor($0.level) } ?? Self.placeholderColor)
 
-                if memory.swapUsedBytes > 0 {
-                    HStack {
-                        Text(L10n.swap).foregroundStyle(.secondary)
-                        Spacer()
-                        Text(SystemMemory.formatGiB(memory.swapUsedBytes))
-                            .monospacedDigit()
-                            .foregroundStyle(.orange)   // non-zero swap = memory pressure
-                    }
-                    .font(.system(size: 10))
-                }
+                    let hasSwap = memory.swapUsedBytes > 0
+                    metricCell(L10n.swap,
+                               hasSwap ? SystemMemory.formatGiB(memory.swapUsedBytes) : "",
+                               color: hasSwap ? .orange : Self.placeholderColor)
 
-                if let vm = manager.vmMemorySample() {
-                    HStack {
-                        Text("VM colima").foregroundStyle(.secondary)
-                        Spacer()
-                        Text(vm.format())
-                            .monospacedDigit()
-                            .foregroundStyle(pressureColor(vm.fraction))
-                    }
-                    .font(.system(size: 10))
-                }
+                    let vm = manager.vmMemorySample()
+                    metricCell("VM colima",
+                               vm?.format() ?? "",
+                               color: vm.map { pressureColor($0.fraction) } ?? Self.placeholderColor)
 
-                // minikube memory from inside the VM — present only during a run (sampler cache).
-                if let mk = manager.minikubeSample() {
-                    HStack {
-                        Text("VM minikube").foregroundStyle(.secondary)
-                        Spacer()
-                        Text(mk.format() + (mk.rustcCount > 0 ? " · rustc \(mk.rustcCount)" : ""))
-                            .monospacedDigit()
-                            .foregroundStyle(pressureColor(mk.fraction))
-                    }
-                    .font(.system(size: 10))
-                }
+                    // minikube memory from inside the VM — present only during a run (sampler cache).
+                    let mk = manager.minikubeSample()
+                    metricCell("VM minikube",
+                               mk.map { $0.format() + ($0.rustcCount > 0 ? " · rustc \($0.rustcCount)" : "") } ?? "",
+                               color: mk.map { pressureColor($0.fraction) } ?? Self.placeholderColor)
 
-                if let host = manager.cachedHostSample {
-                    if host.pressure != .normal {
-                        HStack {
-                            Text(L10n.pressure).foregroundStyle(.secondary)
-                            Spacer()
-                            Text(L10n.pressureValue(host.pressure))
-                                .foregroundStyle(host.pressure == .critical ? .red : .orange)
-                        }
-                        .font(.system(size: 10))
-                    }
-                    let comp = Int((host.compressorFraction(pageSize: hostPageSize) * 100).rounded())
-                    if comp > 0 {
-                        HStack {
-                            Text(L10n.compressor).foregroundStyle(.secondary)
-                            Spacer()
-                            Text("\(comp)%").monospacedDigit().foregroundStyle(.secondary)
-                        }
-                        .font(.system(size: 10))
-                    }
-                    // Live swap rate (↑ out to disk, ↓ in from disk): distinguishes
-                    // "full but stable" from "actively thrashing". Gate at ~0.1 MB/s so
-                    // sub-rounding noise doesn't show as "0.0 MB/s".
+                    let host = manager.cachedHostSample
+                    metricCell(L10n.pressure,
+                               host.map { L10n.pressureValue($0.pressure) } ?? "",
+                               color: host.map { pressureLevelColor($0.pressure) } ?? Self.placeholderColor)
+
+                    metricCell(L10n.compressor,
+                               host.map { "\(Int(($0.compressorFraction(pageSize: hostPageSize) * 100).rounded()))%" } ?? "",
+                               color: host == nil ? Self.placeholderColor : .secondary)
+
+                    // Live swap rate (↑ out to disk, ↓ in from disk): distinguishes "full but stable"
+                    // from "actively thrashing". Gate at ~0.1 MB/s so sub-rounding noise doesn't show.
                     let outRate = manager.cachedSwapOutRatePages ?? 0
                     let inRate = manager.cachedSwapInRatePages ?? 0
                     let gate = 100_000.0
@@ -185,20 +162,39 @@ struct PopoverView: View {
                         outActive ? "↑" + HostMetricsSample.formatRate(pagesPerSec: outRate, pageSize: hostPageSize) : nil,
                         inActive ? "↓" + HostMetricsSample.formatRate(pagesPerSec: inRate, pageSize: hostPageSize) : nil,
                     ].compactMap { $0 }.joined(separator: " ")
-                    if !swapRateText.isEmpty {
-                        HStack {
-                            Text(L10n.swapRate).foregroundStyle(.secondary)
-                            Spacer()
-                            Text(swapRateText)
-                                .monospacedDigit()
-                                .foregroundStyle(.orange)
-                        }
-                        .font(.system(size: 10))
-                    }
+                    metricCell(L10n.swapRate,
+                               swapRateText.isEmpty ? "" : swapRateText,
+                               color: swapRateText.isEmpty ? Self.placeholderColor : .orange)
+
+                    // 1-minute load average, coloured by load-per-core (thrashing during builds).
+                    var loads = [Double](repeating: 0, count: 3)
+                    let gotLoad = getloadavg(&loads, 3) >= 1
+                    let cores = Double(max(1, ProcessInfo.processInfo.activeProcessorCount))
+                    metricCell(L10n.cpuLoad,
+                               gotLoad ? String(format: "%.2f", loads[0]) : "",
+                               color: gotLoad ? pressureColor(loads[0] / cores) : Self.placeholderColor)
                 }
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 9)
+        }
+    }
+
+    /// One label · value metric cell for the header grid.
+    private func metricCell(_ label: String, _ value: String, color: Color) -> some View {
+        HStack(spacing: 4) {
+            Text(label).foregroundStyle(.secondary)
+            Spacer(minLength: 4)
+            Text(value).monospacedDigit().foregroundStyle(color).lineLimit(1)
+        }
+        .font(.system(size: 10))
+    }
+
+    private func pressureLevelColor(_ level: MemoryPressureLevel) -> Color {
+        switch level {
+        case .normal: return .secondary
+        case .warning: return .orange
+        case .critical: return .red
         }
     }
 

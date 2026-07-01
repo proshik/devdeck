@@ -249,6 +249,7 @@ enum L10n {
         }
     }
     static var swapRate: String { t("Swap rate", "Swap-rate") }
+    static var cpuLoad: String { t("CPU load", "Загрузка CPU") }
     static var compressor: String { t("Compressor", "Компрессор") }
     static var clusterHealthToggle: String {
         t("Cluster health (colima + minikube status in the deck)",
