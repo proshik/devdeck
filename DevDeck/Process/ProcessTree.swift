@@ -46,11 +46,34 @@ enum ProcessTree {
         return rc == 0 ? info.ri_phys_footprint : 0
     }
 
+    /// Homebrew bin dirs where dev CLIs and their helpers live (colima→limactl, minikube→docker,
+    /// kubectl). `/opt/homebrew/bin` is Apple Silicon, `/usr/local/bin` is Intel.
+    static let homebrewBinDirs = ["/opt/homebrew/bin", "/usr/local/bin"]
+
+    /// Prepend the Homebrew bin dirs to `existing` PATH, skipping any already present. Pure.
+    ///
+    /// A GUI app launched by launchd inherits only a minimal PATH (/usr/bin:/bin:/usr/sbin:/sbin).
+    /// Running `colima`/`minikube` by absolute path still works, but they shell out to their own
+    /// helpers (`limactl`, `docker`) via PATH and fail — so probes see empty stdout and report
+    /// "unknown". Prepending the Homebrew dirs lets those helpers resolve.
+    static func augmentedPATH(_ existing: String?) -> String {
+        let current = existing ?? ""
+        let parts = current.split(separator: ":").map(String.init)
+        let missing = homebrewBinDirs.filter { !parts.contains($0) }
+        guard !missing.isEmpty else { return current }
+        return (missing + (current.isEmpty ? [] : [current])).joined(separator: ":")
+    }
+
     /// Launch a process and return its stdout as a string (or nil on failure). Synchronous.
     static func run(_ launchPath: String, _ args: [String]) -> String? {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: launchPath)
         process.arguments = args
+        // Inherit the GUI environment (keep HOME/USER) but ensure Homebrew is on PATH so child
+        // tools like limactl/docker resolve — otherwise colima/minikube probes come back empty.
+        var env = ProcessInfo.processInfo.environment
+        env["PATH"] = augmentedPATH(env["PATH"])
+        process.environment = env
         let pipe = Pipe()
         process.standardOutput = pipe
         process.standardError = FileHandle.nullDevice
