@@ -229,13 +229,25 @@ struct PopoverView: View {
     }
 
     private func commandRow(_ command: Command) -> some View {
-        DeckRow(
-            name: command.name,
-            needsSudo: command.needsSudo,
-            indicator: StatusIndicator.forCommand(manager.states[command.id]),
-            onToggle: { toggleCommand(command) },
-            onLogs: { openItem(.command(command.id)) }
-        )
+        VStack(spacing: 0) {
+            DeckRow(
+                name: command.name,
+                needsSudo: command.needsSudo,
+                indicator: StatusIndicator.forCommand(manager.states[command.id]),
+                onToggle: { toggleCommand(command) },
+                onLogs: { openItem(.command(command.id)) },
+                watchdog: command.isDaemon
+                    ? DeckRow.WatchdogBadge(enabled: command.watchdogEnabled,
+                                            phase: manager.watchdogPhases[command.id])
+                    : nil,
+                onWatchdogToggle: command.isDaemon ? { toggleWatchdog(command) } : nil
+            )
+            if command.isDaemon, let conflict = manager.portConflicts[command.id] {
+                PortConflictPanel(conflict: conflict,
+                                  onKill: { manager.killOccupantAndStart(command.id) },
+                                  onDismiss: { manager.dismissPortConflict(command.id) })
+            }
+        }
     }
 
     private func chainRow(_ chain: Chain) -> some View {
@@ -308,6 +320,19 @@ struct PopoverView: View {
         }
     }
 
+    /// The shield button: persist the flag and arm/disarm watching. Arming an idle daemon starts it.
+    private func toggleWatchdog(_ command: Command) {
+        if command.watchdogEnabled {
+            store.setWatchdog(false, forCommand: command.id)
+            manager.disarmWatchdog(command.id)
+        } else {
+            store.setWatchdog(true, forCommand: command.id)
+            var armed = command
+            armed.watchdogEnabled = true
+            manager.armWatchdog(armed)
+        }
+    }
+
     private func toggleChain(_ chain: Chain) {
         if StatusIndicator.forChain(manager.chainStates[chain.id]).isStop {
             manager.stopChain(chain.id)
@@ -370,13 +395,21 @@ struct CollapsibleSection<Content: View>: View {
     }
 }
 
-/// One deck row: status dot · name (· sudo lock) · ▶/■ · ☰ logs.
+/// One deck row: status dot · name (· sudo lock) (· 🛡 watchdog) · ▶/■ · ☰ logs.
 struct DeckRow: View {
+    /// Watchdog shield state for a daemon row; nil — no shield (regular commands, chains).
+    struct WatchdogBadge: Equatable {
+        let enabled: Bool                            // the persisted Command.watchdogEnabled flag
+        let phase: ProcessManager.WatchdogPhase?     // live phase; nil — armed but not watching now
+    }
+
     let name: String
     let needsSudo: Bool
     let indicator: DeckIndicator
     let onToggle: () -> Void
     let onLogs: () -> Void
+    var watchdog: WatchdogBadge? = nil
+    var onWatchdogToggle: (() -> Void)? = nil
 
     var body: some View {
         HStack(spacing: 8) {
@@ -392,6 +425,18 @@ struct DeckRow: View {
             }
 
             Spacer(minLength: 6)
+
+            if let watchdog {
+                Button(action: { onWatchdogToggle?() }) {
+                    Image(systemName: watchdog.enabled ? "shield.fill" : "shield.slash")
+                        .font(.system(size: 13))
+                        .frame(width: 30, height: 30)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(watchdogColor(watchdog))
+                .help(watchdogHelp(watchdog))
+            }
 
             Button(action: onToggle) {
                 Image(systemName: indicator.isStop ? "stop.fill" : "play.fill")
@@ -418,6 +463,65 @@ struct DeckRow: View {
         .padding(.trailing, 16)   // right gap: the scrollbar "slider" won't overlap the buttons
         .padding(.vertical, 2)
         .contentShape(Rectangle())
+    }
+
+    private func watchdogColor(_ badge: WatchdogBadge) -> Color {
+        guard badge.enabled else { return Color(white: 0.72) }
+        switch badge.phase {
+        case .armed: return .green
+        case .restarting: return .orange
+        case .pausedOnConflict: return .yellow
+        case .gaveUp: return .red
+        case nil: return .secondary   // flag on, but not watching until the next start
+        }
+    }
+
+    private func watchdogHelp(_ badge: WatchdogBadge) -> String {
+        guard badge.enabled else { return L10n.watchdogEnableHelp }
+        switch badge.phase {
+        case .restarting(let attempt): return L10n.watchdogRestartingHelp(attempt)
+        case .pausedOnConflict: return L10n.watchdogPausedHelp
+        case .gaveUp: return L10n.watchdogGaveUpHelp
+        case .armed, nil: return L10n.watchdogDisableHelp
+        }
+    }
+}
+
+/// Inline panel under a daemon row: "Port N is occupied by X (PID Y)" + Kill & start / Cancel.
+/// Rendered purely from `ProcessManager.portConflicts` — survives the transient popover closing.
+struct PortConflictPanel: View {
+    let conflict: ProcessManager.PortConflict
+    let onKill: () -> Void
+    let onDismiss: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.yellow)
+                    .font(.system(size: 11))
+                Text(L10n.portOccupied(conflict.port, conflict.occupant.processName, conflict.occupant.pid))
+                    .font(.system(size: 11))
+                    .lineLimit(2)
+            }
+            HStack(spacing: 8) {
+                Button(action: onKill) {
+                    HStack(spacing: 4) {
+                        if conflict.resolving { ProgressView().controlSize(.mini) }
+                        Text(L10n.killAndStart)
+                    }
+                }
+                .disabled(conflict.resolving)
+                Button(L10n.cancel, action: onDismiss)
+                    .disabled(conflict.resolving)
+            }
+            .controlSize(.small)
+        }
+        .padding(8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 6).fill(Color.yellow.opacity(0.12)))
+        .padding(.horizontal, 12)
+        .padding(.vertical, 4)
     }
 }
 

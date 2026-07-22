@@ -7,6 +7,17 @@ versioning follows [SemVer](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Daemon watchdog (auto-restart)**: a shield toggle on daemon rows in the popover — starts the
+  daemon and restarts it automatically if it dies (3 attempts with 2/3/5 s pauses; a stable run
+  resets the counter; give-up turns the shield red + notification). The flag persists in
+  config.json and survives app restarts — adopted daemons re-arm and are watched by PID polling.
+  A manual Stop never triggers a restart.
+- **Occupied-port detection**: a new optional "Local port" field on commands (auto-filled from
+  `port-forward`/`-L`/`--port`/`-p` syntax while editing). Before starting a daemon the port is
+  checked via `lsof`; if a foreign process holds it, an inline panel in the popover offers
+  "Kill & start" (SIGTERM → SIGKILL escalation, then launch) or "Cancel". A fast startup failure
+  also triggers the check (covers chain steps). The watchdog pauses on a conflict instead of
+  burning restart attempts.
 - **Cluster health indicator**: a colored "Cluster: Healthy / Degraded / Down" line in the popover
   (colima `list --json` status + `minikube status`), refreshed while the popover is open; toggle in
   Settings (default on).

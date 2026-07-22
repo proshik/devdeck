@@ -39,6 +39,13 @@ struct CommandEditorView: View {
                     Button(L10n.choose) { chooseDirectory() }
                 }
                 Toggle(L10n.daemonToggle, isOn: $draft.isDaemon)
+                if draft.isDaemon {
+                    TextField(L10n.localPort, value: $draft.port, format: .number.grouping(.never))
+                    Text(L10n.portAutoDetectedHint)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Toggle(L10n.watchdogToggle, isOn: $draft.watchdogEnabled)
+                }
                 Toggle(L10n.needsSudoToggle, isOn: $draft.needsSudo)
                 Toggle(L10n.openInTerminalToggle, isOn: $draft.openInTerminal)
                 if draft.openInTerminal {
@@ -93,6 +100,13 @@ struct CommandEditorView: View {
         }
         .formStyle(.grouped)
         .onAppear { refreshApps() }
+        // Auto-fill the local port while the command is edited, but never clobber a hand-set
+        // value: overwrite only when the field is empty or still holds the previous auto value.
+        .onChange(of: draft.command) { old, new in
+            if draft.port == nil || draft.port == PortParser.localPort(in: old) {
+                draft.port = PortParser.localPort(in: new)
+            }
+        }
         // Launching happens from the popover/list; the editor only has explicit "Delete" (with
         // confirmation) and "Save" (enabled only when there are unsaved changes).
         .toolbar {
