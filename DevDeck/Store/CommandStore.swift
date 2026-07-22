@@ -142,6 +142,15 @@ final class CommandStore {
         persist(updated)
     }
 
+    /// Toggle the per-daemon watchdog flag (the shield button in the popover) and save atomically.
+    func setWatchdog(_ enabled: Bool, forCommand id: UUID) {
+        guard let index = config.commands.firstIndex(where: { $0.id == id }),
+              config.commands[index].watchdogEnabled != enabled else { return }
+        var updated = config
+        updated.commands[index].watchdogEnabled = enabled
+        persist(updated)
+    }
+
     /// Toggle the VM memory-monitoring flag and save atomically.
     func setVMMonitoring(_ on: Bool) {
         guard config.settings.vmMemoryMonitoring != on else { return }

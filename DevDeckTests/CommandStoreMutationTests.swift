@@ -60,6 +60,25 @@ final class CommandStoreMutationTests: XCTestCase {
         XCTAssertTrue(store.config.chains.isEmpty)
     }
 
+    func testSetWatchdogPersistsPerCommand() {
+        let store = CommandStore(configURL: url)
+        let daemon = Command(id: UUID(), name: "pf", command: "kubectl port-forward svc/x 8080:80", isDaemon: true)
+        store.upsert(daemon)
+
+        store.setWatchdog(true, forCommand: daemon.id)
+        XCTAssertEqual(store.config.commands.first?.watchdogEnabled, true)
+
+        let fresh = CommandStore(configURL: url)
+        fresh.reload()
+        XCTAssertEqual(fresh.config.commands.first?.watchdogEnabled, true, "persisted to disk")
+
+        store.setWatchdog(false, forCommand: daemon.id)
+        XCTAssertEqual(store.config.commands.first?.watchdogEnabled, false)
+
+        store.setWatchdog(false, forCommand: UUID())   // unknown id — no crash, no change
+        XCTAssertEqual(store.config.commands.count, 1)
+    }
+
     func testSetVMMonitoringPersists() {
         let store = CommandStore(configURL: url)
         store.setVMMonitoring(false)

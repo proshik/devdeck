@@ -22,6 +22,10 @@ struct Command: Codable, Identifiable, Hashable {
     var appsToQuit: [AppRef]
     /// Open in a dedicated Ghostty tab (for long-running processes with live output).
     var openInTerminal: Bool
+    /// Daemon watchdog: restart automatically when the process dies without a user stop.
+    var watchdogEnabled: Bool
+    /// Local TCP port the daemon listens on (port-forward) — enables the occupied-port check.
+    var port: Int?
 
     init(
         id: UUID = UUID(),
@@ -32,7 +36,9 @@ struct Command: Codable, Identifiable, Hashable {
         needsSudo: Bool = false,
         env: [String: String] = [:],
         appsToQuit: [AppRef] = [],
-        openInTerminal: Bool = false
+        openInTerminal: Bool = false,
+        watchdogEnabled: Bool = false,
+        port: Int? = nil
     ) {
         self.id = id
         self.name = name
@@ -43,10 +49,13 @@ struct Command: Codable, Identifiable, Hashable {
         self.env = env
         self.appsToQuit = appsToQuit
         self.openInTerminal = openInTerminal
+        self.watchdogEnabled = watchdogEnabled
+        self.port = port
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, name, command, workingDirectory, isDaemon, needsSudo, env, appsToQuit, openInTerminal
+        case id, name, command, workingDirectory, isDaemon, needsSudo, env, appsToQuit, openInTerminal,
+             watchdogEnabled, port
     }
 
     init(from decoder: Decoder) throws {
@@ -60,5 +69,7 @@ struct Command: Codable, Identifiable, Hashable {
         env = try c.decodeIfPresent([String: String].self, forKey: .env) ?? [:]
         appsToQuit = try c.decodeIfPresent([AppRef].self, forKey: .appsToQuit) ?? []
         openInTerminal = try c.decodeIfPresent(Bool.self, forKey: .openInTerminal) ?? false
+        watchdogEnabled = try c.decodeIfPresent(Bool.self, forKey: .watchdogEnabled) ?? false
+        port = try c.decodeIfPresent(Int.self, forKey: .port)
     }
 }
