@@ -126,6 +126,25 @@ final class ConfigCodecTests: XCTestCase {
         XCTAssertFalse(try ConfigCodec.decode(data).settings.minikubeMemoryMonitoring)
     }
 
+    func testCommandWatchdogAndPortRoundTripAndResilience() throws {
+        let command = Command(
+            id: UUID(), name: "pf", command: "kubectl port-forward svc/foo 8080:80",
+            isDaemon: true, watchdogEnabled: true, port: 8080
+        )
+        let decoded = try ConfigCodec.decode(ConfigCodec.encode(Config(commands: [command])))
+        XCTAssertEqual(decoded.commands.first?.watchdogEnabled, true)
+        XCTAssertEqual(decoded.commands.first?.port, 8080)
+
+        // Missing keys → defaults (resilient decode).
+        let minimal = try ConfigCodec.decode(Data(#"{ "commands": [ { "name": "x", "command": "echo" } ] }"#.utf8))
+        XCTAssertEqual(minimal.commands.first?.watchdogEnabled, false)
+        XCTAssertNil(minimal.commands.first?.port)
+
+        // nil port stays absent from the JSON (hand-edit friendly).
+        let encoded = try ConfigCodec.encode(Config(commands: [Command(name: "a", command: "echo")]))
+        XCTAssertFalse(String(data: encoded, encoding: .utf8)!.contains("\"port\""))
+    }
+
     func testDecodeGeneratesIDWhenMissing() throws {
         let json = Data("""
         { "commands": [ { "name": "a", "command": "x" }, { "name": "b", "command": "y" } ] }
