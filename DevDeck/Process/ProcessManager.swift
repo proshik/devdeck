@@ -1,6 +1,21 @@
 import Foundation
 import Observation
 
+/// Timing policy for the daemon watchdog and the port-conflict resolver.
+/// Injectable so tests run with millisecond values instead of wall-clock seconds.
+struct SupervisionPolicy: Sendable {
+    /// Pauses before consecutive restart attempts; the count is the attempt limit.
+    var restartDelays: [Duration] = [.seconds(2), .seconds(3), .seconds(5)]
+    /// `daemonRunning` held this long → the failure counter resets.
+    var stabilityWindow: Duration = .seconds(10)
+    /// `isAlive` poll period for adopted daemons (they have no output stream).
+    var adoptedPollInterval: Duration = .seconds(3)
+    /// Port-free poll period after killing the occupant.
+    var portFreePollInterval: Duration = .milliseconds(200)
+    /// How long to wait for the port to free after SIGTERM (and once more after SIGKILL).
+    var portFreeTimeout: Duration = .seconds(3)
+}
+
 /// State machine for running commands and chains. `@MainActor @Observable`:
 /// the popover and the main window read consistent state (like `CommandStore`).
 /// The runner is injected (prod → the real router; tests → `FakeCommandRunner`).
@@ -34,6 +49,14 @@ final class ProcessManager {
     /// Code for a chain command missing from the map.
     static let missingCommandCode: Int32 = -2
 
+    /// Watchdog phase of a daemon (drives the shield button in the popover).
+    enum WatchdogPhase: Equatable {
+        case armed                      // watching a live daemon
+        case restarting(attempt: Int)   // waiting out the pause before restart N
+        case pausedOnConflict           // port occupied — waiting for the user's decision
+        case gaveUp                     // restart limit exhausted
+    }
+
     /// Outcome of a single chain step.
     private enum StepOutcome {
         case succeeded
@@ -45,6 +68,19 @@ final class ProcessManager {
     private(set) var states: [UUID: RunState] = [:]          // by Command.id (popover rows)
     private(set) var chainStates: [UUID: ChainState] = [:]   // by Chain.id
     private(set) var logs: [UUID: RingBuffer<LogLine>] = [:] // by Command.id
+    /// Watchdog phase per daemon; no key — watchdog inactive.
+    private(set) var watchdogPhases: [UUID: WatchdogPhase] = [:]
+    /// Detected port conflicts (the inline panel in the popover); no key — no conflict.
+    private(set) var portConflicts: [UUID: PortConflict] = [:]
+
+    /// "Port N is occupied by X (PID Y)" — everything the popover panel and
+    /// "Kill & start" need. `command` is a snapshot to launch after resolution.
+    struct PortConflict: Equatable {
+        let port: Int
+        let occupant: PortOccupant
+        let command: Command
+        var resolving: Bool = false
+    }
 
     @ObservationIgnored private let runner: any CommandRunner
     @ObservationIgnored private let maxLogLines: Int
@@ -67,6 +103,23 @@ final class ProcessManager {
     @ObservationIgnored private var memoryTokens: [UUID: UUID] = [:]
     /// Adopted daemons: id → pid. They have no managed Process — stop hits the PID.
     @ObservationIgnored private var adoptedPIDs: [UUID: Int32] = [:]
+
+    // MARK: watchdog state
+    @ObservationIgnored private let portInspector: any PortInspector
+    @ObservationIgnored private let policy: SupervisionPolicy
+    /// Daemons the watchdog currently watches (armed). Distinct from `Command.watchdogEnabled`:
+    /// a user stop deactivates watching without touching the persisted flag.
+    @ObservationIgnored private var watchdogArmed: Set<UUID> = []
+    /// Consecutive failed-restart counter; reset by a stable run or a fresh user start.
+    @ObservationIgnored private var watchdogFailures: [UUID: Int] = [:]
+    @ObservationIgnored private var watchdogRestartTasks: [UUID: Task<Void, Never>] = [:]
+    @ObservationIgnored private var stabilityTasks: [UUID: Task<Void, Never>] = [:]
+    /// Snapshot of the last started daemon command — restarts and the reactive
+    /// port check need the full model, not just the id.
+    @ObservationIgnored private var lastStarted: [UUID: Command] = [:]
+    @ObservationIgnored private var adoptedPollTask: Task<Void, Never>?
+    /// Token of the current proactive port pre-check — a rapid re-run preempts the older check.
+    @ObservationIgnored private var portPrecheckTokens: [UUID: UUID] = [:]
 
     // MARK: VM sampler
     @ObservationIgnored private let vmProbe: any VMMemoryProbing
@@ -117,6 +170,8 @@ final class ProcessManager {
         notifier: any Notifier = NoopNotifier(),
         appController: any AppController = LiveAppController(),
         reaper: any DaemonReaper = LiveDaemonReaper(),
+        portInspector: any PortInspector = LivePortInspector(),
+        policy: SupervisionPolicy = SupervisionPolicy(),
         maxLogLines: Int = 2000,
         appQuitTimeout: TimeInterval = 10,
         vmProbe: any VMMemoryProbing = LiveVMMemoryProbe(),
@@ -133,6 +188,8 @@ final class ProcessManager {
         self.notifier = notifier
         self.appController = appController
         self.reaper = reaper
+        self.portInspector = portInspector
+        self.policy = policy
         self.maxLogLines = maxLogLines
         self.appQuitTimeout = appQuitTimeout
         self.vmProbe = vmProbe
@@ -153,9 +210,40 @@ final class ProcessManager {
 
     // MARK: commands
 
-    /// Run a command from the UI. With a non-empty `appsToQuit` — memory freeing:
-    /// gently quit the apps → run → on the terminal event (always) relaunch the closed ones.
+    /// Run a command from the UI. A daemon with a known `port` goes through a proactive
+    /// occupied-port check first; everything else launches directly.
+    /// Chain steps bypass this (they call `startRun`) — the reactive check covers them.
     func run(_ command: Command) {
+        portConflicts[command.id] = nil   // a fresh run clears a stale panel
+        guard command.isDaemon, let port = command.port,
+              active[command.id] == nil, adoptedPIDs[command.id] == nil else {
+            // Restart-over-self needs no pre-check: startRun preempts our own port holder.
+            launch(command)
+            return
+        }
+        states[command.id] = .running   // immediate spinner while lsof runs
+        let precheckToken = UUID()
+        portPrecheckTokens[command.id] = precheckToken
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let occupant = await self.checkPort(port)
+            guard self.portPrecheckTokens[command.id] == precheckToken else { return }
+            self.portPrecheckTokens[command.id] = nil
+            if let occupant {
+                self.states[command.id] = .idle
+                self.portConflicts[command.id] = PortConflict(port: port, occupant: occupant, command: command)
+                DiagnosticLog.shared.log(
+                    "Port \(port) is occupied by \(occupant.processName) (PID \(occupant.pid)) — “\(command.name)” not started",
+                    level: .warn)
+            } else {
+                self.launch(command)
+            }
+        }
+    }
+
+    /// Launch without the port pre-check. With a non-empty `appsToQuit` — memory freeing:
+    /// gently quit the apps → run → on the terminal event (always) relaunch the closed ones.
+    private func launch(_ command: Command) {
         guard !command.appsToQuit.isEmpty else {
             startRun(command)
             return
@@ -178,7 +266,7 @@ final class ProcessManager {
     /// Start a run without memory orchestration. Returns the token (for a chain step),
     /// or nil if the launch is rejected (sudo daemon).
     @discardableResult
-    private func startRun(_ command: Command) -> UUID? {
+    private func startRun(_ command: Command, isWatchdogRestart: Bool = false) -> UUID? {
         // Hard rule: a sudo daemon is impossible (no stream/pid/stop).
         guard !(command.needsSudo && command.isDaemon) else {
             logs[command.id] = RingBuffer(capacity: maxLogLines)
@@ -186,6 +274,17 @@ final class ProcessManager {
             states[command.id] = .failed(code: -1)
             DiagnosticLog.shared.log("Rejected: sudo daemon “\(command.name)”", level: .error)
             return nil
+        }
+
+        if command.isDaemon {
+            lastStarted[command.id] = command
+            if command.watchdogEnabled {
+                // A fresh user start (direct or chain step) begins a new attempt series;
+                // a watchdog restart keeps counting toward the give-up limit.
+                if !isWatchdogRestart { watchdogFailures[command.id] = 0 }
+                watchdogArmed.insert(command.id)
+                watchdogPhases[command.id] = .armed
+            }
         }
 
         // A restart PREEMPTS the previous run of the same id.
@@ -234,6 +333,9 @@ final class ProcessManager {
     /// we mark it as a user stop so it isn't shown red ("error").
     /// An adopted daemon (no managed Process) is killed by PID subtree.
     func stop(_ commandID: UUID) {
+        // A user stop never restarts: deactivate watching (the persisted flag is untouched —
+        // the next manual start re-arms).
+        deactivateWatchdog(commandID)
         if let pid = adoptedPIDs[commandID] {
             DiagnosticLog.shared.log("Stop adopted daemon PID \(pid) [\(commandID.uuidString.prefix(8))]")
             reaper.killTree(pid: pid)
@@ -464,6 +566,203 @@ final class ProcessManager {
         return result
     }
 
+    // MARK: port conflicts
+
+    /// "Kill & start" from the conflict panel: SIGTERM the occupant's subtree, wait for the
+    /// port to free (SIGKILL escalation if it doesn't), then launch our daemon.
+    func killOccupantAndStart(_ commandID: UUID) {
+        guard var conflict = portConflicts[commandID], !conflict.resolving else { return }
+        conflict.resolving = true
+        portConflicts[commandID] = conflict
+        let occupant = conflict.occupant
+        let port = conflict.port
+        let command = conflict.command
+        DiagnosticLog.shared.log("Port \(port): killing occupant \(occupant.processName) (PID \(occupant.pid))")
+        reaper.killTree(pid: occupant.pid)
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            var freed = await self.awaitPortFree(port)
+            if !freed {
+                DiagnosticLog.shared.log(
+                    "Port \(port) still occupied after SIGTERM — escalating to SIGKILL (PID \(occupant.pid))",
+                    level: .warn)
+                self.reaper.forceKillTree(pid: occupant.pid)
+                freed = await self.awaitPortFree(port)
+            }
+            // The user may have dismissed the panel while we waited.
+            guard self.portConflicts[commandID]?.resolving == true else { return }
+            if freed {
+                self.portConflicts[commandID] = nil
+                if self.watchdogArmed.contains(commandID) { self.watchdogPhases[commandID] = .armed }
+                self.startRun(command)
+            } else {
+                self.portConflicts[commandID]?.resolving = false
+                self.appendLog(commandID, L10n.portStillOccupied(port, occupant.processName, occupant.pid), .stderr)
+                DiagnosticLog.shared.log("Port \(port) could not be freed (PID \(occupant.pid))", level: .error)
+            }
+        }
+    }
+
+    /// "Cancel" from the conflict panel: don't start; a paused watchdog stays off
+    /// until the next manual start (the persisted flag is untouched).
+    func dismissPortConflict(_ commandID: UUID) {
+        portConflicts[commandID] = nil
+        if watchdogPhases[commandID] == .pausedOnConflict {
+            deactivateWatchdog(commandID)
+        }
+    }
+
+    /// lsof off the main thread (it blocks for ~100 ms).
+    private func checkPort(_ port: Int) async -> PortOccupant? {
+        let inspector = portInspector
+        return await Task.detached(priority: .userInitiated) { inspector.occupant(ofPort: port) }.value
+    }
+
+    /// Poll until the port frees or the per-phase timeout expires.
+    private func awaitPortFree(_ port: Int) async -> Bool {
+        let deadline = ContinuousClock.now + policy.portFreeTimeout
+        while ContinuousClock.now < deadline {
+            if await checkPort(port) == nil { return true }
+            try? await Task.sleep(for: policy.portFreePollInterval)
+        }
+        return await checkPort(port) == nil
+    }
+
+    /// After a daemon failed to start: if its port is occupied, surface the conflict panel
+    /// under the red row (covers chain steps and races the pre-check can't see).
+    private func startReactivePortCheck(_ commandID: UUID, port: Int) {
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            guard let occupant = await self.checkPort(port) else { return }
+            // Surface only if the daemon is still down and nothing else took over.
+            guard self.active[commandID] == nil, self.adoptedPIDs[commandID] == nil,
+                  self.portConflicts[commandID] == nil,
+                  let command = self.lastStarted[commandID] else { return }
+            self.portConflicts[commandID] = PortConflict(port: port, occupant: occupant, command: command)
+            DiagnosticLog.shared.log(
+                "Port \(port) is occupied by \(occupant.processName) (PID \(occupant.pid)) — “\(command.name)” failed to start",
+                level: .warn)
+        }
+    }
+
+    // MARK: daemon watchdog
+
+    /// Arm from the popover shield: watch a live/adopted daemon, or start it and watch.
+    func armWatchdog(_ command: Command) {
+        var armed = command
+        armed.watchdogEnabled = true
+        if active[armed.id] != nil || adoptedPIDs[armed.id] != nil {
+            lastStarted[armed.id] = armed
+            watchdogFailures[armed.id] = 0
+            watchdogArmed.insert(armed.id)
+            watchdogPhases[armed.id] = .armed
+            startAdoptedWatchdogPollIfNeeded()
+        } else {
+            run(armed)   // startRun arms via the watchdogEnabled flag
+        }
+    }
+
+    /// Disarm from the popover shield; the daemon itself keeps running.
+    func disarmWatchdog(_ commandID: UUID) {
+        deactivateWatchdog(commandID)
+    }
+
+    /// Stop watching: cancel pending restart/stability tasks and clear the phase.
+    private func deactivateWatchdog(_ commandID: UUID) {
+        watchdogRestartTasks.removeValue(forKey: commandID)?.cancel()
+        stabilityTasks.removeValue(forKey: commandID)?.cancel()
+        watchdogArmed.remove(commandID)
+        watchdogPhases[commandID] = nil
+        watchdogFailures[commandID] = nil
+    }
+
+    /// Restart after an unexpected daemon death: counted attempts with growing pauses;
+    /// the limit exhausted → `gaveUp` + notification. A stable run resets the counter.
+    private func scheduleWatchdogRestart(_ commandID: UUID) {
+        guard watchdogArmed.contains(commandID), let command = lastStarted[commandID] else { return }
+        let attempt = (watchdogFailures[commandID] ?? 0) + 1
+        watchdogFailures[commandID] = attempt
+        guard attempt <= policy.restartDelays.count else {
+            watchdogPhases[commandID] = .gaveUp
+            watchdogArmed.remove(commandID)
+            DiagnosticLog.shared.log(
+                "Watchdog: “\(command.name)” keeps dying — giving up after \(policy.restartDelays.count) restarts",
+                level: .error)
+            notifier.post(.watchdogGaveUp(name: command.name))
+            return
+        }
+        watchdogPhases[commandID] = .restarting(attempt: attempt)
+        let delay = policy.restartDelays[attempt - 1]
+        watchdogRestartTasks[commandID]?.cancel()
+        watchdogRestartTasks[commandID] = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: delay)
+            guard let self, !Task.isCancelled else { return }
+            self.watchdogRestartTasks[commandID] = nil
+            // The user may have stopped or restarted the daemon manually during the pause.
+            guard self.watchdogArmed.contains(commandID),
+                  self.active[commandID] == nil, self.adoptedPIDs[commandID] == nil else { return }
+            if let port = command.port {
+                // "Kill & start" already in flight — it will launch when the port frees.
+                if self.portConflicts[commandID]?.resolving == true { return }
+                let occupant = await self.checkPort(port)
+                // Re-check: the world may have changed while lsof ran.
+                guard self.watchdogArmed.contains(commandID),
+                      self.active[commandID] == nil, self.adoptedPIDs[commandID] == nil,
+                      self.portConflicts[commandID]?.resolving != true else { return }
+                if let occupant {
+                    // A foreign port owner: retries are futile — pause and ask the user.
+                    self.watchdogPhases[commandID] = .pausedOnConflict
+                    self.portConflicts[commandID] = PortConflict(port: port, occupant: occupant, command: command)
+                    DiagnosticLog.shared.log(
+                        "Watchdog: port \(port) is occupied by \(occupant.processName) (PID \(occupant.pid)) — pausing “\(command.name)”",
+                        level: .warn)
+                    return
+                }
+            }
+            DiagnosticLog.shared.log("Watchdog: restarting “\(command.name)” (attempt \(attempt))")
+            self.startRun(command, isWatchdogRestart: true)
+        }
+    }
+
+    /// Reset the failure counter once the daemon has stayed up for the stability window.
+    private func startStabilityTask(_ commandID: UUID, token: UUID) {
+        stabilityTasks[commandID]?.cancel()
+        let window = policy.stabilityWindow
+        stabilityTasks[commandID] = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: window)
+            guard let self, !Task.isCancelled else { return }
+            self.stabilityTasks[commandID] = nil
+            // Token guard: a preempted run's timer must not reset the next run's counter.
+            guard self.active[commandID]?.token == token,
+                  self.states[commandID] == .daemonRunning else { return }
+            self.watchdogFailures[commandID] = 0
+            if self.watchdogArmed.contains(commandID) { self.watchdogPhases[commandID] = .armed }
+        }
+    }
+
+    /// Adopted daemons have no output stream — liveness is polled by PID (cheap `kill(pid, 0)`).
+    /// One task for all adopted daemons; exits when none are watched, restarted on adopt/arm.
+    private func startAdoptedWatchdogPollIfNeeded() {
+        guard adoptedPollTask == nil,
+              adoptedPIDs.contains(where: { watchdogArmed.contains($0.key) }) else { return }
+        let interval = policy.adoptedPollInterval
+        adoptedPollTask = Task { @MainActor [weak self] in
+            while let self {
+                let watched = self.adoptedPIDs.filter { self.watchdogArmed.contains($0.key) }
+                if watched.isEmpty { break }
+                for (id, pid) in watched where !self.reaper.isAlive(pid: pid) {
+                    self.adoptedPIDs.removeValue(forKey: id)
+                    self.states[id] = .failed(code: -1)
+                    let name = self.lastStarted[id]?.name ?? id.uuidString
+                    DiagnosticLog.shared.log("Watchdog: adopted daemon “\(name)” (PID \(pid)) died", level: .warn)
+                    self.scheduleWatchdogRestart(id)
+                }
+                try? await Task.sleep(for: interval)
+            }
+            self?.adoptedPollTask = nil
+        }
+    }
+
     // MARK: adopting daemons after a restart
 
     /// Adopt daemons that survived a previous session. For each daemon command we look for an
@@ -476,9 +775,17 @@ final class ProcessManager {
             guard let pid = reaper.findOrphan(matchingCommand: command.command) else { continue }
             states[command.id] = .daemonRunning
             adoptedPIDs[command.id] = pid
+            lastStarted[command.id] = command
+            if command.watchdogEnabled {
+                // The persisted flag survives the app restart — the adopted daemon auto-arms.
+                watchdogFailures[command.id] = 0
+                watchdogArmed.insert(command.id)
+                watchdogPhases[command.id] = .armed
+            }
             DiagnosticLog.shared.log("Adopted daemon: “\(command.name)” PID \(pid)")
             notifier.post(.daemonAdopted(name: command.name))
         }
+        startAdoptedWatchdogPollIfNeeded()
     }
 
     // MARK: for the exit dialog (Stage 5)
@@ -755,6 +1062,7 @@ final class ProcessManager {
                 DiagnosticLog.shared.log("Daemon up: \(tag)")
                 notifier.post(.daemonStarted(name: name))
                 resumeStep(token: token, .daemonRunning)   // a daemon step advances the chain while staying alive
+                if watchdogArmed.contains(commandID) { startStabilityTask(commandID, token: token) }
             }
             startVMSamplerIfNeeded()
         case .line(let text, let stream):
@@ -783,17 +1091,27 @@ final class ProcessManager {
                     }
                 }
                 if isDaemon {
-                    // the daemon exited on its own, without a stop request → dropped (or failed to start)
-                    notifier.post(wasDaemonRunning
-                        ? .daemonStopped(name: name, code: code)
-                        : .daemonFailedToStart(name: name, code: code))
+                    if watchdogArmed.contains(commandID) {
+                        // A scheduled restart replaces the banner — no spam while the watchdog works.
+                        DiagnosticLog.shared.log("Watchdog: \(tag) died (code \(code)) — scheduling restart", level: .warn)
+                        scheduleWatchdogRestart(commandID)
+                    } else {
+                        // the daemon exited on its own, without a stop request → dropped (or failed to start)
+                        notifier.post(wasDaemonRunning
+                            ? .daemonStopped(name: name, code: code)
+                            : .daemonFailedToStart(name: name, code: code))
+                    }
                 } else if code != 0 {
                     notifier.post(.commandFailed(name: name, code: code))
+                }
+                if isDaemon, !wasDaemonRunning, code != 0, let port = lastStarted[commandID]?.port {
+                    startReactivePortCheck(commandID, port: port)
                 }
                 resumeStep(token: token, code == 0 ? .succeeded : .failed(code: code))
             }
         case .cancelled:
             stopRequested.remove(commandID)
+            deactivateWatchdog(commandID)
             states[commandID] = .idle   // user cancellation (sudo dialog) — also neutral
             DiagnosticLog.shared.log("Cancelled by user: \(tag)")
             flushRunPeaks(commandID, name: name)

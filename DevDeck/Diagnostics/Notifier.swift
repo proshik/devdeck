@@ -8,6 +8,7 @@ enum AppNotification: Equatable {
     case daemonAdopted(name: String)                     // adopted from a previous session
     case commandFailed(name: String, code: Int32)        // regular command / chain step — error
     case memoryThreshold(target: String, detail: String) // colima/minikube crossed a danger threshold mid-run
+    case watchdogGaveUp(name: String)                    // watchdog exhausted its restart attempts
 }
 
 /// Abstraction over native notifications (behind a protocol → `ProcessManager` orchestration
