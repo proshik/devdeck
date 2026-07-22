@@ -12,6 +12,10 @@ protocol DaemonReaper {
     /// Kill a process and its entire subtree (SIGTERM). Needed for grandchildren:
     /// `zsh -lc "kubectl …"` may keep `kubectl` as a child process while the port lives there.
     func killTree(pid: Int32)
+    /// SIGKILL escalation for a subtree that survived `killTree` (port still occupied).
+    func forceKillTree(pid: Int32)
+    /// Whether the process is alive — the adopted-daemon watchdog poll.
+    func isAlive(pid: Int32) -> Bool
 }
 
 /// Real implementation via `ps`/`kill`. Called infrequently (start-adoption, stop), on main.
@@ -34,5 +38,13 @@ struct LiveDaemonReaper: DaemonReaper {
 
     func killTree(pid: Int32) {
         ProcessTree.terminate(pid)
+    }
+
+    func forceKillTree(pid: Int32) {
+        ProcessTree.terminate(pid, signal: SIGKILL)
+    }
+
+    func isAlive(pid: Int32) -> Bool {
+        ProcessTree.isAlive(pid)
     }
 }

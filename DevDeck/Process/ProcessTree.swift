@@ -4,10 +4,10 @@ import Darwin
 /// Utilities for working with the process tree (`ps`/`kill`) — nonisolated so they can be called
 /// both from main (adopting daemons) and from a background task (terminal runner).
 enum ProcessTree {
-    /// SIGTERM to a process and its entire subtree (children before the root).
-    static func terminate(_ root: Int32) {
+    /// Signal (SIGTERM by default) to a process and its entire subtree (children before the root).
+    static func terminate(_ root: Int32, signal: Int32 = SIGTERM) {
         guard root > 0 else { return }
-        for pid in subtree(of: root).reversed() { kill(pid, SIGTERM) }
+        for pid in subtree(of: root).reversed() { kill(pid, signal) }
     }
 
     /// Whether the process is alive (`kill(pid, 0)`), with no side effects.

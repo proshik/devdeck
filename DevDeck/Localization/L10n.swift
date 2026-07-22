@@ -170,6 +170,39 @@ enum L10n {
     static var notifDaemonStopped: String { t("Daemon stopped", "Демон остановился") }
     static var notifDaemonFailedToStart: String { t("Daemon failed to start", "Демон не запустился") }
     static var notifCommandFailed: String { t("Command error", "Ошибка команды") }
+    static var notifWatchdogGaveUp: String {
+        t("Daemon keeps dying — auto-restart stopped", "Демон продолжает падать — авторестарт остановлен")
+    }
+    static func portStillOccupied(_ port: Int, _ name: String, _ pid: Int32) -> String {
+        t("Port \(port) could not be freed: \(name) (PID \(pid)) is still listening",
+          "Порт \(port) освободить не удалось: \(name) (PID \(pid)) всё ещё слушает")
+    }
+
+    // MARK: - Watchdog & port conflicts
+
+    static var localPort: String { t("Local port", "Локальный порт") }
+    static var portAutoDetectedHint: String {
+        t("Enables the occupied-port check: if another process holds this port, DevDeck offers to kill it and start the daemon. For a port-forward enter the LOCAL port — the left one in the pair (30090:8080 → 30090), i.e. the port you open in the browser. Auto-filled when the command is edited.",
+          "Нужен для проверки «порт занят»: если порт держит другой процесс, DevDeck предложит убить его и запустить демона. Для port-forward вводите ЛОКАЛЬНЫЙ порт — левый в паре (30090:8080 → 30090), то есть тот, что открываете в браузере. Подставляется автоматически при правке команды.")
+    }
+    static var watchdogToggle: String {
+        t("Auto-restart if it dies (watchdog)", "Автоперезапуск при падении (watchdog)")
+    }
+    static var watchdogEnableHelp: String { t("Enable auto-restart (watchdog)", "Включить автоперезапуск (watchdog)") }
+    static var watchdogDisableHelp: String { t("Disable auto-restart", "Выключить автоперезапуск") }
+    static func watchdogRestartingHelp(_ attempt: Int) -> String {
+        t("Restarting (attempt \(attempt))…", "Перезапуск (попытка \(attempt))…")
+    }
+    static var watchdogPausedHelp: String {
+        t("Port is occupied — waiting for your decision", "Порт занят — ждёт вашего решения")
+    }
+    static var watchdogGaveUpHelp: String {
+        t("Auto-restart gave up — the daemon keeps dying", "Автоперезапуск сдался — демон продолжает падать")
+    }
+    static var killAndStart: String { t("Kill & start", "Убить и запустить") }
+    static func portOccupied(_ port: Int, _ name: String, _ pid: Int32) -> String {
+        t("Port \(port) is occupied by \(name) (PID \(pid))", "Порт \(port) занят: \(name) (PID \(pid))")
+    }
     static func notifNameCode(_ name: String, _ code: Int32) -> String {
         t("\(name) — code \(code)", "\(name) — код \(code)")
     }
