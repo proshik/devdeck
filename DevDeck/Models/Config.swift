@@ -17,12 +17,23 @@ struct Settings: Codable, Equatable {
     var activeProxyName: String?
     /// Username for the active proxy (its password lives in the Keychain).
     var activeProxyUsername: String?
+    /// Last known address of the active proxy. Bonjour dies on networks that filter multicast
+    /// (any corporate VPN), while the proxy itself stays reachable over unicast TCP — this is
+    /// what keeps a flagged command working there. One endpoint for the CURRENT choice, not a
+    /// per-peer table.
+    var activeProxyHost: String?
+    var activeProxyPort: Int?
+    /// Cached alongside the address: without it a remembered auth-protected proxy would resolve
+    /// as open and skip the credentials requirement.
+    var activeProxyAuthRequired: Bool
 
     init(vmMemoryMonitoring: Bool = true, minikubeMemoryMonitoring: Bool = true,
          hostMemoryMonitoring: Bool = true, globalHotkeyEnabled: Bool = false,
          clusterHealthMonitoring: Bool = true, autoUpdateEnabled: Bool = true,
          proxyShareEnabled: Bool = false, proxyDiscoveryEnabled: Bool = false,
-         activeProxyName: String? = nil, activeProxyUsername: String? = nil) {
+         activeProxyName: String? = nil, activeProxyUsername: String? = nil,
+         activeProxyHost: String? = nil, activeProxyPort: Int? = nil,
+         activeProxyAuthRequired: Bool = false) {
         self.vmMemoryMonitoring = vmMemoryMonitoring
         self.minikubeMemoryMonitoring = minikubeMemoryMonitoring
         self.hostMemoryMonitoring = hostMemoryMonitoring
@@ -33,12 +44,16 @@ struct Settings: Codable, Equatable {
         self.proxyDiscoveryEnabled = proxyDiscoveryEnabled
         self.activeProxyName = activeProxyName
         self.activeProxyUsername = activeProxyUsername
+        self.activeProxyHost = activeProxyHost
+        self.activeProxyPort = activeProxyPort
+        self.activeProxyAuthRequired = activeProxyAuthRequired
     }
 
     enum CodingKeys: String, CodingKey {
         case vmMemoryMonitoring, minikubeMemoryMonitoring, hostMemoryMonitoring, globalHotkeyEnabled,
              clusterHealthMonitoring, autoUpdateEnabled, proxyShareEnabled, proxyDiscoveryEnabled,
-             activeProxyName, activeProxyUsername
+             activeProxyName, activeProxyUsername, activeProxyHost, activeProxyPort,
+             activeProxyAuthRequired
     }
 
     init(from decoder: Decoder) throws {
@@ -53,6 +68,9 @@ struct Settings: Codable, Equatable {
         proxyDiscoveryEnabled = try c.decodeIfPresent(Bool.self, forKey: .proxyDiscoveryEnabled) ?? false
         activeProxyName = try c.decodeIfPresent(String.self, forKey: .activeProxyName)
         activeProxyUsername = try c.decodeIfPresent(String.self, forKey: .activeProxyUsername)
+        activeProxyHost = try c.decodeIfPresent(String.self, forKey: .activeProxyHost)
+        activeProxyPort = try c.decodeIfPresent(Int.self, forKey: .activeProxyPort)
+        activeProxyAuthRequired = try c.decodeIfPresent(Bool.self, forKey: .activeProxyAuthRequired) ?? false
     }
 }
 

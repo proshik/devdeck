@@ -82,4 +82,31 @@ final class ProxyConfigCodecTests: XCTestCase {
         XCTAssertFalse(json.lowercased().contains("password"))
         XCTAssertTrue(json.contains("\"username\""), "usernames are fine in the config — passwords are not")
     }
+
+    func testRememberedEndpointRoundTrips() throws {
+        var config = Config.empty
+        config.settings.activeProxyName = "personal-mac"
+        config.settings.activeProxyHost = "192.168.31.117"
+        config.settings.activeProxyPort = 9999
+        config.settings.activeProxyAuthRequired = true
+
+        let decoded = try ConfigCodec.decode(ConfigCodec.encode(config))
+
+        XCTAssertEqual(decoded.settings.activeProxyHost, "192.168.31.117")
+        XCTAssertEqual(decoded.settings.activeProxyPort, 9999)
+        XCTAssertEqual(decoded.settings.activeProxyAuthRequired, true)
+    }
+
+    func testFileWithoutRememberedEndpointDecodesToDefaults() throws {
+        // A config written by 0.5.0 has the active proxy but no cached endpoint.
+        let older = Data(#"{"commands":[],"settings":{"activeProxyName":"personal-mac"}}"#.utf8)
+
+        let config = try ConfigCodec.decode(older)
+
+        XCTAssertEqual(config.settings.activeProxyName, "personal-mac")
+        XCTAssertNil(config.settings.activeProxyHost)
+        XCTAssertNil(config.settings.activeProxyPort)
+        XCTAssertFalse(config.settings.activeProxyAuthRequired)
+        XCTAssertEqual(config.schemaVersion, 2, "adding optional keys does not bump the schema")
+    }
 }
