@@ -18,6 +18,9 @@ struct DiscoveredProxy: Equatable, Identifiable, Sendable {
     let proto: String
     /// TXT record schema version.
     let schema: Int
+    /// False when this entry was rebuilt from the remembered endpoint rather than heard on the
+    /// network. `var` with a default so every existing construction site keeps compiling.
+    var isLive: Bool = true
 
     var id: String { name }
 }

@@ -251,11 +251,26 @@ final class ProxyManager {
 
     // MARK: - Discovery (client side)
 
-    /// The proxy chosen as active, resolved by Bonjour NAME against the current results.
-    /// nil when nothing is selected or the selected peer is currently offline.
+    /// The proxy chosen as active. Live Bonjour data wins; otherwise the last known endpoint is
+    /// used, which is what keeps a flagged command working on networks that filter multicast
+    /// (every corporate VPN) while leaving the proxy reachable over unicast TCP.
+    ///
+    /// Pure read: SwiftUI evaluates this during `body`, so it must never persist anything.
     var activeProxy: DiscoveredProxy? {
-        guard let name = store?.config.settings.activeProxyName else { return nil }
-        return discovered.first { $0.name == name }
+        guard let settings = store?.config.settings, let name = settings.activeProxyName else { return nil }
+        if let live = discovered.first(where: { $0.name == name }) { return live }
+        guard let host = settings.activeProxyHost, let port = settings.activeProxyPort else { return nil }
+        return DiscoveredProxy(name: name, host: host, port: port,
+                               authRequired: settings.activeProxyAuthRequired,
+                               exitIP: nil, proto: "http+socks", schema: proxyTXTSchemaVersion,
+                               isLive: false)
+    }
+
+    /// What the UI lists: everything currently announced, plus the active proxy when it is only
+    /// remembered — otherwise a proxy that went quiet would vanish with no explanation.
+    var visibleProxies: [DiscoveredProxy] {
+        guard let active = activeProxy, !active.isLive else { return discovered }
+        return discovered + [active]
     }
 
     /// The active proxy needs credentials we don't have yet (the UI asks for a password).
@@ -271,6 +286,7 @@ final class ProxyManager {
             for await set in stream {
                 guard let self else { return }
                 self.discovered = set
+                self.rememberActiveEndpointIfLive()
                 self.refreshCredentialCache()
             }
         }
@@ -299,6 +315,8 @@ final class ProxyManager {
         let sameAsBefore = store?.config.settings.activeProxyName == proxy.name
         store?.setActiveProxy(name: proxy.name,
                               username: sameAsBefore ? store?.config.settings.activeProxyUsername : nil)
+        store?.rememberActiveProxyEndpoint(host: proxy.host, port: proxy.port,
+                                           authRequired: proxy.authRequired)
     }
 
     func clientPassword(for proxyName: String) -> String? {
@@ -311,6 +329,16 @@ final class ProxyManager {
         defer { refreshCredentialCache() }
         guard store?.config.settings.activeProxyName == proxyName else { return }
         store?.setActiveProxy(name: proxyName, username: username.isEmpty ? nil : username)
+    }
+
+    /// One of the two places the endpoint cache is written (the other is `setActiveProxy`).
+    /// No-op unless the active proxy is in the current result set — a remembered entry must not
+    /// rewrite itself.
+    private func rememberActiveEndpointIfLive() {
+        guard let name = store?.config.settings.activeProxyName,
+              let live = discovered.first(where: { $0.name == name }) else { return }
+        store?.rememberActiveProxyEndpoint(host: live.host, port: live.port,
+                                           authRequired: live.authRequired)
     }
 
     /// Re-read whether the active peer's credentials are complete — the only place that touches the

@@ -155,4 +155,111 @@ final class ProxyManagerDiscoveryTests: XCTestCase {
         XCTAssertEqual(credentials.password(for: ProxyCredentialAccount.client("locked-mac")), "s3cret",
                        "…and the password goes to the credential store, not the config")
     }
+
+    /// Same as `makeManager`, but retains the store for the whole test — `ProxyManager.store` is
+    /// weak (AppDelegate owns it in the app), so a dropped binding would silently deallocate it.
+    private var retainedStore: CommandStore?
+
+    private func makeManagerKeepingStore() -> (ProxyManager, CommandStore, FakeProxyDiscovering) {
+        let made = makeManager()
+        retainedStore = made.1
+        return made
+    }
+
+    func testRemembersTheEndpointOfTheActiveProxy() async {
+        let (manager, store, fake) = makeManager()
+        manager.startDiscovery()
+        fake.emit([proxy("personal-mac")])
+        await yieldUntil { manager.discovered.count == 1 }
+
+        manager.setActiveProxy(proxy("personal-mac"))
+
+        XCTAssertEqual(store.config.settings.activeProxyHost, "192.168.1.42")
+        XCTAssertEqual(store.config.settings.activeProxyPort, 9999)
+    }
+
+    func testFallsBackToTheRememberedEndpointWhenBonjourGoesQuiet() async {
+        // The work Mac's corporate VPN filters multicast: the announcement disappears while the
+        // proxy stays reachable over unicast TCP. Verified live on 2026-07-25.
+        let (manager, _, fake) = makeManagerKeepingStore()
+        manager.startDiscovery()
+        fake.emit([proxy("personal-mac")])
+        await yieldUntil { manager.discovered.count == 1 }
+        manager.setActiveProxy(proxy("personal-mac"))
+
+        fake.emit([])
+        await yieldUntil { manager.discovered.isEmpty }
+
+        let active = try! XCTUnwrap(manager.activeProxy)
+        XCTAssertEqual(active.host, "192.168.1.42")
+        XCTAssertEqual(active.port, 9999)
+        XCTAssertFalse(active.isLive, "marked as remembered so the UI can say so")
+    }
+
+    func testLiveAnnouncementWinsOverTheRememberedEndpoint() async {
+        let (manager, _, fake) = makeManagerKeepingStore()
+        manager.startDiscovery()
+        fake.emit([proxy("personal-mac", host: "192.168.1.42")])
+        await yieldUntil { manager.discovered.count == 1 }
+        manager.setActiveProxy(proxy("personal-mac", host: "192.168.1.42"))
+
+        // The peer comes back on a new address — live data must override the cached one.
+        fake.emit([proxy("personal-mac", host: "192.168.1.77")])
+        await yieldUntil { manager.activeProxy?.host == "192.168.1.77" }
+
+        XCTAssertTrue(manager.activeProxy?.isLive == true)
+    }
+
+    func testDiscoveryUpdatesRefreshTheRememberedEndpoint() async {
+        let (manager, store, fake) = makeManagerKeepingStore()
+        manager.startDiscovery()
+        fake.emit([proxy("personal-mac", host: "192.168.1.42")])
+        await yieldUntil { manager.discovered.count == 1 }
+        manager.setActiveProxy(proxy("personal-mac", host: "192.168.1.42"))
+
+        fake.emit([proxy("personal-mac", host: "192.168.1.77")])
+        await yieldUntil { store.config.settings.activeProxyHost == "192.168.1.77" }
+
+        XCTAssertEqual(store.config.settings.activeProxyHost, "192.168.1.77")
+    }
+
+    func testReadingActiveProxyNeverWritesTheConfig() async {
+        let (manager, store, fake) = makeManagerKeepingStore()
+        manager.startDiscovery()
+        fake.emit([proxy("personal-mac")])
+        await yieldUntil { manager.discovered.count == 1 }
+        manager.setActiveProxy(proxy("personal-mac"))
+        let before = try! FileManager.default.attributesOfItem(atPath: url.path)[.modificationDate] as? Date
+
+        // SwiftUI evaluates this during `body`; a write here would hit the disk on every render.
+        for _ in 0..<20 { _ = manager.activeProxy }
+
+        let after = try! FileManager.default.attributesOfItem(atPath: url.path)[.modificationDate] as? Date
+        XCTAssertEqual(before, after)
+    }
+
+    func testVisibleProxiesIncludesTheRememberedActiveProxy() async {
+        let (manager, _, fake) = makeManagerKeepingStore()
+        manager.startDiscovery()
+        fake.emit([proxy("personal-mac")])
+        await yieldUntil { manager.discovered.count == 1 }
+        manager.setActiveProxy(proxy("personal-mac"))
+
+        fake.emit([])
+        await yieldUntil { manager.discovered.isEmpty }
+
+        XCTAssertEqual(manager.visibleProxies.map(\.name), ["personal-mac"],
+                       "a proxy that went quiet must not vanish from the list without explanation")
+        XCTAssertFalse(manager.visibleProxies[0].isLive)
+    }
+
+    func testVisibleProxiesHasNoDuplicateWhenTheActiveProxyIsLive() async {
+        let (manager, _, fake) = makeManagerKeepingStore()
+        manager.startDiscovery()
+        fake.emit([proxy("personal-mac"), proxy("laptop")])
+        await yieldUntil { manager.discovered.count == 2 }
+        manager.setActiveProxy(proxy("personal-mac"))
+
+        XCTAssertEqual(manager.visibleProxies.count, 2)
+    }
 }

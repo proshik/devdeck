@@ -103,4 +103,36 @@ final class ProxyManagerRoutingResolutionTests: XCTestCase {
 
         XCTAssertEqual(manager.routing(for: flagged()), .unavailable)
     }
+
+    func testRoutesThroughARememberedEndpoint() async {
+        let (manager, store, fake) = makeManager()
+        manager.startDiscovery()
+        fake.emit([DiscoveredProxy(name: "personal-mac", host: "192.168.31.117", port: 9999,
+                                  authRequired: false, exitIP: nil, proto: "http+socks", schema: 1)])
+        await yieldUntil { manager.discovered.count == 1 }
+        manager.setActiveProxy(manager.discovered[0])
+
+        fake.emit([])   // corporate VPN blocks multicast; the proxy itself is still up
+        await yieldUntil { manager.discovered.isEmpty }
+
+        XCTAssertEqual(manager.routing(for: flagged()),
+                       .routed(env: proxyEnv(host: "192.168.31.117", port: 9999, user: nil, pass: nil)))
+        _ = store
+    }
+
+    func testRememberedAuthProxyWithoutCredentialsStaysUnavailable() async {
+        let (manager, store, fake) = makeManager()
+        manager.startDiscovery()
+        fake.emit([DiscoveredProxy(name: "locked", host: "10.0.0.9", port: 8888,
+                                  authRequired: true, exitIP: nil, proto: "http+socks", schema: 1)])
+        await yieldUntil { manager.discovered.count == 1 }
+        manager.setActiveProxy(manager.discovered[0])
+
+        fake.emit([])
+        await yieldUntil { manager.discovered.isEmpty }
+
+        XCTAssertEqual(manager.routing(for: flagged()), .unavailable,
+                       "caching the address must not smuggle past the credentials requirement")
+        _ = store
+    }
 }
