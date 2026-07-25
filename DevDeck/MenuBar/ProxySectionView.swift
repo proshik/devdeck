@@ -38,9 +38,10 @@ struct ProxySectionView: View {
         (shareEnabled ? 1 : 0) + (discoveryEnabled ? proxy.visibleProxies.count : 0)
     }
 
-    /// Green counter when this deck is actively sharing or has a live active proxy.
+    /// Green counter when this deck is actively sharing or has a LIVE active proxy — a
+    /// remembered-but-not-announced proxy is dimmed in the list, so it must not count here either.
     private var runningCount: Int {
-        (proxy.isAdvertising ? 1 : 0) + (proxy.activeProxy != nil ? 1 : 0)
+        (proxy.isAdvertising ? 1 : 0) + (proxy.activeProxy?.isLive == true ? 1 : 0)
     }
 
     // MARK: host side
