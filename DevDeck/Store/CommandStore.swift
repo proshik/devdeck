@@ -220,6 +220,27 @@ final class CommandStore {
         var updated = config
         updated.settings.activeProxyName = name
         updated.settings.activeProxyUsername = username
+        if name == nil {
+            // The endpoint belongs to the choice — keeping it would let a stale address
+            // resurrect a proxy the user deselected.
+            updated.settings.activeProxyHost = nil
+            updated.settings.activeProxyPort = nil
+            updated.settings.activeProxyAuthRequired = false
+        }
+        persist(updated)
+    }
+
+    /// Remember where the active proxy was last reachable, so it survives Bonjour going quiet.
+    /// Guarded: this is called on every browse update, and an unguarded write would hit the disk
+    /// several times a second.
+    func rememberActiveProxyEndpoint(host: String, port: Int, authRequired: Bool) {
+        guard config.settings.activeProxyHost != host
+                || config.settings.activeProxyPort != port
+                || config.settings.activeProxyAuthRequired != authRequired else { return }
+        var updated = config
+        updated.settings.activeProxyHost = host
+        updated.settings.activeProxyPort = port
+        updated.settings.activeProxyAuthRequired = authRequired
         persist(updated)
     }
 
