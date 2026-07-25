@@ -301,4 +301,60 @@ enum L10n {
         t("Build uses \(effective) jobs; safe for this RAM limit: \(advised)",
           "Сборка: \(effective) задач; безопасно для лимита RAM: \(advised)")
     }
+
+    // MARK: - Proxy manager
+
+    static var proxy: String { t("Proxy", "Прокси") }
+    static var proxySection: String { t("Proxy manager", "Менеджер прокси") }
+    /// Name of the synthetic gost daemon — logs use this instead of the command line,
+    /// which keeps the password out of the log.
+    static var proxyShareDaemonName: String { t("Proxy (gost)", "Прокси (gost)") }
+    static var proxyShareSection: String { t("Share this Mac’s proxy", "Раздавать прокси с этого мака") }
+    static var proxyShareToggle: String {
+        t("Share the proxy on the local network", "Раздавать прокси в локальной сети")
+    }
+    static var proxyDiscoverySection: String { t("Use a proxy from the network", "Использовать прокси из сети") }
+    static var proxyDiscoveryToggle: String {
+        t("Look for proxies on the local network", "Искать прокси в локальной сети")
+    }
+    static var routeThroughProxyToggle: String {
+        t("Route through the LAN proxy", "Пускать через прокси из локальной сети")
+    }
+    static var proxyActive: String { t("Active", "Активный") }
+    static var proxyNone: String { t("none", "нет") }
+    static var proxyAuthRequired: String { t("Password required", "Требуется пароль") }
+    static var proxyExitIP: String { t("Exit IP", "Внешний IP") }
+    static var proxyAdvertising: String { t("Announced on the network", "Анонсируется в сети") }
+    static var proxyNotAdvertising: String { t("Not announced", "Не анонсируется") }
+    static var proxyServiceName: String { t("Name on the network", "Имя в сети") }
+    static var proxyUsername: String { t("Username", "Пользователь") }
+    static var proxyPassword: String { t("Password", "Пароль") }
+    static var proxyAuthToggle: String { t("Require a password", "Требовать пароль") }
+    static var proxyPort: String { t("Port", "Порт") }
+    static var proxySearching: String { t("Searching…", "Идёт поиск…") }
+    static var proxyNoneFound: String { t("No proxies found yet", "Прокси пока не найдены") }
+    static var gostNotFound: String {
+        t("gost not found (install it: brew install gost)", "gost не найден (установите: brew install gost)")
+    }
+    static var proxyUnavailable: String {
+        t("No active proxy — the command was not started. Pick one under Proxy, or turn the flag off.",
+          "Нет активного прокси — команда не запущена. Выберите его в разделе «Прокси» или снимите флаг.")
+    }
+    static var notifProxyUnavailable: String { t("Proxy unavailable", "Прокси недоступен") }
+    static var proxyPortHint: String {
+        t("The port gost listens on — announced to the network and checked for conflicts, exactly like a daemon’s port.",
+          "Порт, который слушает gost — анонсируется в сеть и проверяется на конфликт, как и у обычного демона.")
+    }
+    static var proxyIsolatedNetworkHint: String {
+        t("Discovery uses Bonjour: it needs both Macs on the same Wi-Fi without client isolation (guest networks usually block it).",
+          "Обнаружение работает по Bonjour: нужны оба мака в одной Wi-Fi без изоляции клиентов (в гостевых сетях обычно заблокировано).")
+    }
+    static var proxyNoActiveHint: String {
+        t("No active proxy selected — a command with this flag will fail instead of running unprotected.",
+          "Активный прокси не выбран — команда с этим флагом упадёт, а не запустится в обход.")
+    }
+    static func proxyRoutedVia(_ name: String) -> String {
+        t("Traffic goes through “\(name)”", "Трафик пойдёт через «\(name)»")
+    }
+    static func proxyEndpoint(_ host: String, _ port: Int) -> String { "\(host):\(port)" }
 }

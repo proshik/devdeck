@@ -5,6 +5,7 @@ import ServiceManagement
 struct SettingsView: View {
     @Environment(CommandStore.self) private var store
     @Environment(UpdateController.self) private var updates
+    @Environment(ProxyManager.self) private var proxy
     @State private var localization = LocalizationManager.shared
     @State private var appearance = AppearanceManager.shared
 
@@ -57,6 +58,17 @@ struct SettingsView: View {
                 Toggle(L10n.clusterHealthToggle, isOn: Binding(
                     get: { store.config.settings.clusterHealthMonitoring },
                     set: { store.setClusterHealth($0) }
+                ))
+            }
+
+            Section(L10n.proxySection) {
+                Toggle(L10n.proxyShareToggle, isOn: Binding(
+                    get: { store.config.settings.proxyShareEnabled },
+                    set: { proxy.setShareEnabled($0) }
+                ))
+                Toggle(L10n.proxyDiscoveryToggle, isOn: Binding(
+                    get: { store.config.settings.proxyDiscoveryEnabled },
+                    set: { proxy.setDiscoveryEnabled($0) }
                 ))
             }
 

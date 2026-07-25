@@ -1,0 +1,158 @@
+import XCTest
+@testable import DevDeck
+
+/// Client-side discovery: the push stream updates the list, and the active choice resolves by
+/// Bonjour NAME (so a peer's IP can change freely — the whole point of the feature).
+@MainActor
+final class ProxyManagerDiscoveryTests: XCTestCase {
+
+    private var dir: URL!
+    private var url: URL!
+
+    override func setUpWithError() throws {
+        dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("DevDeckTests-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        url = dir.appendingPathComponent("config.json")
+    }
+
+    override func tearDownWithError() throws {
+        try? FileManager.default.removeItem(at: dir)
+    }
+
+    private func makeManager(
+        discovering: FakeProxyDiscovering = FakeProxyDiscovering(),
+        credentials: FakeProxyCredentialStore = FakeProxyCredentialStore()
+    ) -> (ProxyManager, CommandStore, FakeProxyDiscovering) {
+        let store = CommandStore(configURL: url)
+        let manager = ProxyManager(discovering: discovering,
+                                   advertiser: FakeProxyAdvertising(),
+                                   credentials: credentials)
+        manager.store = store
+        return (manager, store, discovering)
+    }
+
+    private func proxy(_ name: String, host: String = "192.168.1.42", port: Int = 9999,
+                       auth: Bool = false, exitIP: String? = nil) -> DiscoveredProxy {
+        DiscoveredProxy(name: name, host: host, port: port, authRequired: auth,
+                        exitIP: exitIP, proto: "http+socks", schema: 1)
+    }
+
+    func testDiscoveredListFollowsTheBrowseStream() async {
+        let (manager, _, fake) = makeManager()
+        manager.startDiscovery()
+
+        fake.emit([proxy("personal-mac")])
+        await yieldUntil { manager.discovered.count == 1 }
+        XCTAssertEqual(manager.discovered.first?.name, "personal-mac")
+
+        // Bonjour always reports the FULL set — a peer going away shrinks the list.
+        fake.emit([proxy("personal-mac"), proxy("laptop", host: "192.168.1.50")])
+        await yieldUntil { manager.discovered.count == 2 }
+        fake.emit([])
+        await yieldUntil { manager.discovered.isEmpty }
+    }
+
+    func testActiveProxyResolvesByName() async {
+        let (manager, store, fake) = makeManager()
+        manager.startDiscovery()
+        fake.emit([proxy("personal-mac"), proxy("laptop", host: "192.168.1.50")])
+        await yieldUntil { manager.discovered.count == 2 }
+
+        store.setActiveProxy(name: "laptop")
+        XCTAssertEqual(manager.activeProxy?.host, "192.168.1.50")
+
+        // The peer reconnects on a NEW IP — same Bonjour name, so the choice still resolves.
+        fake.emit([proxy("laptop", host: "192.168.1.77")])
+        await yieldUntil { manager.activeProxy?.host == "192.168.1.77" }
+    }
+
+    func testActiveProxyIsNilWhenTheChosenPeerDisappears() async {
+        let (manager, store, fake) = makeManager()
+        manager.startDiscovery()
+        fake.emit([proxy("personal-mac")])
+        await yieldUntil { manager.discovered.count == 1 }
+        store.setActiveProxy(name: "personal-mac")
+        XCTAssertNotNil(manager.activeProxy)
+
+        fake.emit([proxy("laptop")])
+        await yieldUntil { manager.discovered.map(\.name) == ["laptop"] }
+        XCTAssertNil(manager.activeProxy, "the selection is kept but does not resolve while offline")
+        XCTAssertEqual(store.config.settings.activeProxyName, "personal-mac")
+    }
+
+    func testActiveProxyIsNilWithoutASelection() async {
+        let (manager, _, fake) = makeManager()
+        manager.startDiscovery()
+        fake.emit([proxy("personal-mac")])
+        await yieldUntil { manager.discovered.count == 1 }
+
+        XCTAssertNil(manager.activeProxy)
+    }
+
+    func testStopDiscoveryClearsTheListAndStopsTheBrowser() async {
+        let (manager, _, fake) = makeManager()
+        manager.startDiscovery()
+        fake.emit([proxy("personal-mac")])
+        await yieldUntil { manager.discovered.count == 1 }
+
+        manager.stopDiscovery()
+
+        XCTAssertTrue(manager.discovered.isEmpty)
+        XCTAssertEqual(fake.stopCount, 1)
+    }
+
+    func testDisabledDiscoveryNeverStartsTheBrowser() {
+        let (manager, _, fake) = makeManager()
+        // proxyDiscoveryEnabled defaults to false → start() must not open a browse stream at all
+        // (no Local Network prompt, no mDNS chatter for users who don't use the feature).
+        manager.start()
+
+        XCTAssertEqual(fake.resultsCallCount, 0)
+        XCTAssertTrue(manager.discovered.isEmpty)
+    }
+
+    func testStartDiscoveryIsIdempotent() {
+        let (manager, _, fake) = makeManager()
+        manager.startDiscovery()
+        manager.startDiscovery()
+
+        XCTAssertEqual(fake.resultsCallCount, 1, "a second call must not open a second browser")
+    }
+
+    func testSwitchingToADifferentPeerDropsTheStaleUsername() async {
+        let (manager, store, fake) = makeManager()
+        manager.startDiscovery()
+        fake.emit([proxy("personal-mac", auth: true), proxy("laptop", auth: true)])
+        await yieldUntil { manager.discovered.count == 2 }
+
+        manager.setActiveProxy(proxy("personal-mac", auth: true))
+        manager.setClientCredentials(username: "dev", password: "s3cret", for: "personal-mac")
+        XCTAssertEqual(store.config.settings.activeProxyUsername, "dev")
+
+        manager.setActiveProxy(proxy("laptop", auth: true))
+        XCTAssertNil(store.config.settings.activeProxyUsername,
+                     "credentials are per-peer — reusing another host's login would just fail")
+    }
+
+    func testActiveProxyNeedsCredentialsOnlyForAuthPeersWithoutStoredLogin() async {
+        let credentials = FakeProxyCredentialStore()
+        // `store` must stay bound: ProxyManager holds it weakly (AppDelegate owns it in the app).
+        let (manager, store, fake) = makeManager(credentials: credentials)
+        manager.startDiscovery()
+        fake.emit([proxy("open-mac"), proxy("locked-mac", auth: true)])
+        await yieldUntil { manager.discovered.count == 2 }
+
+        manager.setActiveProxy(proxy("open-mac"))
+        XCTAssertFalse(manager.activeProxyNeedsCredentials, "an open proxy needs nothing")
+
+        manager.setActiveProxy(proxy("locked-mac", auth: true))
+        XCTAssertTrue(manager.activeProxyNeedsCredentials)
+
+        manager.setClientCredentials(username: "dev", password: "s3cret", for: "locked-mac")
+        XCTAssertFalse(manager.activeProxyNeedsCredentials)
+        XCTAssertEqual(store.config.settings.activeProxyUsername, "dev", "the username is persisted…")
+        XCTAssertEqual(credentials.password(for: ProxyCredentialAccount.client("locked-mac")), "s3cret",
+                       "…and the password goes to the credential store, not the config")
+    }
+}

@@ -140,8 +140,9 @@ final class ConfigCodecTests: XCTestCase {
         XCTAssertEqual(minimal.commands.first?.watchdogEnabled, false)
         XCTAssertNil(minimal.commands.first?.port)
 
-        // nil port stays absent from the JSON (hand-edit friendly).
-        let encoded = try ConfigCodec.encode(Config(commands: [Command(name: "a", command: "echo")]))
+        // nil port stays absent from the command's JSON (hand-edit friendly). Encoded standalone:
+        // the config root also carries `proxy.port`, which is a different key of the same name.
+        let encoded = try JSONEncoder().encode(Command(name: "a", command: "echo"))
         XCTAssertFalse(String(data: encoded, encoding: .utf8)!.contains("\"port\""))
     }
 

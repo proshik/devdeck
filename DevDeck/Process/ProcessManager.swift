@@ -49,6 +49,9 @@ final class ProcessManager {
     /// Code for a chain command missing from the map.
     static let missingCommandCode: Int32 = -2
 
+    /// Code for a `routeThroughProxy` command that couldn't resolve a proxy.
+    static let proxyUnavailableCode: Int32 = -3
+
     /// Watchdog phase of a daemon (drives the shield button in the popover).
     enum WatchdogPhase: Equatable {
         case armed                      // watching a live daemon
@@ -162,6 +165,11 @@ final class ProcessManager {
     // MARK: cluster health (colima + minikube)
     @ObservationIgnored private let clusterProbe: any ClusterHealthProbing
     @ObservationIgnored var isClusterHealthEnabled: () -> Bool
+
+    // MARK: proxy routing
+    /// Resolves whether a command must be launched through the LAN proxy. Injected by `AppDelegate`
+    /// (a closure, not a type dependency — `ProcessManager` stays unaware of `ProxyManager`).
+    @ObservationIgnored var proxyRouting: (Command) -> ProxyRouting = { _ in .notRouted }
     /// Last cluster-health snapshot for the popover; refreshed while the popover is open.
     private(set) var cachedClusterHealth: ClusterHealth?
 
@@ -276,6 +284,27 @@ final class ProcessManager {
             return nil
         }
 
+        // Proxy routing: a flagged command must egress through the LAN proxy. If none resolves,
+        // fail LOUDLY — launching it directly would leak the traffic past the VPN, which is exactly
+        // what the flag exists to prevent. Applied here, the single `runner.start` call site, so
+        // zsh/sudo/terminal runs are all covered (they each read `command.env`).
+        var effective = command
+        if command.routeThroughProxy {
+            switch proxyRouting(command) {
+            case .unavailable:
+                logs[command.id] = RingBuffer(capacity: maxLogLines)
+                appendLog(command.id, L10n.proxyUnavailable, .stderr)
+                states[command.id] = .failed(code: Self.proxyUnavailableCode)
+                DiagnosticLog.shared.log("Proxy unavailable — “\(command.name)” not started", level: .error)
+                notifier.post(.proxyUnavailable(name: command.name))
+                return nil
+            case .routed(let env):
+                effective.env.merge(env) { _, new in new }
+            case .notRouted:
+                break
+            }
+        }
+
         if command.isDaemon {
             lastStarted[command.id] = command
             if command.watchdogEnabled {
@@ -309,7 +338,7 @@ final class ProcessManager {
         logs[command.id] = RingBuffer(capacity: maxLogLines)
         states[command.id] = .running
 
-        let handle = runner.start(command)
+        let handle = runner.start(effective)
         active[command.id] = handle
 
         let token = handle.token

@@ -31,6 +31,8 @@ badge, per-build peak RSS, compressor, OOM/crate detection, `-j` advisory — 20
 **Tier 2 (minikube from inside the VM + OOM detection, 2026-06-11)**. Closed 2026-06-20: the
 **live swap-rate display** (popover line "Swap rate X MB/s", gated to active thrashing) and the
 **`-j` advisory grounded in live colima cpus/limit** (`colima list --json`, fallback to defaults).
+**Proxy Manager** (share a VPN egress over Bonjour, discover it on the other Mac, route flagged
+commands through it) — implemented 2026-07-25, config schema 2. See the section below.
 
 ---
 
@@ -229,6 +231,62 @@ it **cannot see** individual `rustc` processes, their count, or the current crat
 - [x] On exit, detect OOM-kill and highlight the crate (`detectOOM`, `signal: 9` / `could not compile`).
 - [x] The build ceiling is known via Tier 2 (`minikube --memory` pinned there).
   Implementation plan: `docs/superpowers/plans/2026-06-14-tier1-host-memory-monitoring.md`.
+
+---
+
+## Proxy Manager (share + discover + route) — ✅ DONE 2026-07-25
+
+Two Macs on one Wi-Fi: the personal one has a VPN, the work one doesn't but needs to run Claude Code
+through it. Replaces the manual `gost -L :9999` + `export HTTPS_PROXY=http://<ip>:9999` dance, whose
+pain points were a constantly changing IP, gost dying unsupervised, and not wanting to touch the
+system proxy. Full design: `docs/proxy-manager-plan.md`.
+
+Deliberately thin — it reuses the existing engines rather than adding new ones:
+
+- **Share (host):** `ProxyShare.toCommand` builds a synthetic daemon `Command` (stable
+  `ProxyShare.daemonID`) that goes through the ordinary daemon path — watchdog auto-restart, orphan
+  adoption, occupied-port panel. Zero new supervision code.
+- **Announce:** `LiveProxyAdvertiser` (`NetService`, publish-only — `NWListener` would bind a second
+  socket) publishes host/port/`auth`/`vpnip` in a TXT record. Driven by the LISTENER's run state via
+  `withObservationTracking`, so watchdog restarts re-announce by themselves and a dead gost is never
+  advertised as reachable. Exit IP is resolved best-effort through the proxy itself, proving the
+  tunnel is live.
+- **Discover (client):** `LiveProxyDiscovery` (`NWBrowser`, push-based, no polling) over
+  `_devdeck-proxy._tcp`; host/port come straight from TXT (both ends are ours), so no per-result
+  `NWConnection` resolution.
+- **Route:** `Command.routeThroughProxy` + `ProcessManager.proxyRouting` (a closure injected in
+  `AppDelegate` — `ProcessManager` never learns `ProxyManager` exists). Applied at the single
+  `runner.start` call site in `startRun`, so zsh/sudo/terminal runs are all covered. No usable
+  proxy → `.failed(proxyUnavailableCode)` + notification; **never** a silent direct connection.
+- **Secrets:** passwords only in the Keychain (`KeychainProxyCredentialStore`), usernames in
+  config.json, and no password key is ever announced in TXT (asserted by a test).
+
+Two things that were genuinely delicate, both covered by tests:
+
+- **LAN address choice** (`pickLANIPv4`): the sharing Mac holds a full-tunnel VPN, so `utun*`
+  addresses are always present. Announcing one would look like working discovery while every peer
+  times out. Only `en*` qualifies; `utun*`/`lo0`/`awdl*`/`llw*`/`bridge*` and self-assigned
+  169.254.x are excluded, ties broken in natural interface order.
+- **Local Network permission:** `NSLocalNetworkUsageDescription` + `NSBonjourServices` in
+  `Info.plist`. Without them macOS 15 returns nothing and publishes nothing, with no prompt and no
+  error — `ProxyBonjourPermissionsTests` guards the keys.
+
+Config schema went 1 → 2 (`proxy` block, four proxy settings, `routeThroughProxy`). Old files load
+unchanged: the decode is resilient key-by-key (`decodeIfPresent ?? default`), not migration-based.
+
+Known limitations, accepted for now:
+
+- The password appears in gost's `argv` (visible in `ps`). It is absent from config.json and from
+  the log (which keys off `command.name`). A gost config-file mode would fix it — deferred.
+- `runChainInTerminal` calls `runner.start` directly, bypassing `startRun`, so
+  "whole-chain-in-one-tab" does not get proxy env. Single terminal commands and step-by-step chains
+  are covered.
+- Bonjour needs a network without client isolation (guest Wi-Fi usually blocks it) — but such a
+  network wouldn't pass the proxy traffic either.
+
+Future work: a built-in Swift/`Network.framework` proxy instead of managing `gost`, which would drop
+the Homebrew dependency and the `ps` password exposure. Also deferred: multiple simultaneous shares,
+SOCKS-only/PAC, per-client ACLs and credential rotation.
 
 ---
 

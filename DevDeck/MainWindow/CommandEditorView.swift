@@ -6,6 +6,7 @@ struct CommandEditorView: View {
     @Environment(CommandStore.self) private var store
     @Environment(AppModel.self) private var appModel
     @Environment(ProcessManager.self) private var manager
+    @Environment(ProxyManager.self) private var proxy
 
     let command: Command
 
@@ -47,6 +48,20 @@ struct CommandEditorView: View {
                     Toggle(L10n.watchdogToggle, isOn: $draft.watchdogEnabled)
                 }
                 Toggle(L10n.needsSudoToggle, isOn: $draft.needsSudo)
+                Toggle(L10n.routeThroughProxyToggle, isOn: $draft.routeThroughProxy)
+                if draft.routeThroughProxy {
+                    // Spell out which proxy will be used — and warn when there is none, because
+                    // the run FAILS rather than quietly going direct.
+                    if let active = proxy.activeProxy {
+                        Text(L10n.proxyRoutedVia(active.name))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text(L10n.proxyNoActiveHint)
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                    }
+                }
                 Toggle(L10n.openInTerminalToggle, isOn: $draft.openInTerminal)
                 if draft.openInTerminal {
                     Picker(L10n.terminalModePicker, selection: $terminalMode) {

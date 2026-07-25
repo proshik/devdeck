@@ -24,6 +24,14 @@
 	<true/>
 	<key>NSHumanReadableCopyright</key>
 	<string>© 2026 Prokhor Krylov</string>
+	<!-- Proxy Manager: without BOTH keys macOS 15 silently returns no Bonjour results
+	     and refuses to publish, with no prompt and no error. -->
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>DevDeck finds proxies shared by your other Macs on this network, and announces its own, so commands can be routed through them without copying IP addresses by hand.</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_devdeck-proxy._tcp</string>
+	</array>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
 	<key>SUFeedURL</key>

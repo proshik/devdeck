@@ -26,6 +26,9 @@ struct Command: Codable, Identifiable, Hashable {
     var watchdogEnabled: Bool
     /// Local TCP port the daemon listens on (port-forward) — enables the occupied-port check.
     var port: Int?
+    /// Route this command's traffic through the active LAN proxy (`HTTPS_PROXY` & co injected at launch).
+    /// With no active proxy the run FAILS explicitly — never silently direct.
+    var routeThroughProxy: Bool
 
     init(
         id: UUID = UUID(),
@@ -38,7 +41,8 @@ struct Command: Codable, Identifiable, Hashable {
         appsToQuit: [AppRef] = [],
         openInTerminal: Bool = false,
         watchdogEnabled: Bool = false,
-        port: Int? = nil
+        port: Int? = nil,
+        routeThroughProxy: Bool = false
     ) {
         self.id = id
         self.name = name
@@ -51,11 +55,12 @@ struct Command: Codable, Identifiable, Hashable {
         self.openInTerminal = openInTerminal
         self.watchdogEnabled = watchdogEnabled
         self.port = port
+        self.routeThroughProxy = routeThroughProxy
     }
 
     enum CodingKeys: String, CodingKey {
         case id, name, command, workingDirectory, isDaemon, needsSudo, env, appsToQuit, openInTerminal,
-             watchdogEnabled, port
+             watchdogEnabled, port, routeThroughProxy
     }
 
     init(from decoder: Decoder) throws {
@@ -71,5 +76,6 @@ struct Command: Codable, Identifiable, Hashable {
         openInTerminal = try c.decodeIfPresent(Bool.self, forKey: .openInTerminal) ?? false
         watchdogEnabled = try c.decodeIfPresent(Bool.self, forKey: .watchdogEnabled) ?? false
         port = try c.decodeIfPresent(Int.self, forKey: .port)
+        routeThroughProxy = try c.decodeIfPresent(Bool.self, forKey: .routeThroughProxy) ?? false
     }
 }
