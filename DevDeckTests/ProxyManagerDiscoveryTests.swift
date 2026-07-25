@@ -75,7 +75,11 @@ final class ProxyManagerDiscoveryTests: XCTestCase {
         await yieldUntil { manager.activeProxy?.host == "192.168.1.77" }
     }
 
-    func testActiveProxyIsNilWhenTheChosenPeerDisappears() async {
+    /// The shape of a config written by 0.5.0: a selection with no cached endpoint next to it.
+    /// The selection is made through the STORE on purpose — that is what an upgraded config looks
+    /// like, whereas `ProxyManager.setActiveProxy` (every path in the app) now also caches the
+    /// address, and then the proxy keeps resolving offline (see the fallback tests below).
+    func testSelectionWithoutACachedEndpointDoesNotResolveOffline() async {
         let (manager, store, fake) = makeManager()
         manager.startDiscovery()
         fake.emit([proxy("personal-mac")])
@@ -85,8 +89,8 @@ final class ProxyManagerDiscoveryTests: XCTestCase {
 
         fake.emit([proxy("laptop")])
         await yieldUntil { manager.discovered.map(\.name) == ["laptop"] }
-        XCTAssertNil(manager.activeProxy, "the selection is kept but does not resolve while offline")
-        XCTAssertEqual(store.config.settings.activeProxyName, "personal-mac")
+        XCTAssertNil(manager.activeProxy, "nothing cached to fall back to — the name alone resolves nothing")
+        XCTAssertEqual(store.config.settings.activeProxyName, "personal-mac", "but the choice is kept")
     }
 
     func testActiveProxyIsNilWithoutASelection() async {
@@ -128,19 +132,25 @@ final class ProxyManagerDiscoveryTests: XCTestCase {
         XCTAssertEqual(fake.resultsCallCount, 1, "a second call must not open a second browser")
     }
 
-    func testSwitchingToADifferentPeerDropsTheStaleUsername() async {
+    func testSwitchingToADifferentPeerReplacesTheStaleUsernameAndEndpoint() async {
+        let a = proxy("personal-mac", host: "192.168.1.42", port: 9999, auth: true)
+        let b = proxy("laptop", host: "192.168.1.50", port: 8888, auth: true)
         let (manager, store, fake) = makeManager()
         manager.startDiscovery()
-        fake.emit([proxy("personal-mac", auth: true), proxy("laptop", auth: true)])
+        fake.emit([a, b])
         await yieldUntil { manager.discovered.count == 2 }
 
-        manager.setActiveProxy(proxy("personal-mac", auth: true))
+        manager.setActiveProxy(a)
         manager.setClientCredentials(username: "dev", password: "s3cret", for: "personal-mac")
         XCTAssertEqual(store.config.settings.activeProxyUsername, "dev")
 
-        manager.setActiveProxy(proxy("laptop", auth: true))
+        manager.setActiveProxy(b)
+
         XCTAssertNil(store.config.settings.activeProxyUsername,
                      "credentials are per-peer — reusing another host's login would just fail")
+        // One endpoint belongs to the CURRENT choice; keeping A's would route to the wrong Mac.
+        XCTAssertEqual(store.config.settings.activeProxyHost, "192.168.1.50")
+        XCTAssertEqual(store.config.settings.activeProxyPort, 8888)
     }
 
     func testActiveProxyNeedsCredentialsOnlyForAuthPeersWithoutStoredLogin() async {
