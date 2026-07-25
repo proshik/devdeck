@@ -29,6 +29,10 @@ struct Command: Codable, Identifiable, Hashable {
     /// Route this command's traffic through the active LAN proxy (`HTTPS_PROXY` & co injected at launch).
     /// With no active proxy the run FAILS explicitly — never silently direct.
     var routeThroughProxy: Bool
+    /// Ask for a working directory each time this command is launched from the deck, instead of
+    /// storing one. Lets a single "claude" command serve every project. Direct runs only —
+    /// a chain step has no UI to ask from and uses its own `workingDirectory`.
+    var promptForDirectory: Bool
 
     init(
         id: UUID = UUID(),
@@ -42,7 +46,8 @@ struct Command: Codable, Identifiable, Hashable {
         openInTerminal: Bool = false,
         watchdogEnabled: Bool = false,
         port: Int? = nil,
-        routeThroughProxy: Bool = false
+        routeThroughProxy: Bool = false,
+        promptForDirectory: Bool = false
     ) {
         self.id = id
         self.name = name
@@ -56,11 +61,12 @@ struct Command: Codable, Identifiable, Hashable {
         self.watchdogEnabled = watchdogEnabled
         self.port = port
         self.routeThroughProxy = routeThroughProxy
+        self.promptForDirectory = promptForDirectory
     }
 
     enum CodingKeys: String, CodingKey {
         case id, name, command, workingDirectory, isDaemon, needsSudo, env, appsToQuit, openInTerminal,
-             watchdogEnabled, port, routeThroughProxy
+             watchdogEnabled, port, routeThroughProxy, promptForDirectory
     }
 
     init(from decoder: Decoder) throws {
@@ -77,5 +83,15 @@ struct Command: Codable, Identifiable, Hashable {
         watchdogEnabled = try c.decodeIfPresent(Bool.self, forKey: .watchdogEnabled) ?? false
         port = try c.decodeIfPresent(Int.self, forKey: .port)
         routeThroughProxy = try c.decodeIfPresent(Bool.self, forKey: .routeThroughProxy) ?? false
+        promptForDirectory = try c.decodeIfPresent(Bool.self, forKey: .promptForDirectory) ?? false
+    }
+
+    /// A copy bound to a directory chosen at launch time. `nil`/empty returns an unchanged copy so
+    /// the caller doesn't branch. Never persisted — the stored command keeps its own value.
+    func withWorkingDirectory(_ path: String?) -> Command {
+        guard let path, !path.isEmpty else { return self }
+        var copy = self
+        copy.workingDirectory = path
+        return copy
     }
 }
