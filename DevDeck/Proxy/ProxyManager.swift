@@ -259,7 +259,21 @@ final class ProxyManager {
     var activeProxy: DiscoveredProxy? {
         guard let settings = store?.config.settings, let name = settings.activeProxyName else { return nil }
         if let live = discovered.first(where: { $0.name == name }) { return live }
-        guard let host = settings.activeProxyHost, let port = settings.activeProxyPort else { return nil }
+        return rememberedProxy(named: name, settings: settings)
+    }
+
+    /// Rebuild the active proxy from the cached endpoint. Deliberately narrow — it resolves only when
+    /// every condition below holds, and stays silent (nil → `.unavailable`) otherwise:
+    ///
+    /// - **discovery is on.** Switching it off is the user saying "stop using LAN proxies"; a
+    ///   remembered address must not keep routing behind their back. This is the only path that
+    ///   could still resolve then, since `stopDiscovery()` empties `discovered`.
+    /// - **the endpoint is usable.** `config.json` is hand-editable, so mirror the wire parser's
+    ///   guard rather than building `http://host:0`.
+    private func rememberedProxy(named name: String, settings: Settings) -> DiscoveredProxy? {
+        guard settings.proxyDiscoveryEnabled else { return nil }
+        guard let host = settings.activeProxyHost, !host.isEmpty,
+              let port = settings.activeProxyPort, port > 0 else { return nil }
         return DiscoveredProxy(name: name, host: host, port: port,
                                authRequired: settings.activeProxyAuthRequired,
                                exitIP: nil, proto: "http+socks", schema: proxyTXTSchemaVersion,
