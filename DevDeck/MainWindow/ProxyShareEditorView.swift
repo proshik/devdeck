@@ -144,7 +144,8 @@ struct ProxyShareEditorView: View {
         } label: {
             HStack(spacing: 8) {
                 Image(systemName: isActive ? "largecircle.fill.circle" : "circle")
-                    .foregroundStyle(isActive ? Color.accentColor : Color.secondary)
+                    .foregroundStyle(isActive ? (found.isLive ? Color.accentColor : Color.secondary)
+                                              : Color.secondary)
                 VStack(alignment: .leading, spacing: 1) {
                     HStack(spacing: 5) {
                         Text(found.name)
