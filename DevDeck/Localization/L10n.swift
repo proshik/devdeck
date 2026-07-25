@@ -333,6 +333,10 @@ enum L10n {
     static var proxyPort: String { t("Port", "Порт") }
     static var proxySearching: String { t("Searching…", "Идёт поиск…") }
     static var proxyNoneFound: String { t("No proxies found yet", "Прокси пока не найдены") }
+    static var proxyLastKnownAddress: String {
+        t("Last known address — not announced right now",
+          "Последний известный адрес — сейчас не анонсируется")
+    }
     static var gostNotFound: String {
         t("gost not found (install it: brew install gost)", "gost не найден (установите: brew install gost)")
     }
