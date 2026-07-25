@@ -9,6 +9,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let manager: ProcessManager
     let appModel = AppModel()
     let updateController = UpdateController()
+    let proxyManager = ProxyManager()
 
     private var menuBar: MenuBarController?
 
@@ -30,9 +31,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         manager.isMinikubeMonitoringEnabled = { [weak store] in store?.config.settings.minikubeMemoryMonitoring ?? false }
         manager.isHostMonitoringEnabled = { [weak store] in store?.config.settings.hostMemoryMonitoring ?? false }
         manager.isClusterHealthEnabled = { [weak store] in store?.config.settings.clusterHealthMonitoring ?? false }
+        // Proxy Manager: shares this machine's VPN egress and routes flagged commands through a peer's.
+        // The routing hook is a closure so ProcessManager keeps no dependency on ProxyManager.
+        let proxyManager = self.proxyManager
+        proxyManager.store = store
+        proxyManager.processManager = manager
+        manager.proxyRouting = { [weak proxyManager] command in
+            proxyManager?.routing(for: command) ?? .notRouted
+        }
+        proxyManager.start()
         // Start Sparkle with the persisted auto-update preference; populates the indicator when off.
         updateController.configure(autoUpdateEnabled: store.config.settings.autoUpdateEnabled)
-        menuBar = MenuBarController(store: store, manager: manager, appModel: appModel, updateController: updateController)
+        menuBar = MenuBarController(store: store, manager: manager, appModel: appModel,
+                                    updateController: updateController, proxyManager: proxyManager)
 
         // Global hotkey (⌃⌥D) toggles the popover; enabled per the persisted setting.
         HotKeyManager.shared.onTrigger = { [weak menuBar] in menuBar?.toggle() }

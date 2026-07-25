@@ -54,6 +54,10 @@ final class LiveNotifier: Notifier {
             content.title = L10n.notifWatchdogGaveUp
             content.body = name
             content.sound = .default
+        case .proxyUnavailable(let name):
+            content.title = L10n.notifProxyUnavailable
+            content.body = name
+            content.sound = .default
         }
 
         let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
