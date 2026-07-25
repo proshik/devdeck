@@ -113,10 +113,10 @@ struct ProxyShareEditorView: View {
 
             if !store.config.settings.proxyDiscoveryEnabled {
                 Text(L10n.proxyNoActiveHint).font(.caption).foregroundStyle(.secondary)
-            } else if proxy.discovered.isEmpty {
+            } else if proxy.visibleProxies.isEmpty {
                 Text(L10n.proxySearching).font(.caption).foregroundStyle(.secondary)
             } else {
-                ForEach(proxy.discovered) { found in
+                ForEach(proxy.visibleProxies) { found in
                     discoveredRow(found)
                 }
             }
@@ -165,6 +165,9 @@ struct ProxyShareEditorView: View {
     }
 
     private func detail(for found: DiscoveredProxy) -> String {
+        guard found.isLive else {
+            return "\(L10n.proxyEndpoint(found.host, found.port)) · \(L10n.proxyLastKnownAddress)"
+        }
         var parts = [L10n.proxyEndpoint(found.host, found.port), found.proto]
         if let exitIP = found.exitIP { parts.append("\(L10n.proxyExitIP) \(exitIP)") }
         return parts.joined(separator: " · ")
