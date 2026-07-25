@@ -35,7 +35,7 @@ struct ProxySectionView: View {
     }
 
     private var rowCount: Int {
-        (shareEnabled ? 1 : 0) + (discoveryEnabled ? proxy.discovered.count : 0)
+        (shareEnabled ? 1 : 0) + (discoveryEnabled ? proxy.visibleProxies.count : 0)
     }
 
     /// Green counter when this deck is actively sharing or has a live active proxy.
@@ -84,11 +84,14 @@ struct ProxySectionView: View {
 
     @ViewBuilder
     private var discoveryRows: some View {
-        if proxy.discovered.isEmpty {
+        if proxy.visibleProxies.isEmpty {
             proxyNote(L10n.proxyNoneFound, icon: "antenna.radiowaves.left.and.right", color: .secondary)
         } else {
-            ForEach(proxy.discovered) { found in
+            ForEach(proxy.visibleProxies) { found in
                 discoveredRow(found)
+                if !found.isLive {
+                    proxyNote(L10n.proxyLastKnownAddress, icon: "clock.arrow.circlepath", color: .secondary)
+                }
             }
         }
     }
@@ -102,7 +105,8 @@ struct ProxySectionView: View {
             HStack(spacing: 8) {
                 Image(systemName: isActive ? "largecircle.fill.circle" : "circle")
                     .font(.system(size: 11))
-                    .foregroundStyle(isActive ? Color.accentColor : Color.secondary)
+                    .foregroundStyle(isActive ? (found.isLive ? Color.accentColor : Color.secondary)
+                                              : Color.secondary)
                     .frame(width: 14)
                 Text(found.name).lineLimit(1).truncationMode(.tail)
                 if found.authRequired {
