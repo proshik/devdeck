@@ -20,15 +20,31 @@ final class ProxyManagerRoutingResolutionTests: XCTestCase {
         try? FileManager.default.removeItem(at: dir)
     }
 
+    /// Discovery is turned on as every app path that starts browsing does — the remembered endpoint
+    /// only resolves while it is.
     private func makeManager(credentials: FakeProxyCredentialStore = FakeProxyCredentialStore())
     -> (ProxyManager, CommandStore, FakeProxyDiscovering) {
         let store = CommandStore(configURL: url)
+        store.setProxyDiscoveryEnabled(true)
         let discovering = FakeProxyDiscovering()
         let manager = ProxyManager(discovering: discovering,
                                    advertiser: FakeProxyAdvertising(),
                                    credentials: credentials)
         manager.store = store
         return (manager, store, discovering)
+    }
+
+    /// Same as `makeManager`, but retains the store for the whole test — `ProxyManager.store` is
+    /// weak (AppDelegate owns it in the app), so a dropped binding would silently deallocate it and
+    /// surface later as an unrelated assertion failure.
+    private var retainedStore: CommandStore?
+
+    private func makeManagerKeepingStore(
+        credentials: FakeProxyCredentialStore = FakeProxyCredentialStore()
+    ) -> (ProxyManager, CommandStore, FakeProxyDiscovering) {
+        let made = makeManager(credentials: credentials)
+        retainedStore = made.1
+        return made
     }
 
     private func flagged() -> Command {
@@ -118,6 +134,38 @@ final class ProxyManagerRoutingResolutionTests: XCTestCase {
         XCTAssertEqual(manager.routing(for: flagged()),
                        .routed(env: proxyEnv(host: "192.168.31.117", port: 9999, user: nil, pass: nil)))
         _ = store
+    }
+
+    func testDisablingDiscoveryStopsRoutingThroughTheRememberedEndpoint() async {
+        let (manager, _, fake) = makeManagerKeepingStore()
+        manager.startDiscovery()
+        fake.emit([DiscoveredProxy(name: "personal-mac", host: "192.168.31.117", port: 9999,
+                                  authRequired: false, exitIP: nil, proto: "http+socks", schema: 1)])
+        await yieldUntil { manager.discovered.count == 1 }
+        manager.setActiveProxy(manager.discovered[0])
+
+        fake.emit([])   // the announcement is gone; the remembered endpoint carries the routing
+        await yieldUntil { manager.discovered.isEmpty }
+        XCTAssertEqual(manager.routing(for: flagged()),
+                       .routed(env: proxyEnv(host: "192.168.31.117", port: 9999, user: nil, pass: nil)))
+
+        manager.setDiscoveryEnabled(false)
+
+        XCTAssertNil(manager.activeProxy, "the UI says “no active proxy” — routing must agree")
+        XCTAssertEqual(manager.routing(for: flagged()), .unavailable,
+                       "switching discovery off must stop routing, not keep a remembered proxy alive")
+    }
+
+    func testHandEditedNonsenseEndpointIsNotUsed() {
+        let (manager, store, _) = makeManagerKeepingStore()
+        store.setActiveProxy(name: "personal-mac")
+
+        // config.json is explicitly hand-editable — "http://192.168.31.117:0" is not a proxy.
+        store.rememberActiveProxyEndpoint(host: "192.168.31.117", port: 0, authRequired: false)
+        XCTAssertEqual(manager.routing(for: flagged()), .unavailable, "port 0")
+
+        store.rememberActiveProxyEndpoint(host: "", port: 9999, authRequired: false)
+        XCTAssertEqual(manager.routing(for: flagged()), .unavailable, "empty host")
     }
 
     func testRememberedAuthProxyWithoutCredentialsStaysUnavailable() async {
