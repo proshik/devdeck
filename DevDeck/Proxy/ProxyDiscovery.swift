@@ -2,8 +2,13 @@ import Foundation
 import Network
 
 /// A proxy announced on the LAN by another DevDeck. Ephemeral — rebuilt from Bonjour on every
-/// browse update and never persisted; only the `name` (the Bonjour identity) is remembered in
-/// settings, so the active choice survives the peer's IP changing.
+/// browse update; the struct itself is never persisted.
+///
+/// What DOES cross into `config.json`, for the ACTIVE choice only: `name` (the Bonjour identity, so
+/// the choice survives the peer's IP changing) plus its last known `host`, `port` and `authRequired`
+/// — the remembered endpoint that keeps routing alive when multicast is filtered. That cache is
+/// scoped to the LAN it was learned on (`Settings.activeProxyLANPrefix`) and is cleared when the
+/// proxy is deselected. `exitIP` is never stored: it is cosmetic and only true while the peer is live.
 struct DiscoveredProxy: Equatable, Identifiable, Sendable {
     /// Bonjour service name — the stable identity across IP changes and restarts.
     let name: String

@@ -18,7 +18,12 @@ versioning follows [SemVer](https://semver.org/).
     proxy is never advertised. The announced address is always a physical `en*` interface — never the
     VPN tunnel, which no peer could reach.
   - **Client side**: browses the LAN and lists what it finds; pick one as active by its Bonjour name,
-    so the peer's IP can change freely without reconfiguration.
+    so the peer's IP can change freely without reconfiguration. The active proxy's last known address
+    is remembered, so it keeps working on networks that filter multicast (every corporate VPN) and
+    silence the announcement while the proxy itself stays reachable — the row remains in the list,
+    dimmed, captioned "Last known address — not announced right now". That address is scoped to the
+    LAN it was learned on (never used after moving to another network), ignored while discovery is
+    off, and cleared when the proxy is deselected.
   - **Routing**: a new "Route through the LAN proxy" flag per command injects `HTTPS_PROXY` & co
     (both cases, plus `ALL_PROXY`/`NO_PROXY`) into that process only. With no usable proxy the run
     fails explicitly instead of silently going direct — the flag exists to prevent exactly that leak.
