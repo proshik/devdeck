@@ -146,6 +146,15 @@ final class ConfigCodecTests: XCTestCase {
         XCTAssertFalse(String(data: encoded, encoding: .utf8)!.contains("\"port\""))
     }
 
+    func testPromptForDirectoryRoundTripsAndDefaultsToFalse() throws {
+        let command = Command(id: UUID(), name: "claude", command: "claude", promptForDirectory: true)
+        let decoded = try ConfigCodec.decode(ConfigCodec.encode(Config(commands: [command])))
+        XCTAssertEqual(decoded.commands.first?.promptForDirectory, true)
+
+        let minimal = try ConfigCodec.decode(Data(#"{ "commands": [ { "name": "x", "command": "echo" } ] }"#.utf8))
+        XCTAssertEqual(minimal.commands.first?.promptForDirectory, false)
+    }
+
     func testDecodeGeneratesIDWhenMissing() throws {
         let json = Data("""
         { "commands": [ { "name": "a", "command": "x" }, { "name": "b", "command": "y" } ] }
