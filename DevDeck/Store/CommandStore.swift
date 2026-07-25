@@ -194,6 +194,43 @@ final class CommandStore {
         persist(updated)
     }
 
+    // MARK: proxy manager
+
+    /// Host side: share this machine's proxy on the LAN.
+    func setProxyShareEnabled(_ on: Bool) {
+        guard config.settings.proxyShareEnabled != on else { return }
+        var updated = config
+        updated.settings.proxyShareEnabled = on
+        persist(updated)
+    }
+
+    /// Client side: browse the LAN for announced proxies.
+    func setProxyDiscoveryEnabled(_ on: Bool) {
+        guard config.settings.proxyDiscoveryEnabled != on else { return }
+        var updated = config
+        updated.settings.proxyDiscoveryEnabled = on
+        persist(updated)
+    }
+
+    /// Pick the active proxy by its Bonjour name (nil — none). The username is persisted next to it;
+    /// the password stays in the Keychain.
+    func setActiveProxy(name: String?, username: String? = nil) {
+        guard config.settings.activeProxyName != name
+                || config.settings.activeProxyUsername != username else { return }
+        var updated = config
+        updated.settings.activeProxyName = name
+        updated.settings.activeProxyUsername = username
+        persist(updated)
+    }
+
+    /// Save the host-side share config (port / auth / username / service name).
+    func upsertProxyShare(_ share: ProxyShare) {
+        guard config.proxy != share else { return }
+        var updated = config
+        updated.proxy = share
+        persist(updated)
+    }
+
     /// Save; a write failure goes into `error` (the UI shows a banner) instead of throwing out.
     private func persist(_ newConfig: Config) {
         do {

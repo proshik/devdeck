@@ -67,6 +67,9 @@ struct PopoverView: View {
                             ForEach(store.config.chains) { chainRow($0) }
                         }
                     }
+
+                    // Renders itself only when sharing or discovery is switched on.
+                    ProxySectionView()
                 }
                 .padding(.vertical, 4)
             }

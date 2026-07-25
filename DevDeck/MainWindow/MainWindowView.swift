@@ -37,8 +37,11 @@ struct MainWindowView: View {
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 VStack(spacing: 0) {
                     Divider()
-                    settingsButton(selected: appModel.selection == .settings)
-                        .padding(8)
+                    VStack(spacing: 2) {
+                        pinnedButton(L10n.proxy, icon: "network", selection: .proxy)
+                        pinnedButton(L10n.settings, icon: "gearshape", selection: .settings)
+                    }
+                    .padding(8)
                 }
                 .background(.bar)
             }
@@ -74,6 +77,8 @@ struct MainWindowView: View {
             }
         case .settings:
             SettingsView()
+        case .proxy:
+            ProxyShareEditorView(share: store.config.proxy)
         case nil:
             placeholder
         }
@@ -93,12 +98,13 @@ struct MainWindowView: View {
             .tag(MainSelection.command(command.id))
     }
 
-    /// Pinned Settings entry styled to mimic a selected sidebar row.
-    private func settingsButton(selected: Bool) -> some View {
-        Button {
-            appModel.selection = .settings
+    /// Pinned sidebar entry (Proxy / Settings) styled to mimic a selected sidebar row.
+    private func pinnedButton(_ title: String, icon: String, selection: MainSelection) -> some View {
+        let selected = appModel.selection == selection
+        return Button {
+            appModel.selection = selection
         } label: {
-            Label(L10n.settings, systemImage: "gearshape")
+            Label(title, systemImage: icon)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.vertical, 5)
                 .padding(.horizontal, 8)

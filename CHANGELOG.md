@@ -7,6 +7,22 @@ versioning follows [SemVer](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Proxy Manager** — share one Mac's VPN egress with another over the LAN, without copying IP
+  addresses by hand or touching the system proxy:
+  - **Share side**: supervises a `gost` listener (HTTP+SOCKS on one port) as a synthetic daemon, so
+    it inherits the existing engine — watchdog auto-restart, orphan adoption, occupied-port panel.
+    Optional `user:pass`; the password lives in the Keychain, never in config.json.
+  - **Announcement**: published over Bonjour (`_devdeck-proxy._tcp`) with a TXT record carrying
+    host/port/auth and the VPN exit IP (resolved through the proxy itself, proving the tunnel is
+    live). Driven by the listener's state, so watchdog restarts re-announce automatically and a dead
+    proxy is never advertised. The announced address is always a physical `en*` interface — never the
+    VPN tunnel, which no peer could reach.
+  - **Client side**: browses the LAN and lists what it finds; pick one as active by its Bonjour name,
+    so the peer's IP can change freely without reconfiguration.
+  - **Routing**: a new "Route through the LAN proxy" flag per command injects `HTTPS_PROXY` & co
+    (both cases, plus `ALL_PROXY`/`NO_PROXY`) into that process only. With no usable proxy the run
+    fails explicitly instead of silently going direct — the flag exists to prevent exactly that leak.
+  - New "Proxy" page in the main window, a Proxy section in the popover, and two toggles in Settings.
 - **Daemon watchdog (auto-restart)**: a shield toggle on daemon rows in the popover — starts the
   daemon and restarts it automatically if it dies (3 attempts with 2/3/5 s pauses; a stable run
   resets the counter; give-up turns the shield red + notification). The flag persists in
@@ -26,8 +42,10 @@ versioning follows [SemVer](https://semver.org/).
 
 ### Changed
 - Main window sidebar: Settings is pinned to the bottom (always visible, separated by a divider)
-  instead of scrolling at the end of the commands/daemons/chains list.
+  instead of scrolling at the end of the commands/daemons/chains list; "Proxy" is pinned next to it.
 - Taller, slightly narrower menu bar popover (360×560 → 380×675).
+- Config schema 1 → 2 (`proxy` block, proxy settings, `routeThroughProxy`). Existing files load
+  unchanged — every new key decodes to its default rather than going through a migration.
 
 ### Fixed
 - Define the `AccentColor` asset so control on-states (Settings toggles) are visible in dark mode.
