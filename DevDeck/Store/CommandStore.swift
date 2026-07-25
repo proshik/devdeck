@@ -226,21 +226,26 @@ final class CommandStore {
             updated.settings.activeProxyHost = nil
             updated.settings.activeProxyPort = nil
             updated.settings.activeProxyAuthRequired = false
+            updated.settings.activeProxyLANPrefix = nil
         }
         persist(updated)
     }
 
     /// Remember where the active proxy was last reachable, so it survives Bonjour going quiet.
+    /// `lanPrefix` is the /24 of THIS machine's LAN at that moment: the address is only usable back
+    /// on the same network, so the scope travels with it.
     /// Guarded: this is called on every browse update, and an unguarded write would hit the disk
     /// several times a second.
-    func rememberActiveProxyEndpoint(host: String, port: Int, authRequired: Bool) {
+    func rememberActiveProxyEndpoint(host: String, port: Int, authRequired: Bool, lanPrefix: String?) {
         guard config.settings.activeProxyHost != host
                 || config.settings.activeProxyPort != port
-                || config.settings.activeProxyAuthRequired != authRequired else { return }
+                || config.settings.activeProxyAuthRequired != authRequired
+                || config.settings.activeProxyLANPrefix != lanPrefix else { return }
         var updated = config
         updated.settings.activeProxyHost = host
         updated.settings.activeProxyPort = port
         updated.settings.activeProxyAuthRequired = authRequired
+        updated.settings.activeProxyLANPrefix = lanPrefix
         persist(updated)
     }
 
