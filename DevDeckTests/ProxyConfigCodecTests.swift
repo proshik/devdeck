@@ -89,12 +89,14 @@ final class ProxyConfigCodecTests: XCTestCase {
         config.settings.activeProxyHost = "192.168.31.117"
         config.settings.activeProxyPort = 9999
         config.settings.activeProxyAuthRequired = true
+        config.settings.activeProxyLANPrefix = "192.168.31"
 
         let decoded = try ConfigCodec.decode(ConfigCodec.encode(config))
 
         XCTAssertEqual(decoded.settings.activeProxyHost, "192.168.31.117")
         XCTAssertEqual(decoded.settings.activeProxyPort, 9999)
         XCTAssertEqual(decoded.settings.activeProxyAuthRequired, true)
+        XCTAssertEqual(decoded.settings.activeProxyLANPrefix, "192.168.31")
     }
 
     func testFileWithoutRememberedEndpointDecodesToDefaults() throws {
@@ -107,6 +109,7 @@ final class ProxyConfigCodecTests: XCTestCase {
         XCTAssertNil(config.settings.activeProxyHost)
         XCTAssertNil(config.settings.activeProxyPort)
         XCTAssertFalse(config.settings.activeProxyAuthRequired)
+        XCTAssertNil(config.settings.activeProxyLANPrefix)
         XCTAssertEqual(config.schemaVersion, 2, "adding optional keys does not bump the schema")
     }
 }

@@ -24,7 +24,8 @@ final class CommandStoreProxyEndpointTests: XCTestCase {
         let store = CommandStore(configURL: url)
         store.setActiveProxy(name: "personal-mac")
 
-        store.rememberActiveProxyEndpoint(host: "192.168.31.117", port: 9999, authRequired: false)
+        store.rememberActiveProxyEndpoint(host: "192.168.31.117", port: 9999, authRequired: false,
+                                          lanPrefix: "192.168.31")
 
         XCTAssertEqual(store.config.settings.activeProxyHost, "192.168.31.117")
         XCTAssertEqual(store.config.settings.activeProxyPort, 9999)
@@ -33,16 +34,20 @@ final class CommandStoreProxyEndpointTests: XCTestCase {
         fresh.reload()
         XCTAssertEqual(fresh.config.settings.activeProxyHost, "192.168.31.117",
                        "survives a restart — that is the whole point")
+        XCTAssertEqual(fresh.config.settings.activeProxyLANPrefix, "192.168.31",
+                       "…together with the LAN it is valid on")
     }
 
     func testRepeatedIdenticalRememberDoesNotRewriteTheFile() throws {
         let store = CommandStore(configURL: url)
-        store.rememberActiveProxyEndpoint(host: "192.168.31.117", port: 9999, authRequired: false)
+        store.rememberActiveProxyEndpoint(host: "192.168.31.117", port: 9999, authRequired: false,
+                                          lanPrefix: "192.168.31")
         let firstWrite = try FileManager.default.attributesOfItem(atPath: url.path)[.modificationDate] as? Date
 
         // Every Bonjour browse update calls this; an unguarded write would hit the disk constantly.
         for _ in 0..<5 {
-            store.rememberActiveProxyEndpoint(host: "192.168.31.117", port: 9999, authRequired: false)
+            store.rememberActiveProxyEndpoint(host: "192.168.31.117", port: 9999, authRequired: false,
+                                              lanPrefix: "192.168.31")
         }
         let lastWrite = try FileManager.default.attributesOfItem(atPath: url.path)[.modificationDate] as? Date
 
@@ -51,9 +56,11 @@ final class CommandStoreProxyEndpointTests: XCTestCase {
 
     func testChangedEndpointIsPersisted() {
         let store = CommandStore(configURL: url)
-        store.rememberActiveProxyEndpoint(host: "192.168.31.117", port: 9999, authRequired: false)
+        store.rememberActiveProxyEndpoint(host: "192.168.31.117", port: 9999, authRequired: false,
+                                          lanPrefix: "192.168.31")
 
-        store.rememberActiveProxyEndpoint(host: "192.168.31.200", port: 8888, authRequired: true)
+        store.rememberActiveProxyEndpoint(host: "192.168.31.200", port: 8888, authRequired: true,
+                                          lanPrefix: "192.168.31")
 
         XCTAssertEqual(store.config.settings.activeProxyHost, "192.168.31.200")
         XCTAssertEqual(store.config.settings.activeProxyPort, 8888)
@@ -63,7 +70,8 @@ final class CommandStoreProxyEndpointTests: XCTestCase {
     func testDeselectingTheProxyClearsTheEndpoint() {
         let store = CommandStore(configURL: url)
         store.setActiveProxy(name: "personal-mac", username: "dev")
-        store.rememberActiveProxyEndpoint(host: "192.168.31.117", port: 9999, authRequired: true)
+        store.rememberActiveProxyEndpoint(host: "192.168.31.117", port: 9999, authRequired: true,
+                                          lanPrefix: "192.168.31")
 
         store.setActiveProxy(name: nil, username: nil)
 
@@ -71,5 +79,6 @@ final class CommandStoreProxyEndpointTests: XCTestCase {
         XCTAssertNil(store.config.settings.activeProxyHost, "a stale endpoint must not outlive the choice")
         XCTAssertNil(store.config.settings.activeProxyPort)
         XCTAssertFalse(store.config.settings.activeProxyAuthRequired)
+        XCTAssertNil(store.config.settings.activeProxyLANPrefix)
     }
 }

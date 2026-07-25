@@ -25,6 +25,19 @@ func pickLANIPv4(from interfaces: [NetworkInterfaceAddress]) -> String? {
         .address
 }
 
+/// Reduce an IPv4 address to its /24 prefix — a cheap identity for "the LAN this address is on".
+/// Pure. nil for anything that isn't a dotted quad (an IPv6 address, a hostname, hand-edited junk).
+///
+/// Used to scope the remembered proxy endpoint: `192.168.31.117` means a completely different
+/// machine on a different Wi-Fi, so a cached address must not be dialled — with credentials
+/// attached — after the laptop has moved networks. /24 is an assumption, not a fact (a /16 home
+/// network exists), but erring toward "different LAN" only ever costs a rediscovery.
+func lanPrefix(of address: String) -> String? {
+    let octets = address.split(separator: ".", omittingEmptySubsequences: false)
+    guard octets.count == 4, octets.allSatisfy({ UInt8($0) != nil }) else { return nil }
+    return octets.prefix(3).joined(separator: ".")
+}
+
 /// Every up, non-loopback interface carrying an IPv4 address.
 func activeIPv4Interfaces() -> [NetworkInterfaceAddress] {
     var head: UnsafeMutablePointer<ifaddrs>?

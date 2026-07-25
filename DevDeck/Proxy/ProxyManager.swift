@@ -270,10 +270,14 @@ final class ProxyManager {
     ///   could still resolve then, since `stopDiscovery()` empties `discovered`.
     /// - **the endpoint is usable.** `config.json` is hand-editable, so mirror the wire parser's
     ///   guard rather than building `http://host:0`.
+    /// - **we are back on the LAN it was learned on.** On a different Wi-Fi, `192.168.31.117:9999`
+    ///   is a stranger's machine — and with `authRequired` cached we would send it the proxy
+    ///   password unprompted. Unknown current LAN (no en* address) fails safe the same way.
     private func rememberedProxy(named name: String, settings: Settings) -> DiscoveredProxy? {
         guard settings.proxyDiscoveryEnabled else { return nil }
         guard let host = settings.activeProxyHost, !host.isEmpty,
               let port = settings.activeProxyPort, port > 0 else { return nil }
+        guard let learnedOn = settings.activeProxyLANPrefix, learnedOn == currentLANPrefix else { return nil }
         return DiscoveredProxy(name: name, host: host, port: port,
                                authRequired: settings.activeProxyAuthRequired,
                                exitIP: nil, proto: "http+socks", schema: proxyTXTSchemaVersion,
@@ -330,8 +334,12 @@ final class ProxyManager {
         store?.setActiveProxy(name: proxy.name,
                               username: sameAsBefore ? store?.config.settings.activeProxyUsername : nil)
         store?.rememberActiveProxyEndpoint(host: proxy.host, port: proxy.port,
-                                           authRequired: proxy.authRequired)
+                                           authRequired: proxy.authRequired, lanPrefix: currentLANPrefix)
     }
+
+    /// The /24 this machine is on right now — the scope a remembered endpoint is valid within.
+    /// nil when there is no LAN address at all, which makes every cached endpoint unusable (safe).
+    private var currentLANPrefix: String? { lanIP().flatMap(lanPrefix(of:)) }
 
     func clientPassword(for proxyName: String) -> String? {
         credentials.password(for: ProxyCredentialAccount.client(proxyName))
@@ -352,7 +360,7 @@ final class ProxyManager {
         guard let name = store?.config.settings.activeProxyName,
               let live = discovered.first(where: { $0.name == name }) else { return }
         store?.rememberActiveProxyEndpoint(host: live.host, port: live.port,
-                                           authRequired: live.authRequired)
+                                           authRequired: live.authRequired, lanPrefix: currentLANPrefix)
     }
 
     /// Re-read whether the active peer's credentials are complete — the only place that touches the

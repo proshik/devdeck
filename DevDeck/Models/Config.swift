@@ -26,6 +26,10 @@ struct Settings: Codable, Equatable {
     /// Cached alongside the address: without it a remembered auth-protected proxy would resolve
     /// as open and skip the credentials requirement.
     var activeProxyAuthRequired: Bool
+    /// The /24 of this machine's LAN when the endpoint above was learned. A remembered address is
+    /// only meaningful on the network it came from — elsewhere the same `192.168.x.y` belongs to a
+    /// stranger, and dialling it would hand them the proxy credentials.
+    var activeProxyLANPrefix: String?
 
     init(vmMemoryMonitoring: Bool = true, minikubeMemoryMonitoring: Bool = true,
          hostMemoryMonitoring: Bool = true, globalHotkeyEnabled: Bool = false,
@@ -33,7 +37,7 @@ struct Settings: Codable, Equatable {
          proxyShareEnabled: Bool = false, proxyDiscoveryEnabled: Bool = false,
          activeProxyName: String? = nil, activeProxyUsername: String? = nil,
          activeProxyHost: String? = nil, activeProxyPort: Int? = nil,
-         activeProxyAuthRequired: Bool = false) {
+         activeProxyAuthRequired: Bool = false, activeProxyLANPrefix: String? = nil) {
         self.vmMemoryMonitoring = vmMemoryMonitoring
         self.minikubeMemoryMonitoring = minikubeMemoryMonitoring
         self.hostMemoryMonitoring = hostMemoryMonitoring
@@ -47,13 +51,14 @@ struct Settings: Codable, Equatable {
         self.activeProxyHost = activeProxyHost
         self.activeProxyPort = activeProxyPort
         self.activeProxyAuthRequired = activeProxyAuthRequired
+        self.activeProxyLANPrefix = activeProxyLANPrefix
     }
 
     enum CodingKeys: String, CodingKey {
         case vmMemoryMonitoring, minikubeMemoryMonitoring, hostMemoryMonitoring, globalHotkeyEnabled,
              clusterHealthMonitoring, autoUpdateEnabled, proxyShareEnabled, proxyDiscoveryEnabled,
              activeProxyName, activeProxyUsername, activeProxyHost, activeProxyPort,
-             activeProxyAuthRequired
+             activeProxyAuthRequired, activeProxyLANPrefix
     }
 
     init(from decoder: Decoder) throws {
@@ -71,6 +76,7 @@ struct Settings: Codable, Equatable {
         activeProxyHost = try c.decodeIfPresent(String.self, forKey: .activeProxyHost)
         activeProxyPort = try c.decodeIfPresent(Int.self, forKey: .activeProxyPort)
         activeProxyAuthRequired = try c.decodeIfPresent(Bool.self, forKey: .activeProxyAuthRequired) ?? false
+        activeProxyLANPrefix = try c.decodeIfPresent(String.self, forKey: .activeProxyLANPrefix)
     }
 }
 

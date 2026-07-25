@@ -21,15 +21,18 @@ final class ProxyManagerRoutingResolutionTests: XCTestCase {
     }
 
     /// Discovery is turned on as every app path that starts browsing does — the remembered endpoint
-    /// only resolves while it is.
-    private func makeManager(credentials: FakeProxyCredentialStore = FakeProxyCredentialStore())
+    /// only resolves while it is. `lanIP` is injected (never the machine's real interfaces) because
+    /// that endpoint is also scoped to the LAN it was learned on.
+    private func makeManager(credentials: FakeProxyCredentialStore = FakeProxyCredentialStore(),
+                             lanIP: @escaping () -> String? = { "192.168.31.10" })
     -> (ProxyManager, CommandStore, FakeProxyDiscovering) {
         let store = CommandStore(configURL: url)
         store.setProxyDiscoveryEnabled(true)
         let discovering = FakeProxyDiscovering()
         let manager = ProxyManager(discovering: discovering,
                                    advertiser: FakeProxyAdvertising(),
-                                   credentials: credentials)
+                                   credentials: credentials,
+                                   lanIP: lanIP)
         manager.store = store
         return (manager, store, discovering)
     }
@@ -40,9 +43,10 @@ final class ProxyManagerRoutingResolutionTests: XCTestCase {
     private var retainedStore: CommandStore?
 
     private func makeManagerKeepingStore(
-        credentials: FakeProxyCredentialStore = FakeProxyCredentialStore()
+        credentials: FakeProxyCredentialStore = FakeProxyCredentialStore(),
+        lanIP: @escaping () -> String? = { "192.168.31.10" }
     ) -> (ProxyManager, CommandStore, FakeProxyDiscovering) {
-        let made = makeManager(credentials: credentials)
+        let made = makeManager(credentials: credentials, lanIP: lanIP)
         retainedStore = made.1
         return made
     }
@@ -156,15 +160,73 @@ final class ProxyManagerRoutingResolutionTests: XCTestCase {
                        "switching discovery off must stop routing, not keep a remembered proxy alive")
     }
 
+    func testRememberedEndpointResolvesBackOnTheSameLAN() async {
+        // Same Wi-Fi as when the address was learned — the cache is exactly what it is for.
+        let (manager, _, fake) = makeManagerKeepingStore(lanIP: { "192.168.31.10" })
+        manager.startDiscovery()
+        fake.emit([DiscoveredProxy(name: "personal-mac", host: "192.168.31.117", port: 9999,
+                                  authRequired: false, exitIP: nil, proto: "http+socks", schema: 1)])
+        await yieldUntil { manager.discovered.count == 1 }
+        manager.setActiveProxy(manager.discovered[0])
+
+        fake.emit([])
+        await yieldUntil { manager.discovered.isEmpty }
+
+        XCTAssertEqual(manager.activeProxy?.host, "192.168.31.117")
+        XCTAssertEqual(manager.routing(for: flagged()),
+                       .routed(env: proxyEnv(host: "192.168.31.117", port: 9999, user: nil, pass: nil)))
+    }
+
+    func testRememberedEndpointIsIgnoredOnADifferentLAN() async {
+        // The laptop moves to another network. 192.168.31.117 there is a stranger's machine, and
+        // with auth cached we would hand it the proxy password without the user doing anything.
+        var lanIP: String? = "192.168.31.10"
+        let credentials = FakeProxyCredentialStore([ProxyCredentialAccount.client("personal-mac"): "s3cret"])
+        let (manager, _, fake) = makeManagerKeepingStore(credentials: credentials, lanIP: { lanIP })
+        manager.startDiscovery()
+        fake.emit([DiscoveredProxy(name: "personal-mac", host: "192.168.31.117", port: 9999,
+                                  authRequired: true, exitIP: nil, proto: "http+socks", schema: 1)])
+        await yieldUntil { manager.discovered.count == 1 }
+        manager.setActiveProxy(manager.discovered[0])
+        manager.setClientCredentials(username: "dev", password: "s3cret", for: "personal-mac")
+
+        fake.emit([])
+        await yieldUntil { manager.discovered.isEmpty }
+        lanIP = "10.10.5.20"   // café Wi-Fi
+
+        XCTAssertNil(manager.activeProxy, "a remembered address means nothing on another network")
+        XCTAssertEqual(manager.routing(for: flagged()), .unavailable,
+                       "the proxy password must never be sent to whoever holds that address here")
+    }
+
+    func testRememberedEndpointIsIgnoredWithoutALANAddress() async {
+        var lanIP: String? = "192.168.31.10"
+        let (manager, _, fake) = makeManagerKeepingStore(lanIP: { lanIP })
+        manager.startDiscovery()
+        fake.emit([DiscoveredProxy(name: "personal-mac", host: "192.168.31.117", port: 9999,
+                                  authRequired: false, exitIP: nil, proto: "http+socks", schema: 1)])
+        await yieldUntil { manager.discovered.count == 1 }
+        manager.setActiveProxy(manager.discovered[0])
+
+        fake.emit([])
+        await yieldUntil { manager.discovered.isEmpty }
+        lanIP = nil   // Wi-Fi off / only a VPN tunnel is up: which LAN we are on is unknown
+
+        XCTAssertNil(manager.activeProxy)
+        XCTAssertEqual(manager.routing(for: flagged()), .unavailable, "unknown network → fail safe")
+    }
+
     func testHandEditedNonsenseEndpointIsNotUsed() {
         let (manager, store, _) = makeManagerKeepingStore()
         store.setActiveProxy(name: "personal-mac")
 
         // config.json is explicitly hand-editable — "http://192.168.31.117:0" is not a proxy.
-        store.rememberActiveProxyEndpoint(host: "192.168.31.117", port: 0, authRequired: false)
+        store.rememberActiveProxyEndpoint(host: "192.168.31.117", port: 0, authRequired: false,
+                                          lanPrefix: "192.168.31")
         XCTAssertEqual(manager.routing(for: flagged()), .unavailable, "port 0")
 
-        store.rememberActiveProxyEndpoint(host: "", port: 9999, authRequired: false)
+        store.rememberActiveProxyEndpoint(host: "", port: 9999, authRequired: false,
+                                          lanPrefix: "192.168.31")
         XCTAssertEqual(manager.routing(for: flagged()), .unavailable, "empty host")
     }
 

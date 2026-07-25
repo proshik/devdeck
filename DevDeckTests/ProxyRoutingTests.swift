@@ -94,6 +94,25 @@ final class ProxyRoutingTests: XCTestCase {
         XCTAssertNil(pickLANIPv4(from: []))
     }
 
+    // MARK: LAN scope of a remembered endpoint
+
+    func testLANPrefixIsTheFirstThreeOctets() {
+        XCTAssertEqual(lanPrefix(of: "192.168.31.117"), "192.168.31")
+        XCTAssertEqual(lanPrefix(of: "10.0.0.9"), "10.0.0")
+        XCTAssertEqual(lanPrefix(of: "192.168.1.1"), "192.168.1")
+    }
+
+    func testLANPrefixRejectsAnythingThatIsNotADottedQuad() {
+        // A nil prefix makes a cached endpoint unusable — the safe direction.
+        XCTAssertNil(lanPrefix(of: ""))
+        XCTAssertNil(lanPrefix(of: "192.168.31"), "three octets is not an address")
+        XCTAssertNil(lanPrefix(of: "192.168.31.117.5"), "five octets is not an address")
+        XCTAssertNil(lanPrefix(of: "192.168.31.999"), "999 is not an octet")
+        XCTAssertNil(lanPrefix(of: "192.168.31."), "empty last octet")
+        XCTAssertNil(lanPrefix(of: "fe80::1"), "IPv6")
+        XCTAssertNil(lanPrefix(of: "macbook.local"), "a hostname")
+    }
+
     // MARK: TXT record
 
     func testTXTRecordNeverCarriesAPassword() {
