@@ -20,11 +20,15 @@ final class ProxyManagerDiscoveryTests: XCTestCase {
         try? FileManager.default.removeItem(at: dir)
     }
 
+    /// `discoveryEnabled` mirrors the Settings toggle: the remembered endpoint only resolves while
+    /// discovery is on, so the rig turns it on exactly as every app path that starts browsing does.
     private func makeManager(
         discovering: FakeProxyDiscovering = FakeProxyDiscovering(),
-        credentials: FakeProxyCredentialStore = FakeProxyCredentialStore()
+        credentials: FakeProxyCredentialStore = FakeProxyCredentialStore(),
+        discoveryEnabled: Bool = true
     ) -> (ProxyManager, CommandStore, FakeProxyDiscovering) {
         let store = CommandStore(configURL: url)
+        store.setProxyDiscoveryEnabled(discoveryEnabled)
         let manager = ProxyManager(discovering: discovering,
                                    advertiser: FakeProxyAdvertising(),
                                    credentials: credentials)
@@ -103,8 +107,8 @@ final class ProxyManagerDiscoveryTests: XCTestCase {
     }
 
     func testDisabledDiscoveryNeverStartsTheBrowser() {
-        let (manager, _, fake) = makeManager()
-        // proxyDiscoveryEnabled defaults to false → start() must not open a browse stream at all
+        let (manager, _, fake) = makeManager(discoveryEnabled: false)
+        // proxyDiscoveryEnabled off → start() must not open a browse stream at all
         // (no Local Network prompt, no mDNS chatter for users who don't use the feature).
         manager.start()
 
