@@ -109,7 +109,11 @@ final class ProxyManagerRoutingResolutionTests: XCTestCase {
                        .routed(env: proxyEnv(host: "10.0.0.9", port: 8888, user: "dev", pass: "s3cret")))
     }
 
-    func testSelectedButOfflinePeerIsUnavailable() async {
+    /// The shape of a config written by 0.5.0: a selection with no cached endpoint next to it —
+    /// hence the selection through the STORE, which is the only thing that produces it. Every path
+    /// in the app goes through `ProxyManager.setActiveProxy`, which also caches the address, and
+    /// then an offline peer keeps routing (see the remembered-endpoint tests below).
+    func testSelectionWithoutACachedEndpointIsUnavailableOffline() async {
         let (manager, store, fake) = makeManager()
         manager.startDiscovery()
         fake.emit([DiscoveredProxy(name: "personal-mac", host: "192.168.1.42", port: 9999,
@@ -118,14 +122,15 @@ final class ProxyManagerRoutingResolutionTests: XCTestCase {
         store.setActiveProxy(name: "personal-mac")
         XCTAssertNotEqual(manager.routing(for: flagged()), .unavailable)
 
-        fake.emit([])   // the sharing Mac went to sleep
+        fake.emit([])
         await yieldUntil { manager.discovered.isEmpty }
 
-        XCTAssertEqual(manager.routing(for: flagged()), .unavailable)
+        XCTAssertEqual(manager.routing(for: flagged()), .unavailable,
+                       "no live announcement and nothing cached — a flagged command must fail")
     }
 
     func testRoutesThroughARememberedEndpoint() async {
-        let (manager, store, fake) = makeManager()
+        let (manager, _, fake) = makeManagerKeepingStore()
         manager.startDiscovery()
         fake.emit([DiscoveredProxy(name: "personal-mac", host: "192.168.31.117", port: 9999,
                                   authRequired: false, exitIP: nil, proto: "http+socks", schema: 1)])
@@ -137,7 +142,6 @@ final class ProxyManagerRoutingResolutionTests: XCTestCase {
 
         XCTAssertEqual(manager.routing(for: flagged()),
                        .routed(env: proxyEnv(host: "192.168.31.117", port: 9999, user: nil, pass: nil)))
-        _ = store
     }
 
     func testDisablingDiscoveryStopsRoutingThroughTheRememberedEndpoint() async {
@@ -231,7 +235,7 @@ final class ProxyManagerRoutingResolutionTests: XCTestCase {
     }
 
     func testRememberedAuthProxyWithoutCredentialsStaysUnavailable() async {
-        let (manager, store, fake) = makeManager()
+        let (manager, _, fake) = makeManagerKeepingStore()
         manager.startDiscovery()
         fake.emit([DiscoveredProxy(name: "locked", host: "10.0.0.9", port: 8888,
                                   authRequired: true, exitIP: nil, proto: "http+socks", schema: 1)])
@@ -241,8 +245,11 @@ final class ProxyManagerRoutingResolutionTests: XCTestCase {
         fake.emit([])
         await yieldUntil { manager.discovered.isEmpty }
 
+        // Without this the test would also pass if the fallback never resolved at all — and then it
+        // would say nothing about the credentials requirement.
+        XCTAssertEqual(manager.activeProxy?.authRequired, true,
+                       "the remembered endpoint resolved, and remembered that it is locked")
         XCTAssertEqual(manager.routing(for: flagged()), .unavailable,
                        "caching the address must not smuggle past the credentials requirement")
-        _ = store
     }
 }

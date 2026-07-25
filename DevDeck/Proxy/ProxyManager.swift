@@ -382,6 +382,14 @@ final class ProxyManager {
     func routing(for command: Command) -> ProxyRouting {
         guard command.routeThroughProxy else { return .notRouted }
         guard let proxy = activeProxy else { return .unavailable }
+        // This whole feature exists because the original failure was invisible — so say it out loud
+        // when a run leans on the cache. Logged HERE and not in `activeProxy`, which SwiftUI reads
+        // on every render; `routing(for:)` runs once per launch.
+        if !proxy.isLive {
+            DiagnosticLog.shared.log(
+                "Proxy routing “\(command.name)” through the remembered address of “\(proxy.name)” "
+                    + "(\(proxy.host):\(proxy.port)) — it is not announced on the LAN right now")
+        }
         guard proxy.authRequired else {
             return .routed(env: proxyEnv(host: proxy.host, port: proxy.port, user: nil, pass: nil))
         }
