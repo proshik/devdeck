@@ -22,16 +22,20 @@ final class ProxyManagerDiscoveryTests: XCTestCase {
 
     /// `discoveryEnabled` mirrors the Settings toggle: the remembered endpoint only resolves while
     /// discovery is on, so the rig turns it on exactly as every app path that starts browsing does.
+    /// `lanIP` is injected (never the machine's real interfaces) because the remembered endpoint is
+    /// scoped to the LAN it was learned on.
     private func makeManager(
         discovering: FakeProxyDiscovering = FakeProxyDiscovering(),
         credentials: FakeProxyCredentialStore = FakeProxyCredentialStore(),
-        discoveryEnabled: Bool = true
+        discoveryEnabled: Bool = true,
+        lanIP: @escaping () -> String? = { "192.168.1.10" }
     ) -> (ProxyManager, CommandStore, FakeProxyDiscovering) {
         let store = CommandStore(configURL: url)
         store.setProxyDiscoveryEnabled(discoveryEnabled)
         let manager = ProxyManager(discovering: discovering,
                                    advertiser: FakeProxyAdvertising(),
-                                   credentials: credentials)
+                                   credentials: credentials,
+                                   lanIP: lanIP)
         manager.store = store
         return (manager, store, discovering)
     }
@@ -180,6 +184,8 @@ final class ProxyManagerDiscoveryTests: XCTestCase {
 
         XCTAssertEqual(store.config.settings.activeProxyHost, "192.168.1.42")
         XCTAssertEqual(store.config.settings.activeProxyPort, 9999)
+        XCTAssertEqual(store.config.settings.activeProxyLANPrefix, "192.168.1",
+                       "the address is only usable back on the LAN it was learned on")
     }
 
     func testFallsBackToTheRememberedEndpointWhenBonjourGoesQuiet() async {
