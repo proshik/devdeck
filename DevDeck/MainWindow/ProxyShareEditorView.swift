@@ -218,6 +218,11 @@ struct ProxyShareEditorView: View {
                 Spacer()
                 Button(didCopy ? L10n.copied : L10n.copy) { copySnippet() }
             }
+            // Only when it is actually true of the current choice: an open proxy puts no secret on
+            // disk, and a warning that is always on stops being read.
+            if proxy.activeProxy?.authRequired == true {
+                warning(L10n.proxyTerminalHelperPasswordWarning)
+            }
         }
     }
 
