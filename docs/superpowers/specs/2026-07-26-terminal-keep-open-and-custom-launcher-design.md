@@ -49,23 +49,30 @@ pointed at the proxy (unless the user's own `.zshrc` overwrites those variables)
 Everything else is unchanged: the stop button still kills the subtree while the command runs, and a
 tab closed mid-run still produces `.terminated(143)` from PID death.
 
-## The prerequisite: stop deleting the script out from under the interpreter
+## The prerequisite: clean up run directories at launch, not mid-run
 
-`GhosttyRunningProcess` deletes the whole temp directory the moment the exit-code sentinel appears —
-while zsh is still sitting on the last line of that same script. zsh reads scripts incrementally, so
-this is already a race today; it is merely survivable because `read` happens to be the last thing
-left to execute.
+`GhosttyRunningProcess` deletes the whole temp directory the moment the exit-code sentinel appears,
+and again when the startup timeout fires — in both cases possibly while zsh is still executing the
+last lines of that same script.
 
-`exec` makes it fatal rather than merely risky: if the poller wins, the file vanishes before zsh has
-read the `exec` line, the shell exits, and the tab closes — which is the exact opposite of the
-feature. **This must be fixed for Part 1 to work at all.**
+That is **not** a corruption race, and the plan must not pretend otherwise. The interpreter holds an
+open fd on the file; unlinking a path leaves the inode alive until the last descriptor closes, so
+zsh keeps reading the rest of the script normally. (Verified: a 1.4 MB script whose directory was
+deleted 0.4 s into a `sleep 1` ran every remaining line, `exec` included. Modifying a script in
+place, unlike deleting it, genuinely does corrupt a running shell — but nothing here does that.)
+
+The deletions still have to go, for two ordinary reasons:
+
+- the startup-timeout deletion can simply be **wrong** — a terminal that took longer than 30 seconds
+  to write its pid sentinel is still coming, and we would have removed the script it is about to run;
+- a `run.zsh` left beside a live tab is worth having when something needs diagnosing, which is far
+  more likely now that a tab can stay open indefinitely.
 
 Fix:
 
-- Drop the cleanup at the terminal event and at the startup timeout — in both cases an interpreter
-  may still hold the file.
-- Keep the cleanup on a launch failure: the script was written but no terminal ever received it, so
-  nothing can be reading it.
+- Drop the cleanup at the terminal event and at the startup timeout.
+- Keep the cleanup on a launch failure: no terminal ever received that script, so it is of no use to
+  anyone.
 - Sweep on app start instead: delete leftover `devdeck-term-*` directories in the temp directory,
   but **only** those whose `pid` sentinel is missing (nothing ever started) or names a process that
   is no longer alive. A tab left running from a previous session therefore keeps its script until it
