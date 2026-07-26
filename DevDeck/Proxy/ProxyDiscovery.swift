@@ -65,8 +65,14 @@ func proxyTXTRecord(_ ad: ProxyAdvertisement) -> [String: String] {
 /// Parse a browse result's TXT record into a `DiscoveredProxy`. Pure.
 /// Returns nil when the record lacks a usable endpoint — both sides are ours, so in the MVP the
 /// TXT carries host/port directly and no per-result `NWConnection` resolution is needed.
+///
+/// `host` arrives from anyone on the network and travels a long way from here: into the persisted
+/// endpoint cache and, unescaped, into a `KEY=value` line of `proxy.env`. So it must be a dotted
+/// quad — validated with `lanPrefix(of:)`, the same check the LAN scoping already relies on, rather
+/// than a second parser that could drift from it. That closes the injection question by
+/// construction: nothing with a newline, a space or an `=` in it can get this far.
 func parseProxyTXT(name: String, txt: [String: String]) -> DiscoveredProxy? {
-    guard let host = txt["host"], !host.isEmpty,
+    guard let host = txt["host"], lanPrefix(of: host) != nil,
           let port = txt["port"].flatMap(Int.init), port > 0 else { return nil }
     return DiscoveredProxy(
         name: name,
