@@ -229,10 +229,134 @@ final class TerminalRunnerTests: XCTestCase {
         XCTAssertEqual(win.launched, [])
         XCTAssertEqual(tab.launched, [])
     }
+
+    func testCustomLauncherRefusesATemplateItCannotUse() async {
+        // No {script} to substitute → fail loudly at launch, not by burning the 30-second timeout.
+        do {
+            try await CustomCommandLauncher(template: { "" })
+                .launch(scriptURL: URL(fileURLWithPath: "/tmp/run.zsh"))
+            XCTFail("a blank template must not launch anything")
+        } catch let error as TerminalLauncherError {
+            XCTAssertEqual(error.message, L10n.terminalCustomCommandInvalid)
+        } catch {
+            XCTFail("unexpected error: \(error)")
+        }
+    }
+
+    // MARK: whole runs against a temp base directory
+
+    /// A private base directory for one run; the runner creates `devdeck-term-*` inside it.
+    private func makeBaseDir() throws -> URL {
+        let base = FileManager.default.temporaryDirectory
+            .appendingPathComponent("DevDeckTests-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: base) }
+        return base
+    }
+
+    private func drain(_ process: any RunningProcess) async -> [RunnerOutput] {
+        var events: [RunnerOutput] = []
+        for await event in process.output { events.append(event) }
+        return events
+    }
+
+    private var terminalCommand: Command {
+        Command(id: UUID(), name: "c", command: "true", openInTerminal: true)
+    }
+
+    private func runDirectories(in base: URL) -> [URL] {
+        ((try? FileManager.default.contentsOfDirectory(at: base, includingPropertiesForKeys: nil)) ?? [])
+            .filter { $0.lastPathComponent.hasPrefix("devdeck-term-") }
+    }
+
+    func testTheWrittenScriptFileIsExecutable() async throws {
+        let base = try makeBaseDir()
+        let launcher = RecordingLauncher()
+        let runner = GhosttyCommandRunner(launcher: launcher, baseDir: base,
+                                          pollInterval: .milliseconds(1), maxStartupTicks: 1)
+        _ = await drain(runner.start(terminalCommand))
+
+        let script = try XCTUnwrap(launcher.launched.first)
+        XCTAssertTrue(FileManager.default.isExecutableFile(atPath: script.path),
+                      "a custom launcher execs this path directly — 0644 fails with EACCES")
+        let mode = try FileManager.default.attributesOfItem(atPath: script.path)[.posixPermissions]
+        XCTAssertEqual((mode as? NSNumber)?.intValue, 0o755)
+    }
+
+    func testRunDirectorySurvivesAFinishedRun() async throws {
+        // The point of the branch: cleanup at the terminal event is gone — the tab may still be a
+        // live shell, and its script stays around for diagnosing. The launch sweep owns cleanup now.
+        let base = try makeBaseDir()
+        let runner = GhosttyCommandRunner(launcher: SentinelWritingLauncher(exitCode: 0),
+                                          baseDir: base, pollInterval: .milliseconds(1))
+        let events = await drain(runner.start(terminalCommand))
+
+        XCTAssertEqual(events.last, .terminated(exitCode: 0))
+        let dir = try XCTUnwrap(runDirectories(in: base).first, "the run directory was deleted")
+        XCTAssertTrue(FileManager.default
+            .fileExists(atPath: dir.appendingPathComponent("run.zsh").path),
+                      "the wrapper script must outlive the run")
+    }
+
+    func testRunDirectoryIsRemovedWhenTheLaunchFails() async throws {
+        // The one deletion that stays: no terminal ever received this script.
+        let base = try makeBaseDir()
+        let runner = GhosttyCommandRunner(launcher: FailingLauncher(), baseDir: base,
+                                          pollInterval: .milliseconds(1))
+        let events = await drain(runner.start(terminalCommand))
+
+        XCTAssertEqual(events.last, .terminated(exitCode: 127))
+        XCTAssertEqual(runDirectories(in: base), [])
+    }
+
+    func testStartupTimeoutBlamesGhosttyInGhosttyModes() async throws {
+        let base = try makeBaseDir()
+        let runner = GhosttyCommandRunner(launcher: RecordingLauncher(), baseDir: base,
+                                          pollInterval: .milliseconds(1), maxStartupTicks: 1,
+                                          launchMode: { .window })
+        let events = await drain(runner.start(terminalCommand))
+
+        XCTAssertTrue(events.contains(.line(L10n.terminalDidNotStart, stream: .stderr)))
+        XCTAssertEqual(events.last, .terminated(exitCode: 127))
+    }
+
+    func testStartupTimeoutBlamesTheCustomCommandInCustomMode() async throws {
+        // The custom launch is deliberately not waited on, so this timeout is its ONLY failure
+        // channel — pointing at Ghostty's permissions would misdiagnose every typo'd binary.
+        let base = try makeBaseDir()
+        let runner = GhosttyCommandRunner(launcher: RecordingLauncher(), baseDir: base,
+                                          pollInterval: .milliseconds(1), maxStartupTicks: 1,
+                                          launchMode: { .custom })
+        let events = await drain(runner.start(terminalCommand))
+
+        XCTAssertTrue(events.contains(.line(L10n.terminalCustomDidNotStart, stream: .stderr)))
+        XCTAssertFalse(events.contains(.line(L10n.terminalDidNotStart, stream: .stderr)))
+    }
 }
 
 /// Fake launcher: records launches without invoking a real terminal.
 final class RecordingLauncher: TerminalLauncher, @unchecked Sendable {
     private(set) var launched: [URL] = []
     func launch(scriptURL: URL) async throws { launched.append(scriptURL) }
+}
+
+/// Fake launcher standing in for a terminal that ran the script to completion: writes the two
+/// sentinels the runner polls for, without a terminal or a real process.
+struct SentinelWritingLauncher: TerminalLauncher {
+    let exitCode: Int32
+
+    func launch(scriptURL: URL) async throws {
+        let dir = scriptURL.deletingLastPathComponent()
+        try "\(ProcessInfo.processInfo.processIdentifier)\n"
+            .write(to: dir.appendingPathComponent("pid"), atomically: true, encoding: .utf8)
+        try "\(exitCode)\n"
+            .write(to: dir.appendingPathComponent("exit"), atomically: true, encoding: .utf8)
+    }
+}
+
+/// Fake launcher for the failure path (no terminal installed, AppleScript refused, …).
+struct FailingLauncher: TerminalLauncher {
+    func launch(scriptURL: URL) async throws {
+        throw TerminalLauncherError(message: "no terminal")
+    }
 }
