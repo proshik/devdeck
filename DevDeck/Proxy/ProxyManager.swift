@@ -35,6 +35,10 @@ final class ProxyManager {
     /// Last contents handed to `envFile`, so a browse update that changes nothing doesn't rewrite
     /// the file. nil means the file is absent as far as we know.
     @ObservationIgnored private var lastProxyEnvContents: String?
+    /// Whether this instance has determined the file's state at least once. A stale file can survive
+    /// a crash or an external edit of config.json, so the first refresh must act on disk rather than
+    /// trust `lastProxyEnvContents`, which starts nil in every new instance.
+    @ObservationIgnored private var proxyEnvStateDetermined = false
     /// Owned by `AppDelegate`; weak so the manager never keeps the app graph alive.
     @ObservationIgnored weak var store: CommandStore?
     @ObservationIgnored weak var processManager: ProcessManager?
@@ -400,12 +404,12 @@ final class ProxyManager {
     /// Guarded against redundant writes: this runs on every Bonjour browse update, and an
     /// unconditional write would hit the disk several times a second on a live network.
     private func refreshProxyEnvFile() {
+        defer { proxyEnvStateDetermined = true }
         guard let resolved = resolvedEndpoint(),
               let ip = lanIP(), let prefix = lanPrefix(of: ip) else {
-            if lastProxyEnvContents != nil {
-                lastProxyEnvContents = nil
-                envFile.remove()
-            }
+            guard !proxyEnvStateDetermined || lastProxyEnvContents != nil else { return }
+            lastProxyEnvContents = nil
+            envFile.remove()
             return
         }
         let url = proxyURL(host: resolved.proxy.host, port: resolved.proxy.port,
