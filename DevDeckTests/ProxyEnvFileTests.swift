@@ -60,17 +60,19 @@ final class ProxyEnvFileTests: XCTestCase {
     func testTheWrittenFileIsOwnerOnly() throws {
         let url = dir.appendingPathComponent(".config/devdeck/proxy.env")
 
-        LiveProxyEnvFile(url: url).write("DEVDECK_PROXY_URL=http://dev:s3cret@192.168.31.117:9999\n")
+        XCTAssertTrue(LiveProxyEnvFile(url: url).write("DEVDECK_PROXY_URL=http://dev:s3cret@192.168.31.117:9999\n"))
 
         XCTAssertEqual(try mode(of: url), 0o600)
         XCTAssertEqual(try String(contentsOf: url, encoding: .utf8),
                        "DEVDECK_PROXY_URL=http://dev:s3cret@192.168.31.117:9999\n")
     }
 
-    /// An atomic write-then-rename (`Data.write(to:)`, `FileManager.createFile`) fills a sibling
-    /// `proxy.env.sb-…` at 0644 and renames it over the target. That sibling is a world-readable
-    /// copy of the password while the write is in flight, and a crash mid-write strands it forever —
-    /// removal only unlinks `proxy.env`.
+    /// An atomic write-then-rename (`FileManager.createFile`, `Data.write(to:options: .atomic)`)
+    /// fills a sibling `proxy.env.sb-…` at 0644 and renames it over the target. That sibling is a
+    /// world-readable copy of the password while the write is in flight, and a crash mid-write
+    /// strands it forever — removal only unlinks `proxy.env`. Plain `Data.write(to:)` doesn't
+    /// have a sibling to strand — it writes in place — but a freshly created file still lands at
+    /// 0644, briefly world-readable, which is the problem this test doesn't cover.
     ///
     /// A rename cannot be caught after the fact by listing the directory, so the tell is the inode:
     /// writing in place keeps it, replacing the file changes it. Both are asserted — the listing
@@ -79,10 +81,10 @@ final class ProxyEnvFileTests: XCTestCase {
         let url = dir.appendingPathComponent(".config/devdeck/proxy.env")
         let writer = LiveProxyEnvFile(url: url)
 
-        writer.write("DEVDECK_PROXY_URL=http://a:1\n")
+        XCTAssertTrue(writer.write("DEVDECK_PROXY_URL=http://a:1\n"))
         let firstInode = try XCTUnwrap(
             FileManager.default.attributesOfItem(atPath: url.path)[.systemFileNumber] as? Int)
-        writer.write("DEVDECK_PROXY_URL=http://b:2\n")
+        XCTAssertTrue(writer.write("DEVDECK_PROXY_URL=http://b:2\n"))
         let secondInode = try XCTUnwrap(
             FileManager.default.attributesOfItem(atPath: url.path)[.systemFileNumber] as? Int)
 
@@ -102,7 +104,7 @@ final class ProxyEnvFileTests: XCTestCase {
                                                     attributes: [.posixPermissions: 0o644]))
         XCTAssertEqual(try mode(of: url), 0o644, "sanity: starts world-readable")
 
-        LiveProxyEnvFile(url: url).write("DEVDECK_PROXY_URL=http://dev:s3cret@h:1\n")
+        XCTAssertTrue(LiveProxyEnvFile(url: url).write("DEVDECK_PROXY_URL=http://dev:s3cret@h:1\n"))
 
         XCTAssertEqual(try mode(of: url), 0o600)
         XCTAssertEqual(try String(contentsOf: url, encoding: .utf8),
@@ -113,7 +115,7 @@ final class ProxyEnvFileTests: XCTestCase {
     func testTheDirectoryIsCreatedOwnerOnly() throws {
         let url = dir.appendingPathComponent(".config/devdeck/proxy.env")
 
-        LiveProxyEnvFile(url: url).write("DEVDECK_PROXY_URL=http://h:1\n")
+        XCTAssertTrue(LiveProxyEnvFile(url: url).write("DEVDECK_PROXY_URL=http://h:1\n"))
 
         XCTAssertEqual(try mode(of: url.deletingLastPathComponent()), 0o700,
                        "nobody else needs to list or traverse a directory holding a password")
@@ -122,13 +124,13 @@ final class ProxyEnvFileTests: XCTestCase {
     func testRemoveDeletesTheFileAndToleratesItBeingAbsent() throws {
         let url = dir.appendingPathComponent(".config/devdeck/proxy.env")
         let writer = LiveProxyEnvFile(url: url)
-        writer.write("DEVDECK_PROXY_URL=http://h:1\n")
+        XCTAssertTrue(writer.write("DEVDECK_PROXY_URL=http://h:1\n"))
         XCTAssertTrue(FileManager.default.fileExists(atPath: url.path))
 
-        writer.remove()
+        XCTAssertTrue(writer.remove(), "removing an existing file must succeed")
         XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
 
-        writer.remove()   // already gone is the end state we wanted — must not be treated as an error
+        XCTAssertTrue(writer.remove(), "already gone is the end state we wanted — must not be treated as an error")
         XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
     }
 }

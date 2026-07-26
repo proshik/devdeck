@@ -32,12 +32,16 @@ protocol ProxyEnvFileWriting: Sendable {
 /// The real file at `~/.config/devdeck/proxy.env`, owner-readable only.
 ///
 /// The write is deliberately raw POSIX rather than `Data.write(to:)` or
-/// `FileManager.createFile(atPath:contents:attributes:)`. Both of those are atomic
-/// write-then-rename: they create a sibling temp file (`proxy.env.sb-…`) at the default 0644,
-/// fill it, and rename it over the target. For a file that can hold the proxy password in
-/// plaintext that is two problems — the contents exist world-readable for the duration of the
-/// write inside a directory anyone can traverse, and a crash mid-write strands that 0644 sibling
-/// forever, since removal only ever unlinks `proxy.env` itself.
+/// `FileManager.createFile(atPath:contents:attributes:)`. `FileManager.createFile` — like
+/// `Data.write(to:options: .atomic)` — is atomic write-then-rename: it creates a sibling temp
+/// file (`proxy.env.sb-…`) at the default 0644, fills it, and renames it over the target. For a
+/// file that can hold the proxy password in plaintext that is two problems — the contents exist
+/// world-readable for the duration of the write inside a directory anyone can traverse, and a
+/// crash mid-write strands that 0644 sibling forever, since removal only ever unlinks
+/// `proxy.env` itself. Plain `Data.write(to:)` (no `.atomic` option) doesn't have that problem —
+/// it writes in place, preserving the inode, so there's no sibling to strand — but on creation it
+/// still lands at the default 0644, so a fresh file is briefly world-readable before this code
+/// gets a chance to tighten it.
 ///
 /// `open` + `fchmod` + `write` instead: one inode, never wider than 0600 (`O_CREAT`'s mode
 /// argument is ignored when the file already exists, hence the explicit `fchmod` before any byte
