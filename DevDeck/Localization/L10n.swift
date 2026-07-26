@@ -370,10 +370,20 @@ enum L10n {
           "Одна команда на все проекты: директория выбирается при запуске и не сохраняется. Работает при запуске из деки — шаг цепочки использует свою рабочую директорию.")
     }
     static var chooseRunDirectory: String { t("Run here", "Запустить здесь") }
+    static func chooseRunDirectoryMessage(_ name: String) -> String {
+        t("Choose the directory to run “\(name)” in", "Выберите директорию для запуска «\(name)»")
+    }
     static var proxyTerminalHelperSection: String { t("Terminal helper", "Помощник для терминала") }
     static var proxyTerminalHelperHint: String {
         t("Paste this into ~/.zshrc, then run anything through the active proxy from any directory: dp claude. It reads the file below and refuses if that proxy is not on the current network.",
           "Вставьте это в ~/.zshrc, и запускайте что угодно через активный прокси из любой директории: dp claude. Функция читает файл ниже и откажется работать, если этот прокси не в текущей сети.")
+    }
+    /// Shown only when the active proxy needs a password: a shell cannot read the Keychain, so the
+    /// helper's file has to carry that password in plaintext. The person pasting the snippet has not
+    /// read the design document that accepted this trade-off — say it where they will see it.
+    static var proxyTerminalHelperPasswordWarning: String {
+        t("This proxy needs a password, and a shell cannot read the Keychain — so DevDeck writes that password into the file below in plain text, readable only by you (mode 0600). Deselecting the proxy deletes the file.",
+          "Этот прокси требует пароль, а из терминала Keychain не прочитать — поэтому DevDeck записывает пароль в файл ниже в открытом виде, доступный только вам (права 0600). Когда прокси снят с выбора, файл удаляется.")
     }
     static var copy: String { t("Copy", "Копировать") }
     static var copied: String { t("Copied", "Скопировано") }

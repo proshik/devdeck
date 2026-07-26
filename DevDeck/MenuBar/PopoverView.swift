@@ -337,6 +337,13 @@ struct PopoverView: View {
         panel.canChooseFiles = false
         panel.allowsMultipleSelection = false
         panel.prompt = L10n.chooseRunDirectory
+        // Which command is this for — the popover has already dismissed by the time the panel is up.
+        panel.message = L10n.chooseRunDirectoryMessage(command.name)
+        // Open near the project when the command has a stored directory, instead of wherever the
+        // panel last happened to be.
+        if let stored = command.workingDirectory, !stored.isEmpty {
+            panel.directoryURL = URL(fileURLWithPath: (stored as NSString).expandingTildeInPath)
+        }
         guard panel.runModal() == .OK, let url = panel.url else { return }
         manager.run(command.withWorkingDirectory(url.path))
     }
