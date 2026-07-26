@@ -30,6 +30,11 @@ final class ProxyManager {
     /// `.started` when the process is SPAWNED, so the first probe usually races its socket bind.
     @ObservationIgnored private let exitIPAttempts: Int
     @ObservationIgnored private let exitIPRetryDelay: Duration
+    /// Maintains `~/.config/devdeck/proxy.env` for the `dp` shell helper.
+    @ObservationIgnored private let envFile: any ProxyEnvFileWriting
+    /// Last contents handed to `envFile`, so a browse update that changes nothing doesn't rewrite
+    /// the file. nil means the file is absent as far as we know.
+    @ObservationIgnored private var lastProxyEnvContents: String?
     /// Owned by `AppDelegate`; weak so the manager never keeps the app graph alive.
     @ObservationIgnored weak var store: CommandStore?
     @ObservationIgnored weak var processManager: ProcessManager?
@@ -62,7 +67,8 @@ final class ProxyManager {
             ProcessTree.run("/usr/bin/curl", ["-s", "--max-time", "5", "-x", proxyURL, "https://api.ipify.org"])
         },
         exitIPAttempts: Int = 4,
-        exitIPRetryDelay: Duration = .seconds(1)
+        exitIPRetryDelay: Duration = .seconds(1),
+        envFile: any ProxyEnvFileWriting = LiveProxyEnvFile()
     ) {
         self.discovering = discovering
         self.advertiser = advertiser
@@ -72,13 +78,14 @@ final class ProxyManager {
         self.exitIPProbe = exitIPProbe
         self.exitIPAttempts = exitIPAttempts
         self.exitIPRetryDelay = exitIPRetryDelay
+        self.envFile = envFile
     }
 
     // MARK: - Lifecycle
 
     /// Called from `AppDelegate` once the store and process manager exist.
     func start() {
-        refreshCredentialCache()
+        refreshDerivedState()
         if store?.config.settings.proxyShareEnabled == true { startShare() }
         if store?.config.settings.proxyDiscoveryEnabled == true { startDiscovery() }
     }
@@ -305,7 +312,7 @@ final class ProxyManager {
                 guard let self else { return }
                 self.discovered = set
                 self.rememberActiveEndpointIfLive()
-                self.refreshCredentialCache()
+                self.refreshDerivedState()
             }
         }
     }
@@ -315,6 +322,7 @@ final class ProxyManager {
         discoveryTask = nil
         discovering.stop()
         discovered = []
+        refreshDerivedState()   // discovery off must stop the terminal path too
     }
 
     func setDiscoveryEnabled(_ on: Bool) {
@@ -325,7 +333,7 @@ final class ProxyManager {
     /// Choose the active proxy. Switching to a DIFFERENT peer drops the stored username —
     /// credentials are per-peer, and silently reusing another host's login would just fail.
     func setActiveProxy(_ proxy: DiscoveredProxy?) {
-        defer { refreshCredentialCache() }
+        defer { refreshDerivedState() }
         guard let proxy else {
             store?.setActiveProxy(name: nil, username: nil)
             return
@@ -348,7 +356,7 @@ final class ProxyManager {
     /// Store the credentials for a discovered proxy: username in the config, password in the Keychain.
     func setClientCredentials(username: String, password: String?, for proxyName: String) {
         credentials.setPassword(password, for: ProxyCredentialAccount.client(proxyName))
-        defer { refreshCredentialCache() }
+        defer { refreshDerivedState() }
         guard store?.config.settings.activeProxyName == proxyName else { return }
         store?.setActiveProxy(name: proxyName, username: username.isEmpty ? nil : username)
     }
@@ -375,26 +383,61 @@ final class ProxyManager {
         activeProxyHasCredentials = true
     }
 
+    /// The active proxy resolved to something usable, or nil when a flagged command must fail.
+    /// Shared by `routing(for:)` and the terminal helper's env file, so the two can never disagree
+    /// about whether a proxy is usable.
+    private func resolvedEndpoint() -> (proxy: DiscoveredProxy, user: String?, pass: String?)? {
+        guard let proxy = activeProxy else { return nil }
+        guard proxy.authRequired else { return (proxy, nil, nil) }
+        guard let username = store?.config.settings.activeProxyUsername, !username.isEmpty,
+              let password = clientPassword(for: proxy.name), !password.isEmpty else { return nil }
+        return (proxy, username, password)
+    }
+
+    /// Keep `proxy.env` in step with the in-app verdict. Removing it is the safe state: without the
+    /// file the `dp` helper refuses to run, which mirrors `.unavailable` failing a flagged command.
+    ///
+    /// Guarded against redundant writes: this runs on every Bonjour browse update, and an
+    /// unconditional write would hit the disk several times a second on a live network.
+    private func refreshProxyEnvFile() {
+        guard let resolved = resolvedEndpoint(),
+              let ip = lanIP(), let prefix = lanPrefix(of: ip) else {
+            if lastProxyEnvContents != nil {
+                lastProxyEnvContents = nil
+                envFile.remove()
+            }
+            return
+        }
+        let url = proxyURL(host: resolved.proxy.host, port: resolved.proxy.port,
+                           user: resolved.user, pass: resolved.pass)
+        let contents = proxyEnvFileContents(url: url, lanPrefix: prefix)
+        guard contents != lastProxyEnvContents else { return }
+        lastProxyEnvContents = contents
+        envFile.write(contents)
+    }
+
+    /// Everything derived from the active choice, refreshed together so the two can't drift.
+    private func refreshDerivedState() {
+        refreshCredentialCache()
+        refreshProxyEnvFile()
+    }
+
     // MARK: - Routing (the ProcessManager hook)
 
     /// Resolve how a command should be launched. Wired into `ProcessManager.proxyRouting` by
     /// `AppDelegate`, so `ProcessManager` never learns this type exists.
     func routing(for command: Command) -> ProxyRouting {
         guard command.routeThroughProxy else { return .notRouted }
-        guard let proxy = activeProxy else { return .unavailable }
+        guard let resolved = resolvedEndpoint() else { return .unavailable }
         // This whole feature exists because the original failure was invisible — so say it out loud
         // when a run leans on the cache. Logged HERE and not in `activeProxy`, which SwiftUI reads
         // on every render; `routing(for:)` runs once per launch.
-        if !proxy.isLive {
+        if !resolved.proxy.isLive {
             DiagnosticLog.shared.log(
-                "Proxy routing “\(command.name)” through the remembered address of “\(proxy.name)” "
-                    + "(\(proxy.host):\(proxy.port)) — it is not announced on the LAN right now")
+                "Proxy routing “\(command.name)” through the remembered address of “\(resolved.proxy.name)” "
+                    + "(\(resolved.proxy.host):\(resolved.proxy.port)) — it is not announced on the LAN right now")
         }
-        guard proxy.authRequired else {
-            return .routed(env: proxyEnv(host: proxy.host, port: proxy.port, user: nil, pass: nil))
-        }
-        guard let username = store?.config.settings.activeProxyUsername, !username.isEmpty,
-              let password = clientPassword(for: proxy.name), !password.isEmpty else { return .unavailable }
-        return .routed(env: proxyEnv(host: proxy.host, port: proxy.port, user: username, pass: password))
+        return .routed(env: proxyEnv(host: resolved.proxy.host, port: resolved.proxy.port,
+                                     user: resolved.user, pass: resolved.pass))
     }
 }
