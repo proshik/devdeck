@@ -49,8 +49,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         HotKeyManager.shared.onTrigger = { [weak menuBar] in menuBar?.toggle() }
         HotKeyManager.shared.setEnabled(store.config.settings.globalHotkeyEnabled)
 
-        // Run directories are no longer deleted when a command finishes (zsh may still be reading
-        // the script); collect the ones whose terminal is gone now instead.
+        // Run directories are no longer deleted when a command finishes — a live tab keeps its
+        // script around for diagnosing. Collect the ones whose terminal is gone now instead.
         sweepStaleTerminalDirectories()
     }
 

@@ -222,11 +222,13 @@ struct ModeSelectingLauncher: TerminalLauncher {
 
 /// Delete run directories left over by previous sessions.
 ///
-/// The runner deliberately does NOT delete a directory when the command finishes: zsh reads the
-/// wrapper script incrementally and is still executing its last lines at that moment, so removing it
-/// underneath is a race — and losing it closes the tab, which is precisely what `keepTerminalOpen`
-/// exists to prevent. Cleaning up at launch is safe instead, because a tab that is still running is
-/// detectable: its `pid` sentinel names a live process.
+/// The runner deliberately does NOT delete a directory when the command finishes or when the
+/// startup timeout fires. Not because deleting would break a running script — it wouldn't: zsh
+/// holds an open fd, and unlinking leaves the inode alive until it is done reading. The reasons are
+/// plainer. The timeout deletion could misfire, wiping the script of a terminal that was merely
+/// slower than 30 seconds; and a `run.zsh` sitting next to a live tab is exactly what you want when
+/// something needs diagnosing. Cleaning up at launch costs neither, because a tab that is still
+/// running is detectable: its `pid` sentinel names a live process.
 ///
 /// `isAlive` is injected so the decision is testable without real processes.
 func sweepStaleTerminalDirectories(
@@ -368,10 +370,12 @@ final class GhosttyRunningProcess: RunningProcess, @unchecked Sendable {
                 let msg = (error as? TerminalLauncherError)?.message ?? error.localizedDescription
                 cont.yield(.line(L10n.terminalLaunchFailed(msg), stream: .stderr))
                 cont.yield(.terminated(exitCode: 127))
-                cont.finish()
-                // Safe to delete here and only here: the launch failed, so no interpreter ever
-                // received this script. The other exits leave it to the startup sweep.
+                // Deleted here and only here: the launch failed, so this script is of no use to
+                // anyone — no terminal ever received it, and there is nothing to diagnose in it.
+                // The other exits leave it to the startup sweep, which can tell a live tab apart.
+                // Before `finish()`, so an observer that has seen the stream end sees the cleanup too.
                 try? FileManager.default.removeItem(at: dir)
+                cont.finish()
                 return
             }
             var tracker = TerminalTracker()
