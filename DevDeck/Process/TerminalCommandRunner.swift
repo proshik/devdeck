@@ -271,9 +271,16 @@ struct GhosttyCommandRunner: CommandRunner {
             maxStartupTicks: maxStartupTicks, killTree: killTree, isAlive: isAlive)
     }
 
-    /// Wrapper script: cd/env → write PID → command → write code → pause on "Press Enter to close".
+    /// Wrapper script: shebang → cd/env → write PID → command → write code → pause on "Press Enter to close".
+    ///
+    /// The shebang is load-bearing for `.custom`: templates like `wezterm start -- {script}` or
+    /// `kitty {script}` `execvp` the path directly, and without `#!` the kernel refuses it with
+    /// "Exec format error". (The Ghostty launchers hand the file to an explicit interpreter,
+    /// `zsh -l <script>`, for which the line is just a comment.) macOS passes everything after the
+    /// interpreter path as ONE argument, so `-l` is a single valid flag here.
+    /// The file is written with mode 0755 for the same reason — see `GhosttyRunningProcess`.
     static func script(_ command: Command, pidFile: URL, exitFile: URL) -> String {
-        var lines: [String] = []
+        var lines: [String] = ["#!/bin/zsh -l"]
         if let wd = command.workingDirectory, !wd.isEmpty {
             lines.append("cd \(shQuote(wd)) || exit 127")
         }
@@ -333,6 +340,11 @@ final class GhosttyRunningProcess: RunningProcess, @unchecked Sendable {
             do {
                 try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
                 try script.write(to: scriptFile, atomically: true, encoding: .utf8)
+                // Executable, because a `.custom` template may hand the path straight to `execvp`
+                // (`wezterm start -- <path>`, `kitty <path>`): without +x that fails with
+                // "Permission denied", and the user only sees a 30-second hang.
+                try FileManager.default.setAttributes([.posixPermissions: 0o755],
+                                                      ofItemAtPath: scriptFile.path)
                 try await launcher.launch(scriptURL: scriptFile)
             } catch {
                 let msg = (error as? TerminalLauncherError)?.message ?? error.localizedDescription
