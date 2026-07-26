@@ -23,7 +23,9 @@ final class ProxyManagerEnvFileTests: XCTestCase {
     }
 
     /// The store is retained for the test's lifetime — `ProxyManager.store` is weak.
-    private func makeRig(lanIP: String? = "192.168.31.84",
+    /// `lanIP` is a closure (not a fixed value) so a test can flip the answer mid-run — see
+    /// `testNoLANAddressRemovesTheFile`, which needs the address to disappear after the file exists.
+    private func makeRig(lanIP: @escaping () -> String? = { "192.168.31.84" },
                          credentials: FakeProxyCredentialStore = FakeProxyCredentialStore())
     -> (ProxyManager, CommandStore, FakeProxyDiscovering, FakeProxyEnvFile) {
         let store = CommandStore(configURL: url)
@@ -33,7 +35,7 @@ final class ProxyManagerEnvFileTests: XCTestCase {
         let manager = ProxyManager(discovering: discovering,
                                    advertiser: FakeProxyAdvertising(),
                                    credentials: credentials,
-                                   lanIP: { lanIP },
+                                   lanIP: lanIP,
                                    envFile: envFile)
         manager.store = store
         retainedStore = store
@@ -120,11 +122,17 @@ final class ProxyManagerEnvFileTests: XCTestCase {
     }
 
     func testNoLANAddressRemovesTheFile() async {
-        let (manager, _, fake, envFile) = makeRig(lanIP: nil)
+        // Written first, WITH a LAN address, so the later nil assertion can only pass because the
+        // guard correctly reacted to the address disappearing — not because nothing was ever wired up.
+        var lanIP: String? = "192.168.31.84"
+        let (manager, _, fake, envFile) = makeRig(lanIP: { lanIP })
         manager.startDiscovery()
         fake.emit([proxy("personal-mac")])
         await yieldUntil { manager.discovered.count == 1 }
+        manager.setActiveProxy(proxy("personal-mac"))
+        XCTAssertNotNil(envFile.contents, "sanity: written while a LAN address is known")
 
+        lanIP = nil   // Wi-Fi off / only a VPN tunnel is up: which LAN we are on is unknown
         manager.setActiveProxy(proxy("personal-mac"))
 
         XCTAssertNil(envFile.contents, "without a LAN prefix the helper could not verify the network")
@@ -146,15 +154,36 @@ final class ProxyManagerEnvFileTests: XCTestCase {
     }
 
     func testAuthProxyWithoutCredentialsRemovesTheFile() async {
-        let (manager, _, fake, envFile) = makeRig()
+        // Written first, WITH credentials, so the later nil assertion can only pass because the
+        // guard correctly reacted to losing them — not because nothing was ever wired up.
+        let credentials = FakeProxyCredentialStore()
+        let (manager, _, fake, envFile) = makeRig(credentials: credentials)
         manager.startDiscovery()
         fake.emit([proxy("locked", auth: true)])
         await yieldUntil { manager.discovered.count == 1 }
-
         manager.setActiveProxy(proxy("locked", auth: true))
+        manager.setClientCredentials(username: "dev", password: "s3cret", for: "locked")
+        XCTAssertNotNil(envFile.contents, "sanity: written once credentials make the proxy usable")
+
+        manager.setClientCredentials(username: "", password: nil, for: "locked")
 
         XCTAssertNil(envFile.contents, "same verdict as routing(for:) — unusable means no file")
         XCTAssertEqual(manager.routing(for: Command(id: UUID(), name: "c", command: "c",
                                                     routeThroughProxy: true)), .unavailable)
+    }
+
+    /// Crash recovery: `lastProxyEnvContents` starts nil in every new `ProxyManager`, same as it
+    /// would after a real crash or force-quit. If the removal guard trusted that nil the way it
+    /// trusts it on every LATER call, a file left by a previous process — possibly holding a
+    /// plaintext proxy password — would survive indefinitely because this instance never believed
+    /// it existed. The first refresh of a session must establish ground truth on disk instead.
+    func testStartWithNoActiveProxyRemovesAStaleFileFromAPreviousSession() {
+        let (manager, _, _, envFile) = makeRig()
+
+        manager.start()
+
+        XCTAssertGreaterThan(envFile.removeCount, 0,
+                             "a fresh process must not trust an uninitialized cache over the real file")
+        XCTAssertNil(envFile.contents)
     }
 }
