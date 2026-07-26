@@ -273,6 +273,12 @@ enum L10n {
         t("Command did not start in the terminal — Ghostty did not open or Accessibility access for tabs is missing.",
           "Команда не стартовала в терминале — Ghostty не открылся или нет доступа «Универсальный доступ» для табов.")
     }
+    /// The `.custom` twin of the above: that launch is not waited on, so this timeout is its only
+    /// failure channel — the message must point at the command the user typed, not at Ghostty.
+    static var terminalCustomDidNotStart: String {
+        t("Command did not start in the terminal — the launch command probably failed: check the terminal’s path and that it keeps {script} running.",
+          "Команда не стартовала в терминале — скорее всего не сработала команда запуска: проверьте путь к терминалу и что он действительно запускает {script}.")
+    }
     /// Footer line printed inside the Ghostty tab when a command finishes.
     static func terminalDoneFooter(_ codeVar: String) -> String {
         t("[DevDeck] finished (code \(codeVar)). Press Enter to close.",
