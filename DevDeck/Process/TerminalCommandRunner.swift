@@ -227,8 +227,16 @@ struct GhosttyCommandRunner: CommandRunner {
         lines.append("code=$?")
         lines.append("echo $code > \(shQuote(exitFile.path))")
         lines.append("echo")
-        lines.append("print -P \"%F{8}\(L10n.terminalDoneFooter("$code"))%f\"")
-        lines.append("read")
+        if command.keepTerminalOpen {
+            lines.append("print -P \"%F{8}\(L10n.terminalStaysOpenFooter("$code"))%f\"")
+            // `exec` replaces this shell in place, so the tab becomes an ordinary login shell in the
+            // same directory with the command's environment still exported. The exit sentinel is
+            // written above, so DevDeck has already reported the real exit code by the time this runs.
+            lines.append("exec \"${SHELL:-/bin/zsh}\" -l")
+        } else {
+            lines.append("print -P \"%F{8}\(L10n.terminalDoneFooter("$code"))%f\"")
+            lines.append("read")
+        }
         return lines.joined(separator: "\n") + "\n"
     }
 
