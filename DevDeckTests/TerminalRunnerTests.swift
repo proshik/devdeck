@@ -61,7 +61,9 @@ final class TerminalRunnerTests: XCTestCase {
 
     func testScriptStartsWithAnExecutableShebang() {
         // `.custom` templates hand the path straight to execvp (`wezterm start -- <path>`,
-        // `kitty <path>`): no shebang → "Exec format error", visible only as a 30-second hang.
+        // `kitty <path>`). Without a shebang execvp silently falls back to /bin/sh, where `print -P`
+        // doesn't exist and the stay-open `exec` would pick the wrong shell — a failure that shows
+        // up only as a lost footer, or as a 30-second hang when the mode is 0644 as well.
         let command = Command(id: UUID(), name: "c", command: "x", openInTerminal: true)
         let script = GhosttyCommandRunner.script(command,
                                                  pidFile: URL(fileURLWithPath: "/tmp/p"),
