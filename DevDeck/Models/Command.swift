@@ -33,6 +33,10 @@ struct Command: Codable, Identifiable, Hashable {
     /// storing one. Lets a single "claude" command serve every project. Direct runs only —
     /// a chain step has no UI to ask from and uses its own `workingDirectory`.
     var promptForDirectory: Bool
+    /// When the command finishes in a terminal, hand the tab over to an interactive shell in the
+    /// same directory instead of waiting for Enter and closing. For tools you re-run by hand, or
+    /// when you want to poke around where the command ran.
+    var keepTerminalOpen: Bool
 
     init(
         id: UUID = UUID(),
@@ -47,7 +51,8 @@ struct Command: Codable, Identifiable, Hashable {
         watchdogEnabled: Bool = false,
         port: Int? = nil,
         routeThroughProxy: Bool = false,
-        promptForDirectory: Bool = false
+        promptForDirectory: Bool = false,
+        keepTerminalOpen: Bool = false
     ) {
         self.id = id
         self.name = name
@@ -62,11 +67,12 @@ struct Command: Codable, Identifiable, Hashable {
         self.port = port
         self.routeThroughProxy = routeThroughProxy
         self.promptForDirectory = promptForDirectory
+        self.keepTerminalOpen = keepTerminalOpen
     }
 
     enum CodingKeys: String, CodingKey {
         case id, name, command, workingDirectory, isDaemon, needsSudo, env, appsToQuit, openInTerminal,
-             watchdogEnabled, port, routeThroughProxy, promptForDirectory
+             watchdogEnabled, port, routeThroughProxy, promptForDirectory, keepTerminalOpen
     }
 
     init(from decoder: Decoder) throws {
@@ -84,6 +90,7 @@ struct Command: Codable, Identifiable, Hashable {
         port = try c.decodeIfPresent(Int.self, forKey: .port)
         routeThroughProxy = try c.decodeIfPresent(Bool.self, forKey: .routeThroughProxy) ?? false
         promptForDirectory = try c.decodeIfPresent(Bool.self, forKey: .promptForDirectory) ?? false
+        keepTerminalOpen = try c.decodeIfPresent(Bool.self, forKey: .keepTerminalOpen) ?? false
     }
 
     /// A copy bound to a directory chosen at launch time. `nil`/empty returns an unchanged copy so
