@@ -35,7 +35,8 @@ final class ProxyManagerDiscoveryTests: XCTestCase {
         let manager = ProxyManager(discovering: discovering,
                                    advertiser: FakeProxyAdvertising(),
                                    credentials: credentials,
-                                   lanIP: lanIP)
+                                   lanIP: lanIP,
+                                   envFile: FakeProxyEnvFile())
         manager.store = store
         return (manager, store, discovering)
     }

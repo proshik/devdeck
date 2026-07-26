@@ -97,7 +97,8 @@ final class ProxyManagerShareTests: XCTestCase {
             lanIP: { lanIP },
             gostPath: { _ in gostInstalled ? "/opt/homebrew/bin/gost" : nil },
             exitIPProbe: exitIPProbe ?? { _ in exitIP },
-            exitIPRetryDelay: .milliseconds(1)   // the retry loop is exercised, not waited on
+            exitIPRetryDelay: .milliseconds(1),   // the retry loop is exercised, not waited on
+            envFile: FakeProxyEnvFile()
         )
         manager.store = store
         manager.processManager = processManager
