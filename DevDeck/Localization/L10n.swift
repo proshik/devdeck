@@ -72,6 +72,19 @@ enum L10n {
     static var terminalModePicker: String { t("Terminal mode (shared)", "Режим терминала (общий)") }
     static var terminalWindow: String { t("New window", "Новое окно") }
     static var terminalTab: String { t("Tab (AppleScript)", "Таб (AppleScript)") }
+    static var terminalCustom: String { t("Custom command", "Своя команда") }
+    static var terminalCustomCommandLabel: String { t("Launch command", "Команда запуска") }
+    static var terminalCustomCommandHint: String {
+        t("{script} is replaced with the path to the generated script. Examples: wezterm start -- {script} · open -a iTerm {script} · kitty {script}",
+          "{script} заменяется на путь к сгенерированному скрипту. Примеры: wezterm start -- {script} · open -a iTerm {script} · kitty {script}")
+    }
+    static var keepTerminalOpenToggle: String {
+        t("Stay in the shell after the command finishes", "Оставаться в шелле после завершения команды")
+    }
+    static var keepTerminalOpenHint: String {
+        t("The tab becomes an ordinary shell in the same directory instead of closing — for re-running the command by hand or looking around afterwards.",
+          "Таб превращается в обычный шелл в той же папке вместо закрытия — чтобы перезапустить команду руками или осмотреться после неё.")
+    }
 
     static var envSection: String { t("Environment variables", "Переменные окружения") }
     static var envKeyPlaceholder: String { t("KEY", "КЛЮЧ") }
