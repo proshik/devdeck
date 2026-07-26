@@ -25,9 +25,9 @@ final class ProxyShellHelperTests: XCTestCase {
                            atomically: true, encoding: .utf8)
     }
 
-    /// Runs the snippet under zsh with a sandboxed HOME, then `dp /bin/echo MARKER`.
-    private func runHelper() throws -> (status: Int32, output: String) {
-        let script = proxyShellHelperSnippet + "\ndp /bin/echo MARKER\n"
+    /// Runs the snippet under zsh with a sandboxed HOME, then `tail` — by default `dp /bin/echo MARKER`.
+    private func runHelper(_ tail: String = "dp /bin/echo MARKER\n") throws -> (status: Int32, output: String) {
+        let script = proxyShellHelperSnippet + "\n" + tail
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/zsh")
         process.arguments = ["-c", script]
@@ -69,6 +69,34 @@ final class ProxyShellHelperTests: XCTestCase {
 
         XCTAssertNotEqual(result.status, 0)
         XCTAssertFalse(result.output.contains("MARKER"))
+    }
+
+    /// Typing a command name alone to see what it wants is ordinary behaviour — and with nothing to
+    /// prefix, the env line would stop being a command prefix and become a plain assignment,
+    /// proxying the CALLING shell for the rest of its life (clobbering an exported HTTPS_PROXY) while
+    /// returning 0. The file here is well-formed, and status 2 is the guard's own code — distinct
+    /// from the 1 every other refusal returns — so this cannot pass for one of the later checks.
+    func testRefusesWithNoArgumentsAndDoesNotProxyTheCallingShell() throws {
+        try writeEnvFile("""
+        DEVDECK_PROXY_URL=http://203.0.113.9:9999
+        DEVDECK_PROXY_LAN=203.0.113
+
+        """)
+
+        // `exit $rc` keeps dp's own exit code as the process status while still probing the shell.
+        // Not `status=$?` — in zsh `status` is a read-only alias for `$?`.
+        let result = try runHelper("""
+        dp
+        rc=$?
+        print "LEAKED=[$HTTPS_PROXY]"
+        exit $rc
+
+        """)
+
+        XCTAssertEqual(result.status, 2, "bare dp must refuse, not silently succeed")
+        XCTAssertTrue(result.output.contains("LEAKED=[]"),
+                      "the env must never leak into the calling shell — got: \(result.output)")
+        XCTAssertTrue(result.output.contains("usage:"), "say what it wants: \(result.output)")
     }
 
     func testSnippetDoesNotSourceTheEnvFile() {
