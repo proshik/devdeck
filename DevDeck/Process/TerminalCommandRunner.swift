@@ -73,6 +73,12 @@ enum TerminalLaunchMode: String {
     static let commandKey = "terminalLaunchCommand"
 }
 
+/// The mode currently selected in the UI. A free function so the launcher and the runner's
+/// failure message read one setting through one piece of code.
+func currentTerminalLaunchMode(_ defaults: UserDefaults = .standard) -> TerminalLaunchMode {
+    TerminalLaunchMode(rawValue: defaults.string(forKey: TerminalLaunchMode.key) ?? "") ?? .window
+}
+
 /// Substitute the wrapper script's path into the user's template. Pure.
 ///
 /// nil when the template cannot work — blank, or missing the `{script}` placeholder. Rejecting it
@@ -167,6 +173,14 @@ struct CustomCommandLauncher: TerminalLauncher {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/zsh")
         process.arguments = ["-lc", command]
+        // Not waiting costs the exit status; a termination handler gets it back without blocking,
+        // so a template that fails inside zsh leaves a trace instead of only a 30-second timeout.
+        process.terminationHandler = { finished in
+            guard finished.terminationStatus != 0 else { return }
+            DiagnosticLog.shared.log(
+                "Terminal: custom launch exited with code \(finished.terminationStatus) — \(command)",
+                level: .error)
+        }
         do {
             try process.run()   // not waited on — see the note above
         } catch {
@@ -189,10 +203,7 @@ struct ModeSelectingLauncher: TerminalLauncher {
         window: any TerminalLauncher = GhosttyLauncher(),
         tab: any TerminalLauncher = AppleScriptTabLauncher(),
         custom: any TerminalLauncher = CustomCommandLauncher(),
-        mode: @escaping @Sendable () -> TerminalLaunchMode = {
-            TerminalLaunchMode(rawValue: UserDefaults.standard.string(forKey: TerminalLaunchMode.key) ?? "")
-                ?? .window
-        }
+        mode: @escaping @Sendable () -> TerminalLaunchMode = { currentTerminalLaunchMode() }
     ) {
         self.window = window
         self.tab = tab
@@ -247,6 +258,9 @@ struct GhosttyCommandRunner: CommandRunner {
     let maxStartupTicks: Int
     let killTree: @Sendable (Int32) -> Void
     let isAlive: @Sendable (Int32) -> Bool
+    /// Which mode the launch used — only to word the startup-timeout message. Injected like the
+    /// other seams so the choice is testable without touching UserDefaults.
+    let launchMode: @Sendable () -> TerminalLaunchMode
 
     init(
         launcher: any TerminalLauncher = ModeSelectingLauncher(),
@@ -254,7 +268,8 @@ struct GhosttyCommandRunner: CommandRunner {
         pollInterval: Duration = .milliseconds(300),
         maxStartupTicks: Int = 100,
         killTree: @escaping @Sendable (Int32) -> Void = { ProcessTree.terminate($0) },
-        isAlive: @escaping @Sendable (Int32) -> Bool = { ProcessTree.isAlive($0) }
+        isAlive: @escaping @Sendable (Int32) -> Bool = { ProcessTree.isAlive($0) },
+        launchMode: @escaping @Sendable () -> TerminalLaunchMode = { currentTerminalLaunchMode() }
     ) {
         self.launcher = launcher
         self.baseDir = baseDir
@@ -262,13 +277,15 @@ struct GhosttyCommandRunner: CommandRunner {
         self.maxStartupTicks = maxStartupTicks
         self.killTree = killTree
         self.isAlive = isAlive
+        self.launchMode = launchMode
     }
 
     func start(_ command: Command) -> any RunningProcess {
         let dir = baseDir.appendingPathComponent("devdeck-term-\(UUID().uuidString)")
         return GhosttyRunningProcess(
             command: command, dir: dir, launcher: launcher, pollInterval: pollInterval,
-            maxStartupTicks: maxStartupTicks, killTree: killTree, isAlive: isAlive)
+            maxStartupTicks: maxStartupTicks, killTree: killTree, isAlive: isAlive,
+            launchMode: launchMode)
     }
 
     /// Wrapper script: shebang → cd/env → write PID → command → write code → pause on "Press Enter to close".
@@ -325,7 +342,8 @@ final class GhosttyRunningProcess: RunningProcess, @unchecked Sendable {
         pollInterval: Duration,
         maxStartupTicks: Int,
         killTree: @escaping @Sendable (Int32) -> Void,
-        isAlive: @escaping @Sendable (Int32) -> Bool
+        isAlive: @escaping @Sendable (Int32) -> Bool,
+        launchMode: @escaping @Sendable () -> TerminalLaunchMode
     ) {
         self.killTree = killTree
         let (stream, cont) = AsyncStream.makeStream(of: RunnerOutput.self, bufferingPolicy: .unbounded)
@@ -371,7 +389,12 @@ final class GhosttyRunningProcess: RunningProcess, @unchecked Sendable {
                 if !tracker.startedEmitted {   // hasn't started yet → guard timeout
                     startupTicks += 1
                     if startupTicks >= maxStartupTicks {
-                        cont.yield(.line(L10n.terminalDidNotStart, stream: .stderr))
+                        // In `.custom` mode this timeout is the ONLY failure channel — the launch is
+                        // deliberately not waited on — so blaming Ghostty would misdiagnose every
+                        // typo'd binary and every terminal that exits on its own.
+                        let message = launchMode() == .custom
+                            ? L10n.terminalCustomDidNotStart : L10n.terminalDidNotStart
+                        cont.yield(.line(message, stream: .stderr))
                         cont.yield(.terminated(exitCode: 127))
                         cont.finish()
                         return
