@@ -71,7 +71,9 @@ struct LiveProxyEnvFile: ProxyEnvFileWriting {
         }
         let fd = open(url.path, O_WRONLY | O_CREAT | O_TRUNC, 0o600)
         guard fd >= 0 else {
-            DiagnosticLog.shared.log("Proxy env file: could not open \(url.path) — \(Self.errnoText())",
+            // errno is captured before anything else can clobber it — likewise below.
+            let code = errno
+            DiagnosticLog.shared.log("Proxy env file: could not open \(url.path) — \(Self.errnoText(code))",
                                      level: .warn)
             return false
         }
@@ -79,16 +81,18 @@ struct LiveProxyEnvFile: ProxyEnvFileWriting {
         // Before any byte is written: an existing file keeps its own mode through O_CREAT, so a
         // 0644 file left by an older build (or by hand) must be tightened first, not after.
         guard fchmod(fd, 0o600) == 0 else {
+            let code = errno
             DiagnosticLog.shared.log("Proxy env file: could not set mode 0600 on \(url.path) — "
-                + Self.errnoText(), level: .warn)
+                + Self.errnoText(code), level: .warn)
             return false
         }
         let bytes = Data(contents.utf8)
         let written = bytes.withUnsafeBytes { Darwin.write(fd, $0.baseAddress, $0.count) }
+        let writeErrno = errno
         guard written == bytes.count else {
             DiagnosticLog.shared.log(
                 "Proxy env file: wrote \(written) of \(bytes.count) bytes to \(url.path) — "
-                    + Self.errnoText(), level: .warn)
+                    + Self.errnoText(writeErrno), level: .warn)
             return false
         }
         return true
@@ -103,7 +107,7 @@ struct LiveProxyEnvFile: ProxyEnvFileWriting {
         return false
     }
 
-    private static func errnoText(_ code: Int32 = errno) -> String {
+    private static func errnoText(_ code: Int32) -> String {
         String(cString: strerror(code)) + " (errno \(code))"
     }
 }
