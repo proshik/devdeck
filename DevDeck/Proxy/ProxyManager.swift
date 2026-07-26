@@ -31,7 +31,10 @@ final class ProxyManager {
     @ObservationIgnored private let exitIPAttempts: Int
     @ObservationIgnored private let exitIPRetryDelay: Duration
     /// Maintains `~/.config/devdeck/proxy.env` for the `dp` shell helper.
-    @ObservationIgnored private let envFile: any ProxyEnvFileWriting
+    @ObservationIgnored private let envFile: any PrivateFileWriting
+    /// Maintains the generated `gost.json` the listener is started with. Owner-only, because it
+    /// holds the share password in plaintext — the command line no longer does.
+    @ObservationIgnored private let shareConfigFile: any PrivateFileWriting
     /// Last contents handed to `envFile`, so a browse update that changes nothing doesn't rewrite
     /// the file. nil means the file is absent as far as we know.
     @ObservationIgnored private var lastProxyEnvContents: String?
@@ -75,7 +78,8 @@ final class ProxyManager {
         },
         exitIPAttempts: Int = 4,
         exitIPRetryDelay: Duration = .seconds(1),
-        envFile: any ProxyEnvFileWriting = LiveProxyEnvFile()
+        envFile: any PrivateFileWriting = LivePrivateFile(url: proxyEnvFileURL),
+        shareConfigFile: any PrivateFileWriting = LivePrivateFile(url: ProxyShare.configURL)
     ) {
         self.discovering = discovering
         self.advertiser = advertiser
@@ -86,6 +90,7 @@ final class ProxyManager {
         self.exitIPAttempts = exitIPAttempts
         self.exitIPRetryDelay = exitIPRetryDelay
         self.envFile = envFile
+        self.shareConfigFile = shareConfigFile
     }
 
     // MARK: - Lifecycle
@@ -132,13 +137,22 @@ final class ProxyManager {
     /// Run state of the synthetic `gost` daemon (drives the popover row).
     var shareState: ProcessManager.RunState? { processManager?.states[ProxyShare.daemonID] }
 
-    /// Build the synthetic daemon command, pulling the password from the Keychain.
-    /// nil when `gost` isn't installed.
+    /// Build the synthetic daemon command. nil when `gost` isn't installed.
+    ///
+    /// The credentials are NOT here any more — they live in the config file this command points at,
+    /// so the command string is safe to log and to show.
     func shareCommand() -> Command? {
-        let share = share
         guard let path = gostPath(share) else { return nil }
+        return share.toCommand(gostPath: path, configPath: shareConfigFile.url.path)
+    }
+
+    /// Write the config the listener is started with. False → do not start: `gost -C` on a missing
+    /// file exits immediately, and starting anyway would just feed the watchdog a restart loop.
+    private func writeShareConfig() -> Bool {
+        let share = share
         let password = share.authEnabled ? credentials.password(for: ProxyCredentialAccount.share) : nil
-        return share.toCommand(gostPath: path, password: password)
+        guard let json = share.gostConfigJSON(password: password) else { return false }
+        return shareConfigFile.write(json)
     }
 
     /// Adopt a `gost` that survived a previous session, then start one if none is up.
@@ -152,6 +166,14 @@ final class ProxyManager {
             return
         }
         gostMissing = false
+        // Before anything is launched: the listener reads its credentials from this file, and
+        // rewriting it here is also what applies a password or port change on restart.
+        guard writeShareConfig() else {
+            DiagnosticLog.shared.log(
+                "Proxy share: could not write \(shareConfigFile.url.path) — the listener was not started",
+                level: .error)
+            return
+        }
         // Arm BEFORE anything can change the daemon's state, so the very first transition to
         // `daemonRunning` is what triggers the announcement — no matter who started the share
         // (launch, the Settings toggle, or the popover's play button).
@@ -168,10 +190,19 @@ final class ProxyManager {
         syncAdvertising()
     }
 
-    /// Stop the listener and withdraw the announcement.
+    /// Stop the listener, withdraw the announcement, and take the password back off the disk.
+    ///
+    /// The removal is last and unconditional: `stop` disarms the watchdog, so nothing is going to
+    /// want this file again until the next explicit start, which rewrites it. (`gost` reads the
+    /// config once at startup, so removing it never disturbs a listener that is already up.)
+    ///
+    /// Quitting the app does NOT come through here, so the file outlives a quit either way. That is
+    /// a tidiness gap rather than an exposure — it is 0600, and the same password is in the
+    /// Keychain regardless.
     func stopShare() {
         processManager?.stop(ProxyShare.daemonID)
         stopAdvertising()
+        _ = shareConfigFile.remove()
     }
 
     /// Persist share settings; a live listener is restarted so port/auth changes take effect.

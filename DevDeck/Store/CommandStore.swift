@@ -34,13 +34,19 @@ final class CommandStore {
 
     /// `~/Library/Application Support/DevDeck/config.json`.
     nonisolated static var defaultConfigURL: URL {
-        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        return base.appendingPathComponent("DevDeck/config.json")
+        PrivateFile.applicationSupportDirectory.appendingPathComponent("config.json")
     }
 
     /// Full start: first launch (copy the default) → load → watch. Idempotent w.r.t. the file.
+    ///
+    /// The permissions pass runs on every launch rather than only on creation, because installs
+    /// made before it shipped have a 0755 directory and a 0644 config — and config.json is a
+    /// complete description of what this user runs and where, readable by every other account on
+    /// the Mac. A save would fix it too, but only for users who happen to save.
     func start() {
         installDefaultConfigIfNeeded()
+        try? ensureDirectoryExists()
+        PrivateFile.restrict(configURL)
         reload()
         startWatching()
     }
@@ -73,10 +79,15 @@ final class CommandStore {
     }
 
     /// Atomically save the config (temp + rename) and update the in-memory state.
+    ///
+    /// `.atomic` is kept — a torn config file is a worse failure than a brief permissions window,
+    /// and unlike `proxy.env` this file holds no password. The rename lands a fresh inode at the
+    /// default 0644, so the mode is reapplied right after every write.
     func save(_ newConfig: Config) throws {
         let data = try ConfigCodec.encode(newConfig)
         try ensureDirectoryExists()
         try data.write(to: configURL, options: .atomic)
+        PrivateFile.restrict(configURL)
         config = newConfig
         error = nil
     }
@@ -277,14 +288,12 @@ final class CommandStore {
         // encode(.empty) effectively never fails; in the impossible failure case we just skip creating it.
         guard let data = defaultConfigData ?? (try? ConfigCodec.encode(.empty)) else { return }
         try? data.write(to: configURL, options: .atomic)
+        PrivateFile.restrict(configURL)
         DiagnosticLog.shared.log("First launch: wrote the starter config (\(defaultConfigData != nil ? "bundled examples" : "empty"))")
     }
 
     private func ensureDirectoryExists() throws {
-        try FileManager.default.createDirectory(
-            at: configURL.deletingLastPathComponent(),
-            withIntermediateDirectories: true
-        )
+        try PrivateFile.makeDirectory(at: configURL.deletingLastPathComponent())
     }
 
     private func startWatching() {

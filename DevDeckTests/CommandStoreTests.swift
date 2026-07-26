@@ -32,6 +32,48 @@ final class CommandStoreTests: XCTestCase {
         Config(commands: [Command(id: UUID(), name: name, command: "colima stop")])
     }
 
+    private func mode(of url: URL) throws -> Int {
+        let attrs = try FileManager.default.attributesOfItem(atPath: url.path)
+        return try XCTUnwrap(attrs[.posixPermissions] as? NSNumber).intValue
+    }
+
+    // MARK: permissions
+
+    func testSaveLeavesTheConfigOwnerOnly() throws {
+        // config.json is a complete description of what this user runs and where. `.atomic` lands a
+        // fresh inode at the default 0644, so the mode has to be reapplied after every write.
+        let store = CommandStore(configURL: configURL)
+        self.store = store
+
+        try store.save(sampleConfig())
+
+        XCTAssertEqual(try mode(of: configURL), 0o600)
+        XCTAssertEqual(try mode(of: dir), 0o700)
+    }
+
+    func testStartTightensAConfigLeftLooseByAnOlderBuild() throws {
+        try writeFile(sampleConfig())
+        try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: configURL.path)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: dir.path)
+
+        let store = CommandStore(configURL: configURL)
+        self.store = store
+        store.start()
+
+        XCTAssertEqual(try mode(of: configURL), 0o600, "the migration has to reach installs that never save")
+        XCTAssertEqual(try mode(of: dir), 0o700)
+    }
+
+    func testFirstLaunchWritesTheStarterConfigOwnerOnly() throws {
+        let store = CommandStore(configURL: configURL,
+                                 defaultConfigData: try ConfigCodec.encode(sampleConfig()))
+        self.store = store
+
+        store.start()
+
+        XCTAssertEqual(try mode(of: configURL), 0o600)
+    }
+
     // MARK: first launch
 
     func testStartCopiesBundledDefaultOnFirstRun() throws {

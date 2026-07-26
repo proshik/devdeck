@@ -36,7 +36,7 @@ final class ProxyManagerDiscoveryTests: XCTestCase {
                                    advertiser: FakeProxyAdvertising(),
                                    credentials: credentials,
                                    lanIP: lanIP,
-                                   envFile: FakeProxyEnvFile())
+                                   envFile: FakePrivateFile())
         manager.store = store
         return (manager, store, discovering)
     }

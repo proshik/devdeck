@@ -1,10 +1,18 @@
 import Foundation
 @testable import DevDeck
 
-/// Records what would have been written to `~/.config/devdeck/proxy.env` — the real path is never
-/// touched by tests. `writeSucceeds` / `removeSucceeds` simulate a disk that refuses (full disk,
-/// read-only home): the manager must then keep believing the old state and retry.
-final class FakeProxyEnvFile: ProxyEnvFileWriting, @unchecked Sendable {
+/// Records what would have been written to an owner-only file (`proxy.env`, `gost.json`) — the real
+/// paths are never touched by tests. `writeSucceeds` / `removeSucceeds` simulate a disk that refuses
+/// (full disk, read-only home): the manager must then keep believing the old state and retry.
+final class FakePrivateFile: PrivateFileWriting, @unchecked Sendable {
+    /// Stands in for the real path. The gost config's path travels onto the listener's command
+    /// line, so tests assert against this value rather than a hardcoded string.
+    let url: URL
+
+    init(url: URL = URL(fileURLWithPath: "/fake/private-file")) {
+        self.url = url
+    }
+
     private let lock = NSLock()
     private var _contents: String?
     private var _removeCount = 0
