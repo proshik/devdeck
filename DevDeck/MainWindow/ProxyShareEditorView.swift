@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 /// Proxy Manager page: the host side (share this Mac's VPN egress) above the client side
 /// (pick a proxy found on the network). Both halves are independent — a Mac normally uses one.
@@ -15,6 +16,8 @@ struct ProxyShareEditorView: View {
     @State private var clientPassword = ""
     /// The proxy name the credential fields were loaded for — reset when the choice changes.
     @State private var loadedFor: String?
+    /// Flips to true for 2s after "Copy" — feedback that the snippet is on the clipboard.
+    @State private var didCopy = false
 
     init(share: ProxyShare) {
         _draft = State(initialValue: share)
@@ -24,6 +27,7 @@ struct ProxyShareEditorView: View {
         Form {
             shareSection
             discoverySection
+            terminalHelperSection
         }
         .formStyle(.grouped)
         .navigationTitle(L10n.proxySection)
@@ -195,5 +199,35 @@ struct ProxyShareEditorView: View {
             Text(text)
         }
         .font(.caption)
+    }
+
+    // MARK: - Terminal helper
+
+    @ViewBuilder
+    private var terminalHelperSection: some View {
+        Section(L10n.proxyTerminalHelperSection) {
+            Text(L10n.proxyTerminalHelperHint).font(.caption).foregroundStyle(.secondary)
+            Text(proxyShellHelperSnippet)
+                .font(.system(size: 11, design: .monospaced))
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            HStack {
+                Text(proxyEnvFileDisplayPath)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button(didCopy ? L10n.copied : L10n.copy) { copySnippet() }
+            }
+        }
+    }
+
+    private func copySnippet() {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(proxyShellHelperSnippet, forType: .string)
+        didCopy = true
+        Task {
+            try? await Task.sleep(for: .seconds(2))
+            didCopy = false
+        }
     }
 }

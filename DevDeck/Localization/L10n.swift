@@ -361,4 +361,20 @@ enum L10n {
         t("Traffic goes through “\(name)”", "Трафик пойдёт через «\(name)»")
     }
     static func proxyEndpoint(_ host: String, _ port: Int) -> String { "\(host):\(port)" }
+
+    static var promptForDirectoryToggle: String {
+        t("Ask for a directory on every run", "Спрашивать директорию при каждом запуске")
+    }
+    static var promptForDirectoryHint: String {
+        t("One command for every project: the directory is chosen at launch and is not saved. Applies to runs from the deck — a chain step uses its own working directory.",
+          "Одна команда на все проекты: директория выбирается при запуске и не сохраняется. Работает при запуске из деки — шаг цепочки использует свою рабочую директорию.")
+    }
+    static var chooseRunDirectory: String { t("Run here", "Запустить здесь") }
+    static var proxyTerminalHelperSection: String { t("Terminal helper", "Помощник для терминала") }
+    static var proxyTerminalHelperHint: String {
+        t("Paste this into ~/.zshrc, then run anything through the active proxy from any directory: dp claude. It reads the file below and refuses if that proxy is not on the current network.",
+          "Вставьте это в ~/.zshrc, и запускайте что угодно через активный прокси из любой директории: dp claude. Функция читает файл ниже и откажется работать, если этот прокси не в текущей сети.")
+    }
+    static var copy: String { t("Copy", "Копировать") }
+    static var copied: String { t("Copied", "Скопировано") }
 }

@@ -69,6 +69,12 @@ struct CommandEditorView: View {
                         Text(L10n.terminalTab).tag(TerminalLaunchMode.tab.rawValue)
                     }
                 }
+                Toggle(L10n.promptForDirectoryToggle, isOn: $draft.promptForDirectory)
+                if draft.promptForDirectory {
+                    Text(L10n.promptForDirectoryHint)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
                 if draft.command.contains("cargo") || draft.command.contains("dev-build") {
                     let cfg = effectiveVMConfig(manager.vmBuildConfig)
                     let advice = adviseJobs(command: draft.command, env: assembledDraft.env,
