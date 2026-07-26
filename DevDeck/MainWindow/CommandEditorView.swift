@@ -39,6 +39,15 @@ struct CommandEditorView: View {
                     ))
                     Button(L10n.choose) { chooseDirectory() }
                 }
+                // Directly under the directory field: the two settle the same question, and the
+                // field above keeps a job even when the prompt is on (it seeds the picker and is
+                // what a chain step or the watchdog shield falls back to), so it stays editable.
+                Toggle(L10n.promptForDirectoryToggle, isOn: $draft.promptForDirectory)
+                if draft.promptForDirectory {
+                    Text(L10n.promptForDirectoryHint)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
                 Toggle(L10n.daemonToggle, isOn: $draft.isDaemon)
                 if draft.isDaemon {
                     TextField(L10n.localPort, value: $draft.port, format: .number.grouping(.never))
@@ -68,12 +77,6 @@ struct CommandEditorView: View {
                         Text(L10n.terminalWindow).tag(TerminalLaunchMode.window.rawValue)
                         Text(L10n.terminalTab).tag(TerminalLaunchMode.tab.rawValue)
                     }
-                }
-                Toggle(L10n.promptForDirectoryToggle, isOn: $draft.promptForDirectory)
-                if draft.promptForDirectory {
-                    Text(L10n.promptForDirectoryHint)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
                 }
                 if draft.command.contains("cargo") || draft.command.contains("dev-build") {
                     let cfg = effectiveVMConfig(manager.vmBuildConfig)

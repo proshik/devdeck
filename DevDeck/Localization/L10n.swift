@@ -366,8 +366,8 @@ enum L10n {
         t("Ask for a directory on every run", "Спрашивать директорию при каждом запуске")
     }
     static var promptForDirectoryHint: String {
-        t("One command for every project: the directory is chosen at launch and is not saved. Applies to runs from the deck — a chain step uses its own working directory.",
-          "Одна команда на все проекты: директория выбирается при запуске и не сохраняется. Работает при запуске из деки — шаг цепочки использует свою рабочую директорию.")
+        t("One command for every project: the directory is chosen at launch and never saved. The field above is where the picker opens — and what a chain step or the watchdog shield falls back to, since neither can ask.",
+          "Одна команда на все проекты: директория выбирается при запуске и не сохраняется. Поле выше — стартовая папка диалога, и его же используют шаг цепочки и щит watchdog: спросить они не могут.")
     }
     static var chooseRunDirectory: String { t("Run here", "Запустить здесь") }
     static func chooseRunDirectoryMessage(_ name: String) -> String {
