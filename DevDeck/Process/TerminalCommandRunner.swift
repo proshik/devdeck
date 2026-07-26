@@ -149,8 +149,10 @@ struct AppleScriptTabLauncher: TerminalLauncher {
 /// Launches through the user's own command line — any terminal, including ones that don't exist yet.
 ///
 /// Run via `zsh -lc` rather than a hand-rolled argv split: the user gets the full shell syntax, and
-/// `-l` picks up their PATH from `.zshrc`, so `wezterm` resolves without an absolute path — exactly
-/// how every other command in this app is launched.
+/// `-l` picks up the PATH a login shell builds — exactly how every other command in this app is
+/// launched. Note that a login shell which is not interactive reads `.zshenv`, `.zprofile` and
+/// `.zlogin` but NOT `.zshrc`, so a bare `wezterm` resolves only if the user's PATH is set in one
+/// of those; the field's hint leads with an absolute path for that reason.
 ///
 /// Deliberately NOT waited on. A terminal that stays in the foreground (`alacritty -e` does) would
 /// otherwise block the caller before polling ever starts, leaving the command stuck in `running`
@@ -293,10 +295,13 @@ struct GhosttyCommandRunner: CommandRunner {
     /// Wrapper script: shebang → cd/env → write PID → command → write code → pause on "Press Enter to close".
     ///
     /// The shebang is load-bearing for `.custom`: templates like `wezterm start -- {script}` or
-    /// `kitty {script}` `execvp` the path directly, and without `#!` the kernel refuses it with
-    /// "Exec format error". (The Ghostty launchers hand the file to an explicit interpreter,
-    /// `zsh -l <script>`, for which the line is just a comment.) macOS passes everything after the
-    /// interpreter path as ONE argument, so `-l` is a single valid flag here.
+    /// `kitty {script}` `execvp` the path directly. Without `#!` the kernel returns ENOEXEC and
+    /// libc's `execvp` quietly re-runs the file under `/bin/sh` instead of failing — where
+    /// `print -P` is not a builtin, so the footer is lost and `keepTerminalOpen`'s
+    /// `exec "${SHELL:-/bin/zsh}" -l` would hand the tab to the wrong shell. (The Ghostty launchers
+    /// hand the file to an explicit interpreter, `zsh -l <script>`, for which the line is just a
+    /// comment.) macOS passes everything after the interpreter path as ONE argument, so `-l` is a
+    /// single valid flag here.
     /// The file is written with mode 0755 for the same reason — see `GhosttyRunningProcess`.
     static func script(_ command: Command, pidFile: URL, exitFile: URL) -> String {
         var lines: [String] = ["#!/bin/zsh -l"]
