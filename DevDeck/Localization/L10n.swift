@@ -73,10 +73,12 @@ enum L10n {
     static var terminalWindow: String { t("New window", "Новое окно") }
     static var terminalTab: String { t("Tab (AppleScript)", "Таб (AppleScript)") }
     static var terminalCustom: String { t("Custom command", "Своя команда") }
-    static var terminalCustomCommandLabel: String { t("Launch command", "Команда запуска") }
+    static var terminalCustomCommandLabel: String {
+        t("Launch command (shared)", "Команда запуска (общая)")
+    }
     static var terminalCustomCommandHint: String {
-        t("{script} is replaced with the path to the generated script. Examples: wezterm start -- {script} · open -a iTerm {script} · kitty {script}",
-          "{script} заменяется на путь к сгенерированному скрипту. Примеры: wezterm start -- {script} · open -a iTerm {script} · kitty {script}")
+        t("{script} is replaced with the path to the generated script — already quoted, so don’t add quotes around it. Give the terminal by full path unless you know it is on the PATH of a login shell. Examples: /opt/homebrew/bin/wezterm start -- {script} · open -a iTerm {script} · kitty {script}",
+          "{script} заменяется на путь к сгенерированному скрипту — уже в кавычках, свои кавычки добавлять не нужно. Указывайте терминал полным путём, если не уверены, что он есть в PATH логин-шелла. Примеры: /opt/homebrew/bin/wezterm start -- {script} · open -a iTerm {script} · kitty {script}")
     }
     static var keepTerminalOpenToggle: String {
         t("Stay in the shell after the command finishes", "Оставаться в шелле после завершения команды")
