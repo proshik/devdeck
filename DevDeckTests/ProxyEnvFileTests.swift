@@ -1,9 +1,9 @@
 import XCTest
 @testable import DevDeck
 
-/// The file the terminal helper reads: the pure text below, plus `LiveProxyEnvFile` itself against
+/// The file the terminal helper reads: the pure text below, plus `LivePrivateFile` itself against
 /// an injected temp path — never the real `~/.config`. The manager's own bookkeeping is covered
-/// separately through `FakeProxyEnvFile`.
+/// separately through `FakePrivateFile`.
 final class ProxyEnvFileTests: XCTestCase {
 
     private var dir: URL!
@@ -54,13 +54,13 @@ final class ProxyEnvFileTests: XCTestCase {
                        "an empty user must not produce a ':p@' prefix")
     }
 
-    // MARK: - LiveProxyEnvFile
+    // MARK: - LivePrivateFile
 
     /// The whole point of the POSIX write path: this file can hold the proxy password in plaintext.
     func testTheWrittenFileIsOwnerOnly() throws {
         let url = dir.appendingPathComponent(".config/devdeck/proxy.env")
 
-        XCTAssertTrue(LiveProxyEnvFile(url: url).write("DEVDECK_PROXY_URL=http://dev:s3cret@192.168.31.117:9999\n"))
+        XCTAssertTrue(LivePrivateFile(url: url).write("DEVDECK_PROXY_URL=http://dev:s3cret@192.168.31.117:9999\n"))
 
         XCTAssertEqual(try mode(of: url), 0o600)
         XCTAssertEqual(try String(contentsOf: url, encoding: .utf8),
@@ -79,7 +79,7 @@ final class ProxyEnvFileTests: XCTestCase {
     /// catches a stranded sibling, the inode catches the rename that produces one.
     func testWritingIsInPlaceAndLeavesNoSiblingTempFile() throws {
         let url = dir.appendingPathComponent(".config/devdeck/proxy.env")
-        let writer = LiveProxyEnvFile(url: url)
+        let writer = LivePrivateFile(url: url)
 
         XCTAssertTrue(writer.write("DEVDECK_PROXY_URL=http://a:1\n"))
         let firstInode = try XCTUnwrap(
@@ -104,7 +104,7 @@ final class ProxyEnvFileTests: XCTestCase {
                                                     attributes: [.posixPermissions: 0o644]))
         XCTAssertEqual(try mode(of: url), 0o644, "sanity: starts world-readable")
 
-        XCTAssertTrue(LiveProxyEnvFile(url: url).write("DEVDECK_PROXY_URL=http://dev:s3cret@h:1\n"))
+        XCTAssertTrue(LivePrivateFile(url: url).write("DEVDECK_PROXY_URL=http://dev:s3cret@h:1\n"))
 
         XCTAssertEqual(try mode(of: url), 0o600)
         XCTAssertEqual(try String(contentsOf: url, encoding: .utf8),
@@ -115,7 +115,7 @@ final class ProxyEnvFileTests: XCTestCase {
     func testTheDirectoryIsCreatedOwnerOnly() throws {
         let url = dir.appendingPathComponent(".config/devdeck/proxy.env")
 
-        XCTAssertTrue(LiveProxyEnvFile(url: url).write("DEVDECK_PROXY_URL=http://h:1\n"))
+        XCTAssertTrue(LivePrivateFile(url: url).write("DEVDECK_PROXY_URL=http://h:1\n"))
 
         XCTAssertEqual(try mode(of: url.deletingLastPathComponent()), 0o700,
                        "nobody else needs to list or traverse a directory holding a password")
@@ -123,7 +123,7 @@ final class ProxyEnvFileTests: XCTestCase {
 
     func testRemoveDeletesTheFileAndToleratesItBeingAbsent() throws {
         let url = dir.appendingPathComponent(".config/devdeck/proxy.env")
-        let writer = LiveProxyEnvFile(url: url)
+        let writer = LivePrivateFile(url: url)
         XCTAssertTrue(writer.write("DEVDECK_PROXY_URL=http://h:1\n"))
         XCTAssertTrue(FileManager.default.fileExists(atPath: url.path))
 

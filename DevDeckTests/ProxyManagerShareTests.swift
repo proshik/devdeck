@@ -39,6 +39,8 @@ final class ProxyManagerShareTests: XCTestCase {
         let runner: FakeCommandRunner
         let advertiser: FakeProxyAdvertising
         let credentials: FakeProxyCredentialStore
+        /// The generated gost config — where the credentials live now that the command line is clean.
+        let shareConfig: FakePrivateFile
 
         /// The synthetic daemon carries a `port`, so `run` goes through the proactive occupied-port
         /// check (a detached task) before launching — wait for the launch rather than assuming it.
@@ -90,6 +92,7 @@ final class ProxyManagerShareTests: XCTestCase {
                                            policy: Self.fastPolicy)
         let advertiser = FakeProxyAdvertising()
         let credentials = FakeProxyCredentialStore()
+        let shareConfig = FakePrivateFile(url: URL(fileURLWithPath: "/fake/gost.json"))
         let manager = ProxyManager(
             discovering: FakeProxyDiscovering(),
             advertiser: advertiser,
@@ -98,12 +101,14 @@ final class ProxyManagerShareTests: XCTestCase {
             gostPath: { _ in gostInstalled ? "/opt/homebrew/bin/gost" : nil },
             exitIPProbe: exitIPProbe ?? { _ in exitIP },
             exitIPRetryDelay: .milliseconds(1),   // the retry loop is exercised, not waited on
-            envFile: FakeProxyEnvFile()
+            envFile: FakePrivateFile(),
+            shareConfigFile: shareConfig
         )
         manager.store = store
         manager.processManager = processManager
         return Rig(manager: manager, store: store, processManager: processManager,
-                   runner: runner, advertiser: advertiser, credentials: credentials)
+                   runner: runner, advertiser: advertiser, credentials: credentials,
+                   shareConfig: shareConfig)
     }
 
     // MARK: starting the listener
@@ -117,8 +122,30 @@ final class ProxyManagerShareTests: XCTestCase {
         XCTAssertEqual(rig.runner.startedCommandIDs, [ProxyShare.daemonID])
         XCTAssertFalse(rig.manager.gostMissing)
         let started = rig.controller?.command
-        XCTAssertEqual(started?.command, "/opt/homebrew/bin/gost -L 'auto://:9999'")
+        XCTAssertEqual(started?.command, "'/opt/homebrew/bin/gost' -C '/fake/gost.json'")
         XCTAssertTrue(started?.watchdogEnabled == true)
+    }
+
+    func testTheConfigIsOnDiskBeforeTheListenerIsLaunched() async {
+        let rig = makeRig()
+
+        rig.manager.startShare()
+        await rig.awaitLaunch()
+
+        XCTAssertEqual(rig.shareConfig.contents, ProxyShare(port: 9999).gostConfigJSON(password: nil),
+                       "gost -C reads the file at startup — writing it after the launch would race")
+    }
+
+    func testAnUnwritableConfigStopsTheLaunch() async {
+        // `gost -C` on a missing file exits immediately, so launching anyway would just hand the
+        // watchdog a restart loop with no way to succeed.
+        let rig = makeRig()
+        rig.shareConfig.writeSucceeds = false
+
+        rig.manager.startShare()
+        await settle()
+
+        XCTAssertTrue(rig.runner.startedCommandIDs.isEmpty)
     }
 
     func testMissingGostFlagsItAndStartsNothing() async {
@@ -151,9 +178,12 @@ final class ProxyManagerShareTests: XCTestCase {
         rig.manager.startShare()
         await rig.awaitLaunch()
 
-        XCTAssertEqual(rig.controller?.command.command,
-                       "/opt/homebrew/bin/gost -L 'auto://dev:s3cret@:8888'")
-        // The password is in the Keychain, never in the config file on disk.
+        // The password reaches gost through the 0600 config file, never through the argv every
+        // local account can read.
+        XCTAssertEqual(rig.controller?.command.command, "'/opt/homebrew/bin/gost' -C '/fake/gost.json'")
+        XCTAssertEqual(rig.shareConfig.contents?.contains(#""password":"s3cret""#), true)
+        XCTAssertEqual(rig.shareConfig.contents?.contains(#""username":"dev""#), true)
+        // And still never into config.json.
         let onDisk = try? String(contentsOf: url, encoding: .utf8)
         XCTAssertFalse(onDisk?.contains("s3cret") ?? false)
     }
@@ -296,6 +326,8 @@ final class ProxyManagerShareTests: XCTestCase {
 
         XCTAssertFalse(rig.manager.isAdvertising)
         XCTAssertEqual(rig.advertiser.stopCount, 1)
+        XCTAssertNil(rig.shareConfig.contents,
+                     "the password should not outlive the listener that needed it")
     }
 
     func testDisabledShareStartsNothingOnLaunch() async {

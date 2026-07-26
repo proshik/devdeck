@@ -27,11 +27,11 @@ final class ProxyManagerEnvFileTests: XCTestCase {
     /// `testNoLANAddressRemovesTheFile`, which needs the address to disappear after the file exists.
     private func makeRig(lanIP: @escaping () -> String? = { "192.168.31.84" },
                          credentials: FakeProxyCredentialStore = FakeProxyCredentialStore())
-    -> (ProxyManager, CommandStore, FakeProxyDiscovering, FakeProxyEnvFile) {
+    -> (ProxyManager, CommandStore, FakeProxyDiscovering, FakePrivateFile) {
         let store = CommandStore(configURL: url)
         store.setProxyDiscoveryEnabled(true)
         let discovering = FakeProxyDiscovering()
-        let envFile = FakeProxyEnvFile()
+        let envFile = FakePrivateFile()
         let manager = ProxyManager(discovering: discovering,
                                    advertiser: FakeProxyAdvertising(),
                                    credentials: credentials,
