@@ -151,6 +151,31 @@ struct ModeSelectingLauncher: TerminalLauncher {
     }
 }
 
+/// Delete run directories left over by previous sessions.
+///
+/// The runner deliberately does NOT delete a directory when the command finishes: zsh reads the
+/// wrapper script incrementally and is still executing its last lines at that moment, so removing it
+/// underneath is a race — and losing it closes the tab, which is precisely what `keepTerminalOpen`
+/// exists to prevent. Cleaning up at launch is safe instead, because a tab that is still running is
+/// detectable: its `pid` sentinel names a live process.
+///
+/// `isAlive` is injected so the decision is testable without real processes.
+func sweepStaleTerminalDirectories(
+    in baseDir: URL = FileManager.default.temporaryDirectory,
+    isAlive: (Int32) -> Bool = { ProcessTree.isAlive($0) }
+) {
+    let fm = FileManager.default
+    guard let entries = try? fm.contentsOfDirectory(at: baseDir, includingPropertiesForKeys: nil)
+    else { return }
+    for dir in entries where dir.lastPathComponent.hasPrefix("devdeck-term-") {
+        let pidText = try? String(contentsOf: dir.appendingPathComponent("pid"), encoding: .utf8)
+        let pid = pidText.flatMap { Int32($0.trimmingCharacters(in: .whitespacesAndNewlines)) }
+        // A live pid means a tab from a previous session is still running this script.
+        if let pid, isAlive(pid) { continue }
+        try? fm.removeItem(at: dir)
+    }
+}
+
 // MARK: - Terminal runner
 
 /// Runs a command in a Ghostty tab and tracks it via sentinel files (PID/exit code),
@@ -248,6 +273,8 @@ final class GhosttyRunningProcess: RunningProcess, @unchecked Sendable {
                 cont.yield(.line(L10n.terminalLaunchFailed(msg), stream: .stderr))
                 cont.yield(.terminated(exitCode: 127))
                 cont.finish()
+                // Safe to delete here and only here: the launch failed, so no interpreter ever
+                // received this script. The other exits leave it to the startup sweep.
                 try? FileManager.default.removeItem(at: dir)
                 return
             }
@@ -261,7 +288,6 @@ final class GhosttyRunningProcess: RunningProcess, @unchecked Sendable {
                 for event in tracker.tick(pid: pid, exitCode: exit, pidAlive: alive) { cont.yield(event) }
                 if tracker.finished {
                     cont.finish()
-                    try? FileManager.default.removeItem(at: dir)
                     return
                 }
                 if !tracker.startedEmitted {   // hasn't started yet → guard timeout
@@ -270,7 +296,6 @@ final class GhosttyRunningProcess: RunningProcess, @unchecked Sendable {
                         cont.yield(.line(L10n.terminalDidNotStart, stream: .stderr))
                         cont.yield(.terminated(exitCode: 127))
                         cont.finish()
-                        try? FileManager.default.removeItem(at: dir)
                         return
                     }
                 }
