@@ -74,6 +74,27 @@ versioning follows [SemVer](https://semver.org/).
   and keeping `run.zsh` beside a live tab makes a misbehaving command diagnosable. They are swept at
   the next launch instead, once their terminal is gone.
 
+### Security
+- **The proxy share password no longer travels on the command line.** It used to be part of the
+  listener spec (`gost -L 'auto://user:pass@:9999'`), and macOS lets every local account read the
+  full argv of every process — root's included — so the password was effectively published to the
+  machine. The whole service definition moved into a generated `gost.json` (mode 0600, beside
+  config.json) and the command line carries nothing but its path. Closes the deferred risk recorded
+  in `docs/proxy-manager-plan.md`.
+  - A password containing `'` used to close the shell literal and run the rest of it as commands.
+    The config is generated with `JSONEncoder`, so the escaping is no longer hand-rolled and the
+    injection is structurally impossible.
+  - Upgrading with a listener already running: the occupied-port panel appears once, and
+    "Kill & start" is the intended path through it.
+- **`config.json` and `devdeck.log` are owner-only (0600), in an owner-only directory (0700).** They
+  were 0644 in a 0755 directory, readable by every other account on the Mac — while `proxy.env`
+  right next to them was carefully kept at 0600. config.json describes every command this user runs
+  and where; the log names every command, proxy and path involved. Existing installs are migrated on
+  the next launch, not only on the next save, and a rotated `devdeck.log.1` is tightened too.
+- One implementation of shell quoting instead of four copies, and the private-file writer now opens
+  with `O_NOFOLLOW`, so a symlink planted at `proxy.env` or `gost.json` cannot redirect a write that
+  may carry a password.
+
 ## [0.3.0] — 2026-06-20
 
 ### Added

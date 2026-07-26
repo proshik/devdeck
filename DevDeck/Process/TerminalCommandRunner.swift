@@ -329,9 +329,7 @@ struct GhosttyCommandRunner: CommandRunner {
         return lines.joined(separator: "\n") + "\n"
     }
 
-    static func shQuote(_ s: String) -> String {
-        "'" + s.replacingOccurrences(of: "'", with: "'\\''") + "'"
-    }
+    static func shQuote(_ s: String) -> String { shellQuote(s) }
 }
 
 /// Handle for a terminal run: prepares the script, launches Ghostty, polls the sentinels.

@@ -276,17 +276,58 @@ unchanged: the decode is resilient key-by-key (`decodeIfPresent ?? default`), no
 
 Known limitations, accepted for now:
 
-- The password appears in gost's `argv` (visible in `ps`). It is absent from config.json and from
-  the log (which keys off `command.name`). A gost config-file mode would fix it — deferred.
+- ~~The password appears in gost's `argv` (visible in `ps`).~~ — fixed 2026-07-26, see below.
 - `runChainInTerminal` calls `runner.start` directly, bypassing `startRun`, so
   "whole-chain-in-one-tab" does not get proxy env. Single terminal commands and step-by-step chains
   are covered.
 - Bonjour needs a network without client isolation (guest Wi-Fi usually blocks it) — but such a
   network wouldn't pass the proxy traffic either.
 
-Future work: a built-in Swift/`Network.framework` proxy instead of managing `gost`, which would drop
-the Homebrew dependency and the `ps` password exposure. Also deferred: multiple simultaneous shares,
-SOCKS-only/PAC, per-client ACLs and credential rotation.
+Deferred: multiple simultaneous shares, SOCKS-only/PAC, per-client ACLs and credential rotation.
+
+### Security review — 2026-07-26
+
+A full read of the service. Two findings fixed the same day (see CHANGELOG): the share password left
+the command line for a 0600 `gost.json`, and `config.json`/`devdeck.log` became owner-only. What was
+measured rather than assumed: **`ps` on macOS shows every local account the full argv of every
+process, root's included** — so a secret on a command line is a secret published to the machine.
+
+**Deferred #1 — a spoofed Bonjour name harvests the proxy credentials.** The service name is the
+only identity a peer has, and `rememberActiveEndpointIfLive` silently rebinds a saved name to
+whatever host announced it. Any device on the LAN that announces the victim's saved name receives
+`Proxy-Authorization: Basic …` from the next routed command, sees every destination host, and can
+read or rewrite anything not under TLS. Two ways out, and the cheap one is the one to do first:
+
+- **Pin the endpoint (~30 lines, not yet done).** Address behind a saved name changed → do not
+  route, do not send credentials, ask for one confirmation in the UI, then remember the new address.
+  Closes credential disclosure outright; interception then requires taking over the exact IP.
+- **Local forwarder on the client (big, explicitly deferred 2026-07-26).** The env vars would point
+  at `http://127.0.0.1:PORT`, DevDeck accepts locally and speaks TLS with a pinned key to the peer.
+  This is the only design that also retires the plaintext password in `proxy.env` and in the
+  terminal wrapper script. Costly, so not now.
+
+Worth recording, because it is the reasoning that decides the above: **replacing `gost` with our own
+proxy does not fix this.** The auth scheme is dictated by the clients, not by the listener — curl,
+Go and Node all speak only Basic over `HTTPS_PROXY`, and curl's proxy-certificate pinning has no
+env-var form. The env-var interface therefore cannot authenticate a proxy at all, whoever wrote it.
+A hand-rolled CONNECT proxy would also add a LAN-facing parser we own, where `gost` is battle-tested
+Go. Writing our own is a dependency/UX project (dropping the Homebrew requirement), not a security
+one — and if it happens, the part worth writing is the client-side forwarder above.
+
+**Deferred — orphan adoption has never worked for the gost daemon.** `LiveDaemonReaper.findOrphan`
+matches a pre-shell command string against post-shell argv from `ps`, and the quotes DevDeck adds
+never appear in argv. Verified for both the old (`-L 'auto://…'`) and new (`-C '<path>'`) forms, so
+a surviving listener always surfaces as an occupied port instead of being adopted. The defect is in
+the matching, not in the command; user daemons whose commands need no quoting are unaffected.
+
+**Deferred, lower — none of these cross a trust boundary that same-user code does not already
+cross:** env-var *keys* are interpolated unquoted into the sudo/chain/terminal shell builders (values
+are quoted; keys are only checked for non-emptiness); `rememberedProxy` accepts any non-empty host
+from a hand-edited config although its comment claims it mirrors the wire parser's dotted-quad
+guard; the `dp` helper leaves `$lan` unquoted on the right of `[[ == ]]`, where zsh treats it as a
+glob; the terminal wrapper script is mode 0755 and keeps the proxy URL — password included — until
+the next app launch sweeps it; and the `do shell script … with administrator privileges` dialog does
+not show the user what is about to run as root.
 
 ---
 

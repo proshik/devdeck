@@ -61,24 +61,102 @@ struct ProxyShare: Codable, Equatable {
         return host.hasSuffix(".local") ? String(host.dropLast(6)) : host
     }
 
+    /// Where the generated gost config lives. Fixed, not a temp path: orphan adoption after an app
+    /// restart matches a surviving `gost` by its command line, so the path has to be the same in
+    /// the next session as it was in the last one.
+    static var configURL: URL {
+        PrivateFile.applicationSupportDirectory.appendingPathComponent("gost.json")
+    }
+
     /// The synthetic daemon `Command` fed to `ProcessManager`.
     ///
-    /// gost v3 `auto://` serves HTTP and SOCKS on one listener; credentials are optional:
-    ///   open: `gost -L 'auto://:9999'`   ·   auth: `gost -L 'auto://user:pass@:9999'`
+    /// gost v3 `auto://` serves HTTP and SOCKS on one listener. Credentials used to travel in the
+    /// listener spec — `gost -L 'auto://user:pass@:9999'` — which put the password in the process's
+    /// argv, and macOS lets **every** local account read the full argv of every process, root's
+    /// included. So the whole service definition moves into a 0600 config file and the command line
+    /// carries nothing but its path.
     ///
-    /// The password only ever reaches the argv (see the `ps` caveat in the plan) — logs key off
-    /// `Command.name`, so it never lands in devdeck.log or config.json. `watchdogEnabled` is what
-    /// gives the "gost keeps dying" problem its auto-restart.
-    func toCommand(gostPath: String, password: String?) -> Command {
-        let creds = (authEnabled && !username.isEmpty) ? "\(username):\(password ?? "")@" : ""
-        let listener = "auto://\(creds):\(port)"
-        return Command(
+    /// A second problem disappears with it: the password no longer passes through a shell string,
+    /// so a quote in it can no longer close the literal and run the remainder as commands.
+    ///
+    /// The string is also stable across a password change now, where it used to differ. That does
+    /// NOT yet buy orphan adoption for this daemon: `findOrphan` matches a pre-shell command string
+    /// against post-shell argv from `ps`, and the quotes here (needed — the config path can contain
+    /// a space) never appear in argv. Adoption of the listener has therefore never worked, before
+    /// this change or after it; a surviving gost surfaces as an occupied port instead. Recorded
+    /// rather than fixed here, because the defect is in the matching, not in this string.
+    ///
+    /// `watchdogEnabled` is what gives the "gost keeps dying" problem its auto-restart.
+    func toCommand(gostPath: String, configPath: String) -> Command {
+        Command(
             id: Self.daemonID,
             name: L10n.proxyShareDaemonName,
-            command: "\(gostPath) -L '\(listener)'",
+            command: "\(shellQuote(gostPath)) -C \(shellQuote(configPath))",
             isDaemon: true,
             watchdogEnabled: true,
             port: port
         )
     }
+
+    /// The gost service definition, as JSON. Pure.
+    ///
+    /// JSON rather than gost's YAML for one reason: `JSONEncoder` escapes the credentials for us.
+    /// Hand-rolling YAML would mean hand-rolling the escaping of a value chosen by the user, in the
+    /// one place where getting it wrong hands over the password — the mistake this whole change
+    /// exists to undo. gost accepts either format, keyed off the file extension.
+    ///
+    /// Keys are sorted so the output is deterministic and the tests can assert it verbatim.
+    /// Credentials are omitted entirely unless auth is on AND a username exists, mirroring the
+    /// listener spec this replaces: gost treats an absent `auth` block as an open proxy.
+    func gostConfigJSON(password: String?) -> String? {
+        let auth = (authEnabled && !username.isEmpty)
+            ? GostAuth(username: username, password: password ?? "")
+            : nil
+        let config = GostConfig(services: [
+            GostService(
+                name: "devdeck-proxy",
+                addr: ":\(port)",
+                handler: GostHandler(type: "auto", auth: auth),
+                listener: GostListener(type: "tcp")
+            )
+        ])
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        guard let data = try? encoder.encode(config) else {
+            DiagnosticLog.shared.log("Proxy share: could not encode the gost config", level: .error)
+            return nil
+        }
+        return String(decoding: data, as: UTF8.self)
+    }
+}
+
+// MARK: - gost config file
+
+/// gost v3's config schema, only the slice we generate. Encode-only — DevDeck writes this file and
+/// never reads it back. Verified against `gost -L 'auto://user:pass@:port' -O yaml`, which prints
+/// the canonical config for a listener spec.
+struct GostConfig: Encodable, Equatable {
+    let services: [GostService]
+}
+
+struct GostService: Encodable, Equatable {
+    let name: String
+    let addr: String
+    let handler: GostHandler
+    let listener: GostListener
+}
+
+struct GostHandler: Encodable, Equatable {
+    let type: String
+    /// Absent for an open proxy — the key is omitted, not sent empty.
+    let auth: GostAuth?
+}
+
+struct GostAuth: Encodable, Equatable {
+    let username: String
+    let password: String
+}
+
+struct GostListener: Encodable, Equatable {
+    let type: String
 }

@@ -23,8 +23,7 @@ final class DiagnosticLog: @unchecked Sendable {
             return FileManager.default.temporaryDirectory
                 .appendingPathComponent("DevDeck-test/devdeck.log")
         }
-        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        return base.appendingPathComponent("DevDeck/devdeck.log")
+        return PrivateFile.applicationSupportDirectory.appendingPathComponent("devdeck.log")
     }
 
     init(fileURL: URL, maxBytes: Int = 512 * 1024) {
@@ -34,8 +33,11 @@ final class DiagnosticLog: @unchecked Sendable {
         formatter.dateFormat = "yyyy-MM-dd HH:mm:ss.SSS"
         self.formatter = formatter
 
-        try? FileManager.default.createDirectory(
-            at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? PrivateFile.makeDirectory(at: fileURL.deletingLastPathComponent())
+        // The rotated copy holds the same content, so tightening only the live file would leave
+        // half the log readable. New rotations inherit the mode through the rename; this is for
+        // a devdeck.log.1 that predates the change.
+        PrivateFile.restrict(fileURL.appendingPathExtension("1"))
         openHandle(rotatingIfOver: maxBytes)
     }
 
@@ -58,7 +60,12 @@ final class DiagnosticLog: @unchecked Sendable {
             moveToBackup()
         }
         if !fm.fileExists(atPath: fileURL.path) {
-            fm.createFile(atPath: fileURL.path, contents: nil)
+            fm.createFile(atPath: fileURL.path, contents: nil,
+                          attributes: [.posixPermissions: PrivateFile.fileMode])
+        } else {
+            // Migrates a 0644 log left by an older build. The log names every command that ran,
+            // every proxy dialled and every path involved — not something other accounts need.
+            PrivateFile.restrict(fileURL)
         }
         handle = try? FileHandle(forWritingTo: fileURL)
         if let handle, let end = try? handle.seekToEnd() {
@@ -71,7 +78,8 @@ final class DiagnosticLog: @unchecked Sendable {
     private func rotate() {
         try? handle?.close()
         moveToBackup()
-        FileManager.default.createFile(atPath: fileURL.path, contents: nil)
+        FileManager.default.createFile(atPath: fileURL.path, contents: nil,
+                                       attributes: [.posixPermissions: PrivateFile.fileMode])
         handle = try? FileHandle(forWritingTo: fileURL)
         bytesWritten = 0
     }
@@ -89,7 +97,7 @@ final class DiagnosticLog: @unchecked Sendable {
     /// Best-effort: Swift `fatalError`/precondition are caught partially (via SIGTRAP/SIGILL).
     func installCrashHandlers() {
         guard diagnosticLogFD < 0 else { return }   // already installed — don't create extra fds
-        diagnosticLogFD = open(fileURL.path, O_WRONLY | O_APPEND | O_CREAT, 0o644)
+        diagnosticLogFD = open(fileURL.path, O_WRONLY | O_APPEND | O_CREAT, mode_t(PrivateFile.fileMode))
 
         NSSetUncaughtExceptionHandler { exception in
             DiagnosticLog.shared.log(

@@ -41,7 +41,5 @@ enum ChainScript {
             .replacingOccurrences(of: "\"", with: "\\\"")
     }
 
-    private static func shQuoted(_ s: String) -> String {
-        "'" + s.replacingOccurrences(of: "'", with: "'\\''") + "'"
-    }
+    private static func shQuoted(_ s: String) -> String { shellQuote(s) }
 }

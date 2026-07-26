@@ -103,7 +103,5 @@ struct SudoCommandRunner: CommandRunner {
         return parts.joined(separator: "; ")
     }
 
-    static func shQuote(_ string: String) -> String {
-        "'" + string.replacingOccurrences(of: "'", with: "'\\''") + "'"
-    }
+    static func shQuote(_ string: String) -> String { shellQuote(string) }
 }

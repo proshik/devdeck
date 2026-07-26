@@ -18,6 +18,44 @@ final class DiagnosticLogTests: XCTestCase {
         XCTAssertFalse(path.contains("Application Support/DevDeck"), path)
     }
 
+    func testLogFileIsOwnerOnly() throws {
+        // The log names every command that ran, every proxy dialled and every path involved.
+        let url = tempLogURL()
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+
+        DiagnosticLog(fileURL: url).log("event")
+
+        let attrs = try FileManager.default.attributesOfItem(atPath: url.path)
+        XCTAssertEqual((attrs[.posixPermissions] as? NSNumber)?.intValue, 0o600)
+    }
+
+    func testExistingLooseLogIsTightenedOnOpen() throws {
+        let url = tempLogURL()
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        FileManager.default.createFile(atPath: url.path, contents: Data("old\n".utf8),
+                                       attributes: [.posixPermissions: 0o644])
+
+        DiagnosticLog(fileURL: url).log("event")
+
+        let attrs = try FileManager.default.attributesOfItem(atPath: url.path)
+        XCTAssertEqual((attrs[.posixPermissions] as? NSNumber)?.intValue, 0o600,
+                       "installs predating the change carry a 0644 log")
+    }
+
+    func testRotatedBackupIsOwnerOnlyToo() throws {
+        // Tightening only the live file would leave half the log readable.
+        let url = tempLogURL()
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let backup = url.appendingPathExtension("1")
+        FileManager.default.createFile(atPath: backup.path, contents: Data("old\n".utf8),
+                                       attributes: [.posixPermissions: 0o644])
+
+        _ = DiagnosticLog(fileURL: url)
+
+        let attrs = try FileManager.default.attributesOfItem(atPath: backup.path)
+        XCTAssertEqual((attrs[.posixPermissions] as? NSNumber)?.intValue, 0o600)
+    }
+
     func testLogAppendsTimestampedLeveledLines() throws {
         let url = tempLogURL()
         defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
