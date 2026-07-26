@@ -111,6 +111,47 @@ final class TerminalRunnerTests: XCTestCase {
         let decoded = try JSONDecoder().decode(Command.self, from: Data(json.utf8))
         XCTAssertFalse(decoded.openInTerminal)
     }
+
+    // MARK: stale run-directory sweep
+
+    /// Build a fake run directory; `pid` nil means the wrapper never started.
+    private func makeRunDir(_ base: URL, _ name: String, pid: Int32?) throws -> URL {
+        let dir = base.appendingPathComponent(name)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        if let pid {
+            try "\(pid)\n".write(to: dir.appendingPathComponent("pid"), atomically: true, encoding: .utf8)
+        }
+        return dir
+    }
+
+    func testSweepRemovesFinishedRunsAndKeepsLiveOnes() throws {
+        let base = FileManager.default.temporaryDirectory
+            .appendingPathComponent("DevDeckTests-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: base) }
+
+        let live = try makeRunDir(base, "devdeck-term-live", pid: 4242)
+        let dead = try makeRunDir(base, "devdeck-term-dead", pid: 1)
+        let never = try makeRunDir(base, "devdeck-term-never", pid: nil)
+        let foreign = try makeRunDir(base, "someone-elses-dir", pid: nil)
+
+        sweepStaleTerminalDirectories(in: base, isAlive: { $0 == 4242 })
+
+        let fm = FileManager.default
+        XCTAssertTrue(fm.fileExists(atPath: live.path),
+                      "a tab still running from a previous session must keep its script")
+        XCTAssertFalse(fm.fileExists(atPath: dead.path), "its terminal is gone — nothing can read it")
+        XCTAssertFalse(fm.fileExists(atPath: never.path), "no pid sentinel means it never started")
+        XCTAssertTrue(fm.fileExists(atPath: foreign.path),
+                      "only our own devdeck-term-* directories are ours to delete")
+    }
+
+    func testSweepToleratesAnUnreadableBaseDirectory() {
+        // Must not throw or trap when the temp directory can't be listed.
+        let missing = FileManager.default.temporaryDirectory
+            .appendingPathComponent("DevDeckTests-absent-\(UUID().uuidString)")
+        sweepStaleTerminalDirectories(in: missing, isAlive: { _ in false })
+    }
 }
 
 /// Fake launcher: records launches without invoking a real terminal.
