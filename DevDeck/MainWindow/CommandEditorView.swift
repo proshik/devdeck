@@ -17,7 +17,7 @@ struct CommandEditorView: View {
     /// Terminal launch mode — shared across all commands (a toggle for experiments).
     @AppStorage("terminalLaunchMode") private var terminalMode = TerminalLaunchMode.window.rawValue
     /// The `.custom` launch command — shared across commands, like the mode itself.
-    @AppStorage("terminalLaunchCommand") private var terminalCommand = ""
+    @AppStorage(TerminalLaunchMode.commandKey) private var terminalCommand = ""
 
     private let appController = LiveAppController()
 
