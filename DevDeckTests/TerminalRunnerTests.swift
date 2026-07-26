@@ -59,6 +59,16 @@ final class TerminalRunnerTests: XCTestCase {
         XCTAssertTrue(script.contains("echo $code > '/tmp/e'"))
     }
 
+    func testScriptStartsWithAnExecutableShebang() {
+        // `.custom` templates hand the path straight to execvp (`wezterm start -- <path>`,
+        // `kitty <path>`): no shebang → "Exec format error", visible only as a 30-second hang.
+        let command = Command(id: UUID(), name: "c", command: "x", openInTerminal: true)
+        let script = GhosttyCommandRunner.script(command,
+                                                 pidFile: URL(fileURLWithPath: "/tmp/p"),
+                                                 exitFile: URL(fileURLWithPath: "/tmp/e"))
+        XCTAssertTrue(script.hasPrefix("#!/bin/zsh -l\n"), "got: \(script.prefix(40))")
+    }
+
     func testScriptPrefixesSudo() {
         let command = Command(id: UUID(), name: "c", command: "purge",
                               needsSudo: true, openInTerminal: true)
