@@ -37,7 +37,9 @@ final class ProxyManager {
     @ObservationIgnored private var lastProxyEnvContents: String?
     /// Whether this instance has determined the file's state at least once. A stale file can survive
     /// a crash or an external edit of config.json, so the first refresh must act on disk rather than
-    /// trust `lastProxyEnvContents`, which starts nil in every new instance.
+    /// trust `lastProxyEnvContents`, which starts nil in every new instance. Set only once an
+    /// operation has actually SUCCEEDED — after a failure we still don't know, so the next refresh
+    /// must act on disk again.
     @ObservationIgnored private var proxyEnvStateDetermined = false
     /// Owned by `AppDelegate`; weak so the manager never keeps the app graph alive.
     @ObservationIgnored weak var store: CommandStore?
@@ -60,6 +62,7 @@ final class ProxyManager {
     /// Token of the in-flight exit-IP probe — a restart preempts an older, slower probe.
     @ObservationIgnored private var exitIPToken: UUID?
     @ObservationIgnored private var observingDaemonState = false
+    @ObservationIgnored private var observingSettings = false
 
     init(
         discovering: any ProxyDiscovering = LiveProxyDiscovery(),
@@ -89,9 +92,36 @@ final class ProxyManager {
 
     /// Called from `AppDelegate` once the store and process manager exist.
     func start() {
+        observeSettings()
         refreshDerivedState()
         if store?.config.settings.proxyShareEnabled == true { startShare() }
         if store?.config.settings.proxyDiscoveryEnabled == true { startDiscovery() }
+    }
+
+    /// Re-arm an observation of the persisted settings — same pattern as `observeDaemonState`.
+    ///
+    /// `config.json` is hand-editable and the `FileWatcher` reloads it, but nothing told this
+    /// manager. `routing(for:)` honours such an edit on the next launch, so hand-deselecting the
+    /// active proxy left `proxy.env` still granting access — until the next browse update, which on
+    /// a quiet network never comes. That is the one window where the terminal path and the in-app
+    /// path genuinely disagreed, and it was fail-open.
+    ///
+    /// Cannot recurse: the refresh reads the store and writes the credential cache and the file,
+    /// never the store.
+    private func observeSettings() {
+        guard let store, !observingSettings else { return }
+        observingSettings = true
+        withObservationTracking {
+            _ = store.config.settings
+        } onChange: { [weak self] in
+            // onChange fires BEFORE the value is applied — read it back on the next main-actor hop.
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.observingSettings = false
+                self.refreshDerivedState()
+                self.observeSettings()
+            }
+        }
     }
 
     // MARK: - Share (host side)
@@ -319,6 +349,9 @@ final class ProxyManager {
                 self.refreshDerivedState()
             }
         }
+        // Symmetry with `stopDiscovery()`: the remembered endpoint resolves the moment discovery is
+        // back on, so the terminal path must not stay refusing until the first Bonjour callback.
+        refreshDerivedState()
     }
 
     func stopDiscovery() {
@@ -403,21 +436,26 @@ final class ProxyManager {
     ///
     /// Guarded against redundant writes: this runs on every Bonjour browse update, and an
     /// unconditional write would hit the disk several times a second on a live network.
+    ///
+    /// The cache advances ONLY on a reported success. A swallowed failure would be fail-open on the
+    /// one control the design calls the safe state: we would believe a file that grants proxy access
+    /// — and holds the password — was gone, and never try again.
     private func refreshProxyEnvFile() {
-        defer { proxyEnvStateDetermined = true }
         guard let resolved = resolvedEndpoint(),
               let ip = lanIP(), let prefix = lanPrefix(of: ip) else {
             guard !proxyEnvStateDetermined || lastProxyEnvContents != nil else { return }
+            guard envFile.remove() else { return }
             lastProxyEnvContents = nil
-            envFile.remove()
+            proxyEnvStateDetermined = true
             return
         }
         let url = proxyURL(host: resolved.proxy.host, port: resolved.proxy.port,
                            user: resolved.user, pass: resolved.pass)
         let contents = proxyEnvFileContents(url: url, lanPrefix: prefix)
         guard contents != lastProxyEnvContents else { return }
+        guard envFile.write(contents) else { return }
         lastProxyEnvContents = contents
-        envFile.write(contents)
+        proxyEnvStateDetermined = true
     }
 
     /// Everything derived from the active choice, refreshed together so the two can't drift.
