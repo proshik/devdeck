@@ -28,6 +28,12 @@ versioning follows [SemVer](https://semver.org/).
     (both cases, plus `ALL_PROXY`/`NO_PROXY`) into that process only. With no usable proxy the run
     fails explicitly instead of silently going direct — the flag exists to prevent exactly that leak.
   - New "Proxy" page in the main window, a Proxy section in the popover, and two toggles in Settings.
+- **Run through the proxy from anywhere**: a `dp` shell function (copy it from the Proxy page into
+  `~/.zshrc`) routes any command through the active proxy from whatever directory you're in —
+  `dp claude`. It reads `~/.config/devdeck/proxy.env`, which DevDeck keeps in step with the app's
+  own routing verdict, and refuses to run when that proxy is not on the current network. For runs
+  from the deck, a new "Ask for a directory on every run" flag lets one command serve every
+  project — the directory is chosen at launch and never saved.
 - **Daemon watchdog (auto-restart)**: a shield toggle on daemon rows in the popover — starts the
   daemon and restarts it automatically if it dies (3 attempts with 2/3/5 s pauses; a stable run
   resets the counter; give-up turns the shield red + notification). The flag persists in

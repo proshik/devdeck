@@ -318,9 +318,27 @@ struct PopoverView: View {
     private func toggleCommand(_ command: Command) {
         if StatusIndicator.forCommand(manager.states[command.id]).isStop {
             manager.stop(command.id)
+        } else if command.promptForDirectory {
+            runAfterChoosingDirectory(command)
         } else {
             manager.run(command)
         }
+    }
+
+    /// Ask where to run, then launch a copy bound to that directory — the stored command is
+    /// untouched, so one "claude" serves every project.
+    ///
+    /// `NSApp.activate()` first: the popover is `.transient` and dismisses as soon as the panel
+    /// takes focus, and without activating, the panel can open behind other windows.
+    private func runAfterChoosingDirectory(_ command: Command) {
+        NSApp.activate()
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.prompt = L10n.chooseRunDirectory
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        manager.run(command.withWorkingDirectory(url.path))
     }
 
     /// The shield button: persist the flag and arm/disarm watching. Arming an idle daemon starts it.
