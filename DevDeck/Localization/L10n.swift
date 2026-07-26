@@ -252,6 +252,10 @@ enum L10n {
     static func terminalLaunchFailed(_ detail: String) -> String {
         t("Could not launch in terminal: \(detail)", "Не удалось запустить в терминале: \(detail)")
     }
+    static var terminalCustomCommandInvalid: String {
+        t("The custom terminal command is empty or has no {script} placeholder — DevDeck wouldn’t know where to put the script.",
+          "Своя команда терминала пуста или не содержит {script} — DevDeck негде подставить скрипт.")
+    }
     static var terminalDidNotStart: String {
         t("Command did not start in the terminal — Ghostty did not open or Accessibility access for tabs is missing.",
           "Команда не стартовала в терминале — Ghostty не открылся или нет доступа «Универсальный доступ» для табов.")
