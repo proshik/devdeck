@@ -180,6 +180,45 @@ final class TerminalRunnerTests: XCTestCase {
             .appendingPathComponent("DevDeckTests-absent-\(UUID().uuidString)")
         sweepStaleTerminalDirectories(in: missing, isAlive: { _ in false })
     }
+
+    // MARK: custom launch command
+
+    func testExpandSubstitutesTheQuotedScriptPath() {
+        let expanded = expandTerminalLaunchCommand(template: "wezterm start -- {script}",
+                                                   scriptPath: "/tmp/run.zsh")
+        XCTAssertEqual(expanded, "wezterm start -- '/tmp/run.zsh'")
+    }
+
+    func testExpandQuotesAPathWithSpaces() {
+        // The path is ours (a temp dir), but the user's home may contain spaces.
+        let expanded = expandTerminalLaunchCommand(template: "open -a iTerm {script}",
+                                                   scriptPath: "/Users/a b/run.zsh")
+        XCTAssertEqual(expanded, "open -a iTerm '/Users/a b/run.zsh'")
+    }
+
+    func testExpandRejectsATemplateWithoutThePlaceholder() {
+        // The terminal would open with nothing to run, and the failure would look like a hang.
+        XCTAssertNil(expandTerminalLaunchCommand(template: "wezterm start", scriptPath: "/tmp/r"))
+    }
+
+    func testExpandRejectsABlankTemplate() {
+        XCTAssertNil(expandTerminalLaunchCommand(template: "", scriptPath: "/tmp/r"))
+        XCTAssertNil(expandTerminalLaunchCommand(template: "   \n", scriptPath: "/tmp/r"))
+    }
+
+    func testModeSelectorRoutesToTheCustomLauncher() async throws {
+        let win = RecordingLauncher()
+        let tab = RecordingLauncher()
+        let custom = RecordingLauncher()
+        let url = URL(fileURLWithPath: "/tmp/run.zsh")
+
+        try await ModeSelectingLauncher(window: win, tab: tab, custom: custom, mode: { .custom })
+            .launch(scriptURL: url)
+
+        XCTAssertEqual(custom.launched, [url])
+        XCTAssertEqual(win.launched, [])
+        XCTAssertEqual(tab.launched, [])
+    }
 }
 
 /// Fake launcher: records launches without invoking a real terminal.

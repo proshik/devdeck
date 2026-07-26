@@ -61,11 +61,28 @@ struct GhosttyLauncher: TerminalLauncher {
     }
 }
 
-/// Terminal launch mode (toggled in the UI, stored in UserDefaults).
+/// Terminal launch mode (chosen in the UI, stored in UserDefaults).
 enum TerminalLaunchMode: String {
     case window   // a new Ghostty window/instance (reliable, no permissions)
     case tab      // a new tab via Ghostty's native AppleScript (needs "Automation")
+    case custom   // the user's own command line — any terminal, including ones we've never heard of
     static let key = "terminalLaunchMode"
+    /// UserDefaults key for the `.custom` template. Beside `key` on purpose: the two are one
+    /// setting in the user's mind, and splitting them across stores would make neither the source
+    /// of truth.
+    static let commandKey = "terminalLaunchCommand"
+}
+
+/// Substitute the wrapper script's path into the user's template. Pure.
+///
+/// nil when the template cannot work — blank, or missing the `{script}` placeholder. Rejecting it
+/// here matters: a terminal launched with nothing to run looks exactly like DevDeck hanging, and the
+/// user would wait out the 30-second startup timeout to learn about a typo.
+func expandTerminalLaunchCommand(template: String, scriptPath: String) -> String? {
+    let trimmed = template.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty, trimmed.contains("{script}") else { return nil }
+    return trimmed.replacingOccurrences(of: "{script}",
+                                        with: GhosttyCommandRunner.shQuote(scriptPath))
 }
 
 /// Launches in a NEW TAB via Ghostty's NATIVE AppleScript (`new tab with configuration`,
@@ -123,16 +140,55 @@ struct AppleScriptTabLauncher: TerminalLauncher {
     }
 }
 
+/// Launches through the user's own command line — any terminal, including ones that don't exist yet.
+///
+/// Run via `zsh -lc` rather than a hand-rolled argv split: the user gets the full shell syntax, and
+/// `-l` picks up their PATH from `.zshrc`, so `wezterm` resolves without an absolute path — exactly
+/// how every other command in this app is launched.
+///
+/// Deliberately NOT waited on. A terminal that stays in the foreground (`alacritty -e` does) would
+/// otherwise block the caller before polling ever starts, leaving the command stuck in `running`
+/// forever. A template that fails inside zsh is caught by the runner's startup timeout instead.
+struct CustomCommandLauncher: TerminalLauncher {
+    let template: @Sendable () -> String
+
+    init(template: @escaping @Sendable () -> String = {
+        UserDefaults.standard.string(forKey: TerminalLaunchMode.commandKey) ?? ""
+    }) {
+        self.template = template
+    }
+
+    func launch(scriptURL: URL) async throws {
+        guard let command = expandTerminalLaunchCommand(template: template(),
+                                                        scriptPath: scriptURL.path) else {
+            throw TerminalLauncherError(message: L10n.terminalCustomCommandInvalid)
+        }
+        DiagnosticLog.shared.log("Terminal: custom launch — \(command)")
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/zsh")
+        process.arguments = ["-lc", command]
+        do {
+            try process.run()   // not waited on — see the note above
+        } catch {
+            DiagnosticLog.shared.log("Terminal: custom launch failed — \(error.localizedDescription)",
+                                     level: .error)
+            throw TerminalLauncherError(message: L10n.terminalLaunchFailed(error.localizedDescription))
+        }
+    }
+}
+
 /// Picks a launcher by the current mode (UserDefaults) on EVERY launch — switching
 /// in the UI takes effect immediately, without recreating the runners.
 struct ModeSelectingLauncher: TerminalLauncher {
     let window: any TerminalLauncher
     let tab: any TerminalLauncher
+    let custom: any TerminalLauncher
     let mode: @Sendable () -> TerminalLaunchMode
 
     init(
         window: any TerminalLauncher = GhosttyLauncher(),
         tab: any TerminalLauncher = AppleScriptTabLauncher(),
+        custom: any TerminalLauncher = CustomCommandLauncher(),
         mode: @escaping @Sendable () -> TerminalLaunchMode = {
             TerminalLaunchMode(rawValue: UserDefaults.standard.string(forKey: TerminalLaunchMode.key) ?? "")
                 ?? .window
@@ -140,6 +196,7 @@ struct ModeSelectingLauncher: TerminalLauncher {
     ) {
         self.window = window
         self.tab = tab
+        self.custom = custom
         self.mode = mode
     }
 
@@ -147,6 +204,7 @@ struct ModeSelectingLauncher: TerminalLauncher {
         switch mode() {
         case .tab: try await tab.launch(scriptURL: scriptURL)
         case .window: try await window.launch(scriptURL: scriptURL)
+        case .custom: try await custom.launch(scriptURL: scriptURL)
         }
     }
 }
