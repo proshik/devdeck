@@ -172,6 +172,76 @@ final class ProxyManagerEnvFileTests: XCTestCase {
                                                     routeThroughProxy: true)), .unavailable)
     }
 
+    /// A removal that FAILS (full disk, read-only home) must not advance the cache: believing the
+    /// file is gone when it still grants proxy access — and holds the plaintext password — is
+    /// fail-open on the very control the design calls the safe state, with nothing left to retry it.
+    func testAFailedRemovalIsRetriedOnTheNextRefresh() async {
+        let (manager, _, fake, envFile) = makeRig()
+        manager.startDiscovery()
+        fake.emit([proxy("personal-mac")])
+        await yieldUntil { manager.discovered.count == 1 }
+        manager.setActiveProxy(proxy("personal-mac"))
+        XCTAssertNotNil(envFile.contents, "sanity: the file is there before we deselect")
+
+        envFile.removeSucceeds = false
+        manager.setActiveProxy(nil)
+        let attempts = envFile.removeCount
+
+        XCTAssertGreaterThan(attempts, 0, "sanity: removal was attempted")
+        XCTAssertNotNil(envFile.contents, "sanity: the file is still on disk — the removal failed")
+
+        // Next refresh: it must try again rather than trust a cache it never got to update.
+        envFile.removeSucceeds = true
+        fake.emit([proxy("personal-mac")])
+        await yieldUntil({ envFile.contents == nil }, message: "a failed removal was never retried")
+
+        XCTAssertGreaterThan(envFile.removeCount, attempts)
+    }
+
+    /// A failed WRITE has the same shape in the milder direction: the endpoint on disk is stale
+    /// while DevDeck considers it current, so the next refresh must write again.
+    func testAFailedWriteIsRetriedOnTheNextRefresh() async {
+        let (manager, _, fake, envFile) = makeRig()
+        manager.startDiscovery()
+        envFile.writeSucceeds = false
+        fake.emit([proxy("personal-mac")])
+        await yieldUntil { manager.discovered.count == 1 }
+        manager.setActiveProxy(proxy("personal-mac"))
+        let attempts = envFile.writeCount
+
+        XCTAssertGreaterThan(attempts, 0, "sanity: a write was attempted")
+        XCTAssertNil(envFile.contents, "sanity: nothing landed — the write failed")
+
+        envFile.writeSucceeds = true
+        fake.emit([proxy("personal-mac")])
+        await yieldUntil({ envFile.contents != nil }, message: "a failed write was never retried")
+
+        XCTAssertGreaterThan(envFile.writeCount, attempts)
+    }
+
+    /// `config.json` is hand-editable and the `FileWatcher` reloads it, so deselecting the proxy
+    /// there must reach the terminal helper too — `routing(for:)` already honours it immediately.
+    /// Without the settings observation the file kept granting access until the next browse update,
+    /// which on a quiet network never arrives.
+    func testAnExternalConfigEditRemovesTheFile() async {
+        let (manager, store, fake, envFile) = makeRig()
+        manager.start()   // arms the settings observation, as AppDelegate does
+        fake.emit([proxy("personal-mac")])
+        await yieldUntil { manager.discovered.count == 1 }
+        manager.setActiveProxy(proxy("personal-mac"))
+        XCTAssertNotNil(envFile.contents, "sanity: the file is there before the edit")
+
+        // Straight through the store — exactly what a reload from a hand-edited file produces,
+        // with no ProxyManager method involved.
+        store.setActiveProxy(name: nil)
+
+        await yieldUntil({ envFile.contents == nil },
+                         message: "an external deselection left proxy.env usable")
+        XCTAssertEqual(manager.routing(for: Command(id: UUID(), name: "c", command: "c",
+                                                    routeThroughProxy: true)), .unavailable,
+                       "and the in-app verdict agrees")
+    }
+
     /// Crash recovery: `lastProxyEnvContents` starts nil in every new `ProxyManager`, same as it
     /// would after a real crash or force-quit. If the removal guard trusted that nil the way it
     /// trusts it on every LATER call, a file left by a previous process — possibly holding a

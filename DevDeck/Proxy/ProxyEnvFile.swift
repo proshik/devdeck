@@ -17,9 +17,16 @@ func proxyEnvFileContents(url: String, lanPrefix: String) -> String {
 
 /// Maintains the file the terminal helper reads. Behind a protocol (probe pattern, like everything
 /// else in this directory) so tests never touch the real `~/.config`.
+///
+/// Both operations report success, and the caller must not update its cache unless they succeed:
+/// silently believing a removal happened would leave a file that grants proxy access — and carries
+/// the password — in place forever, with nothing to retry it. The failure modes are real (a full
+/// disk, a read-only home, an unwritable directory) and this file is a security control.
 protocol ProxyEnvFileWriting: Sendable {
-    func write(_ contents: String)
-    func remove()
+    /// True when the file now holds exactly `contents`.
+    func write(_ contents: String) -> Bool
+    /// True when the file is gone. Already absent counts — that is the end state we wanted.
+    func remove() -> Bool
 }
 
 /// The real file at `~/.config/devdeck/proxy.env`, owner-readable only.
@@ -50,7 +57,7 @@ struct LiveProxyEnvFile: ProxyEnvFileWriting {
         self.url = url
     }
 
-    func write(_ contents: String) {
+    func write(_ contents: String) -> Bool {
         do {
             // 0700 as well: the directory holds a file that can carry a password, so nobody else
             // needs to be able to list or traverse it.
@@ -60,13 +67,13 @@ struct LiveProxyEnvFile: ProxyEnvFileWriting {
         } catch {
             DiagnosticLog.shared.log("Proxy env file: could not create the directory — "
                 + error.localizedDescription, level: .warn)
-            return
+            return false
         }
         let fd = open(url.path, O_WRONLY | O_CREAT | O_TRUNC, 0o600)
         guard fd >= 0 else {
             DiagnosticLog.shared.log("Proxy env file: could not open \(url.path) — \(Self.errnoText())",
                                      level: .warn)
-            return
+            return false
         }
         defer { close(fd) }
         // Before any byte is written: an existing file keeps its own mode through O_CREAT, so a
@@ -74,7 +81,7 @@ struct LiveProxyEnvFile: ProxyEnvFileWriting {
         guard fchmod(fd, 0o600) == 0 else {
             DiagnosticLog.shared.log("Proxy env file: could not set mode 0600 on \(url.path) — "
                 + Self.errnoText(), level: .warn)
-            return
+            return false
         }
         let bytes = Data(contents.utf8)
         let written = bytes.withUnsafeBytes { Darwin.write(fd, $0.baseAddress, $0.count) }
@@ -82,16 +89,18 @@ struct LiveProxyEnvFile: ProxyEnvFileWriting {
             DiagnosticLog.shared.log(
                 "Proxy env file: wrote \(written) of \(bytes.count) bytes to \(url.path) — "
                     + Self.errnoText(), level: .warn)
-            return
+            return false
         }
+        return true
     }
 
-    func remove() {
-        if unlink(url.path) == 0 { return }
+    func remove() -> Bool {
+        if unlink(url.path) == 0 { return true }
         let code = errno
-        if code == ENOENT { return }   // already gone — that IS the end state we wanted
+        if code == ENOENT { return true }   // already gone — that IS the end state we wanted
         DiagnosticLog.shared.log("Proxy env file: could not remove \(url.path) — "
             + Self.errnoText(code), level: .warn)
+        return false
     }
 
     private static func errnoText(_ code: Int32 = errno) -> String {
