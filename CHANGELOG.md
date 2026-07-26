@@ -53,6 +53,12 @@ versioning follows [SemVer](https://semver.org/).
   Settings (default on).
 - **Appearance mode** in Settings: Light / Dark / System (applied app-wide via `NSApp.appearance`,
   persisted in UserDefaults).
+- **Terminal tabs can stay open.** A per-command "Stay in the shell after the command finishes"
+  option hands the tab over to an ordinary shell in the same directory instead of closing it, so a
+  command can be re-run by hand or its output read at leisure.
+- **Any terminal, not just Ghostty.** A third launch mode, "Custom command", runs a command line you
+  supply with `{script}` substituted — `wezterm start -- {script}`, `open -a iTerm {script}`, and so
+  on. Ghostty keeps working with no configuration.
 
 ### Changed
 - Main window sidebar: Settings is pinned to the bottom (always visible, separated by a divider)
@@ -63,6 +69,8 @@ versioning follows [SemVer](https://semver.org/).
 
 ### Fixed
 - Define the `AccentColor` asset so control on-states (Settings toggles) are visible in dark mode.
+- Terminal run directories are no longer deleted while zsh is still reading the wrapper script; they
+  are swept at the next launch instead, once their terminal is gone.
 
 ## [0.3.0] — 2026-06-20
 

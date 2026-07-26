@@ -16,6 +16,8 @@ struct CommandEditorView: View {
     @State private var confirmDelete = false
     /// Terminal launch mode — shared across all commands (a toggle for experiments).
     @AppStorage("terminalLaunchMode") private var terminalMode = TerminalLaunchMode.window.rawValue
+    /// The `.custom` launch command — shared across commands, like the mode itself.
+    @AppStorage("terminalLaunchCommand") private var terminalCommand = ""
 
     private let appController = LiveAppController()
 
@@ -76,6 +78,19 @@ struct CommandEditorView: View {
                     Picker(L10n.terminalModePicker, selection: $terminalMode) {
                         Text(L10n.terminalWindow).tag(TerminalLaunchMode.window.rawValue)
                         Text(L10n.terminalTab).tag(TerminalLaunchMode.tab.rawValue)
+                        Text(L10n.terminalCustom).tag(TerminalLaunchMode.custom.rawValue)
+                    }
+                    if terminalMode == TerminalLaunchMode.custom.rawValue {
+                        TextField(L10n.terminalCustomCommandLabel, text: $terminalCommand)
+                        Text(L10n.terminalCustomCommandHint)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Toggle(L10n.keepTerminalOpenToggle, isOn: $draft.keepTerminalOpen)
+                    if draft.keepTerminalOpen {
+                        Text(L10n.keepTerminalOpenHint)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
                 }
                 if draft.command.contains("cargo") || draft.command.contains("dev-build") {
