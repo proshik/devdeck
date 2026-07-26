@@ -69,8 +69,10 @@ versioning follows [SemVer](https://semver.org/).
 
 ### Fixed
 - Define the `AccentColor` asset so control on-states (Settings toggles) are visible in dark mode.
-- Terminal run directories are no longer deleted while zsh is still reading the wrapper script; they
-  are swept at the next launch instead, once their terminal is gone.
+- Terminal run directories are no longer deleted the moment a command finishes or its startup times
+  out — the timeout deletion could remove the script of a terminal that was merely slow to start,
+  and keeping `run.zsh` beside a live tab makes a misbehaving command diagnosable. They are swept at
+  the next launch instead, once their terminal is gone.
 
 ## [0.3.0] — 2026-06-20
 
