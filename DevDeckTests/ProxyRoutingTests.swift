@@ -154,4 +154,19 @@ final class ProxyRoutingTests: XCTestCase {
         XCTAssertNil(parseProxyTXT(name: "x", txt: ["host": "", "port": "9999"]), "empty host")
         XCTAssertNil(parseProxyTXT(name: "x", txt: ["host": "1.2.3.4", "port": "nope"]), "unparseable port")
     }
+
+    /// `host` comes from anyone on the network and ends up in the persisted endpoint cache and,
+    /// unescaped, in a `KEY=value` line of `proxy.env`. Requiring a dotted quad deletes that whole
+    /// class of worry: nothing carrying a newline, a space or an `=` can reach either.
+    func testParseRejectsAHostThatIsNotADottedQuad() {
+        XCTAssertNil(parseProxyTXT(name: "x", txt: ["host": "evil.example.com", "port": "9999"]),
+                     "a hostname is not an endpoint we know how to validate")
+        XCTAssertNil(parseProxyTXT(name: "x", txt: ["host": "1.2.3", "port": "9999"]), "too few octets")
+        XCTAssertNil(parseProxyTXT(name: "x", txt: ["host": "1.2.3.999", "port": "9999"]), "octet out of range")
+        XCTAssertNil(parseProxyTXT(name: "x", txt: ["host": "192.168.1.9\nDEVDECK_PROXY_LAN=10.0.0",
+                                                   "port": "9999"]),
+                     "an injected second env line must never reach proxy.env")
+        XCTAssertNotNil(parseProxyTXT(name: "x", txt: ["host": "192.168.1.9", "port": "9999"]),
+                        "sanity: a real LAN address still parses")
+    }
 }
