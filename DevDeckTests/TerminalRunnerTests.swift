@@ -68,6 +68,34 @@ final class TerminalRunnerTests: XCTestCase {
         XCTAssertTrue(script.contains("sudo purge"))
     }
 
+    func testScriptWaitsForEnterByDefault() {
+        let command = Command(id: UUID(), name: "build", command: "just build", openInTerminal: true)
+        let script = GhosttyCommandRunner.script(
+            command,
+            pidFile: URL(fileURLWithPath: "/tmp/p"), exitFile: URL(fileURLWithPath: "/tmp/e"))
+
+        XCTAssertTrue(script.hasSuffix("read\n"), "unchanged default — the tab closes on Enter")
+        XCTAssertFalse(script.contains("exec "))
+    }
+
+    func testScriptHandsTheTabToAShellWhenAsked() {
+        let command = Command(id: UUID(), name: "claude", command: "claude",
+                              openInTerminal: true, keepTerminalOpen: true)
+        let script = GhosttyCommandRunner.script(
+            command,
+            pidFile: URL(fileURLWithPath: "/tmp/p"), exitFile: URL(fileURLWithPath: "/tmp/e"))
+
+        XCTAssertTrue(script.contains("exec \"${SHELL:-/bin/zsh}\" -l"))
+        XCTAssertFalse(script.contains("\nread\n"), "waiting for Enter would defeat the point")
+
+        // The tracker reports the command's exit code from this sentinel. Writing it AFTER handing
+        // the tab over would mean it never gets written at all.
+        let exitWrite = try! XCTUnwrap(script.range(of: "> '/tmp/e'"))
+        let exec = try! XCTUnwrap(script.range(of: "exec \""))
+        XCTAssertTrue(exitWrite.upperBound < exec.lowerBound,
+                      "the exit sentinel must be written before the exec")
+    }
+
     // MARK: mode selection and AppleScript
 
     func testModeSelectorRoutesToWindowOrTab() async throws {

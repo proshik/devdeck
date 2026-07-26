@@ -261,6 +261,11 @@ enum L10n {
         t("[DevDeck] finished (code \(codeVar)). Press Enter to close.",
           "[DevDeck] завершено (код \(codeVar)). Enter — закрыть.")
     }
+    /// Footer for a tab that stays open — the command is done, the shell is yours.
+    static func terminalStaysOpenFooter(_ codeVar: String) -> String {
+        t("[DevDeck] finished (code \(codeVar)). The shell is yours.",
+          "[DevDeck] завершено (код \(codeVar)). Шелл в вашем распоряжении.")
+    }
 
     // MARK: - Chain script (user-visible)
 

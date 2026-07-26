@@ -155,6 +155,16 @@ final class ConfigCodecTests: XCTestCase {
         XCTAssertEqual(minimal.commands.first?.promptForDirectory, false)
     }
 
+    func testKeepTerminalOpenRoundTripsAndDefaultsToFalse() throws {
+        let command = Command(id: UUID(), name: "claude", command: "claude",
+                              openInTerminal: true, keepTerminalOpen: true)
+        let decoded = try ConfigCodec.decode(ConfigCodec.encode(Config(commands: [command])))
+        XCTAssertEqual(decoded.commands.first?.keepTerminalOpen, true)
+
+        let minimal = try ConfigCodec.decode(Data(#"{ "commands": [ { "name": "x", "command": "echo" } ] }"#.utf8))
+        XCTAssertEqual(minimal.commands.first?.keepTerminalOpen, false)
+    }
+
     func testDecodeGeneratesIDWhenMissing() throws {
         let json = Data("""
         { "commands": [ { "name": "a", "command": "x" }, { "name": "b", "command": "y" } ] }
