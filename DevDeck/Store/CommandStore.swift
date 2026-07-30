@@ -132,6 +132,48 @@ final class CommandStore {
         persist(updated)
     }
 
+    /// Duplicate a command: a copy with a fresh id and the next free `(copy)` name, inserted
+    /// directly after the original so it lands next to it in the sidebar section too (the sections
+    /// are filters over this one array, and the copy keeps `isDaemon`).
+    ///
+    /// Returns the copy's id so the caller can select it. `nil` means the original is gone —
+    /// an external edit to config.json between opening the context menu and clicking it.
+    @discardableResult
+    func duplicate(commandID: UUID) -> UUID? {
+        guard let index = config.commands.firstIndex(where: { $0.id == commandID }) else { return nil }
+        var copy = config.commands[index]
+        copy.id = UUID()
+        copy.name = DuplicateNaming.nextName(
+            base: config.commands[index].name,
+            marker: L10n.copyMarker,
+            knownMarkers: L10n.copyMarkers,
+            existing: Set(config.commands.map(\.name))
+        )
+        var updated = config
+        updated.commands.insert(copy, at: index + 1)
+        persist(updated)
+        return copy.id
+    }
+
+    /// Duplicate a chain. Shallow: the copy references the same commands — `commandIDs` is carried
+    /// over untouched, and no command is duplicated along with it.
+    @discardableResult
+    func duplicate(chainID: UUID) -> UUID? {
+        guard let index = config.chains.firstIndex(where: { $0.id == chainID }) else { return nil }
+        var copy = config.chains[index]
+        copy.id = UUID()
+        copy.name = DuplicateNaming.nextName(
+            base: config.chains[index].name,
+            marker: L10n.copyMarker,
+            knownMarkers: L10n.copyMarkers,
+            existing: Set(config.chains.map(\.name))
+        )
+        var updated = config
+        updated.chains.insert(copy, at: index + 1)
+        persist(updated)
+        return copy.id
+    }
+
     /// Reorder a subset of commands (daemons or regular) by sidebar drag-and-drop.
     /// Indices are in the coordinates of the section's filtered list; positions of the OTHER
     /// kind of command in the combined array don't change (stable for manual JSON edits).

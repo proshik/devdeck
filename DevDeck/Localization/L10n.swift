@@ -417,4 +417,15 @@ enum L10n {
     }
     static var copy: String { t("Copy", "Копировать") }
     static var copied: String { t("Copied", "Скопировано") }
+
+    // MARK: - Duplicate
+
+    static var duplicate: String { t("Duplicate", "Дублировать") }
+    /// The word written into a duplicate's name: `deploy` → `deploy (copy)`.
+    /// Distinct from `copy` above, which is the clipboard verb.
+    static var copyMarker: String { t("copy", "копия") }
+    /// Every marker DevDeck can recognize inside an existing name — not just the active language's.
+    /// Names live in config.json and outlive a language switch, so a copy made in Russian must
+    /// still be recognized as a copy after switching to English.
+    static let copyMarkers = ["copy", "копия"]
 }
