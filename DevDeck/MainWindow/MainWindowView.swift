@@ -27,6 +27,9 @@ struct MainWindowView: View {
                     ForEach(store.config.chains) { chain in
                         Label(chain.name.isEmpty ? L10n.untitled : chain.name, systemImage: "link")
                             .tag(MainSelection.chain(chain.id))
+                            .contextMenu {
+                                Button(L10n.duplicate) { duplicateChain(chain.id) }
+                            }
                     }
                     .onMove { store.moveChains($0, to: $1) }
                 }
@@ -96,6 +99,9 @@ struct MainWindowView: View {
     private func sidebarRow(_ command: Command, icon: String) -> some View {
         Label(command.name.isEmpty ? L10n.untitled : command.name, systemImage: icon)
             .tag(MainSelection.command(command.id))
+            .contextMenu {
+                Button(L10n.duplicate) { duplicateCommand(command.id) }
+            }
     }
 
     /// Pinned sidebar entry (Proxy / Settings) styled to mimic a selected sidebar row.
@@ -128,6 +134,19 @@ struct MainWindowView: View {
         let chain = Chain(id: UUID(), name: L10n.newChain, commandIDs: [])
         store.upsert(chain)
         appModel.selection = .chain(chain.id)
+    }
+
+    /// Selection follows the copy, which opens its editor — the same move `addCommand` makes, and
+    /// the copy's name is the first thing worth changing. A `nil` id means the original was deleted
+    /// from under us; leave the selection alone.
+    private func duplicateCommand(_ id: UUID) {
+        guard let copyID = store.duplicate(commandID: id) else { return }
+        appModel.selection = .command(copyID)
+    }
+
+    private func duplicateChain(_ id: UUID) {
+        guard let copyID = store.duplicate(chainID: id) else { return }
+        appModel.selection = .chain(copyID)
     }
 }
 
