@@ -23,12 +23,12 @@ jobs:
     runs-on: macos-15
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0   # needed for git rev-list --count HEAD (monotonic build number)
 
       - name: Cache SwiftPM
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/Library/Caches/org.swift.swiftpm
           key: spm-${{ hashFiles('DevDeck.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved') }}
