@@ -392,6 +392,26 @@ enum L10n {
     }
     static func proxyEndpoint(_ host: String, _ port: Int) -> String { "\(host):\(port)" }
 
+    // MARK: - Proxy: connected machines (host side)
+
+    static var proxyConnectedSection: String { t("Connected machines", "Подключённые машины") }
+    static var proxyNoConnections: String {
+        t("Nobody has connected yet", "Пока никто не подключался")
+    }
+    static var proxyClientActive: String { t("active", "активна") }
+    /// Written as "sessions: N" in both languages — it sidesteps English and Russian number
+    /// agreement, so no plural helper is needed anywhere in the catalog.
+    static func proxySessions(_ count: Int) -> String {
+        t("sessions: \(count)", "сессий: \(count)")
+    }
+    static func proxyLastSeen(_ minutes: Int) -> String {
+        minutes < 1 ? t("just now", "только что") : t("\(minutes) min ago", "\(minutes) мин назад")
+    }
+    /// Same trick: "connected N", not "N machines".
+    static func proxyConnectedCount(_ count: Int) -> String {
+        t("connected \(count)", "подключено \(count)")
+    }
+
     static var promptForDirectoryToggle: String {
         t("Ask for a directory on every run", "Спрашивать директорию при каждом запуске")
     }
