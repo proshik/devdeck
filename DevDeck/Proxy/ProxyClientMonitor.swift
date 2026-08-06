@@ -124,12 +124,31 @@ final class ProxyClientMonitor {
     // MARK: - Lifecycle
 
     /// The listener came up. Live sessions died with the previous process; who was here does not.
+    /// Idempotent per bring-up is the CALLER's job — `ProxyManager` only invokes this on the
+    /// listener's up transition, once per bring-up, including a watchdog restart.
     func listenerDidStart() {
+        dropLiveSessions()
+        startSweep()
+        publishNow()
+    }
+
+    /// The listener went down — a watchdog restart in progress, or one the watchdog gave up on.
+    /// Its live sessions die with it; the machine list itself is untouched. Deliberately NOT the
+    /// same as `clear()`: only an explicit `stopShare()` empties the list — a listener that merely
+    /// died keeps the roster of who was just here, the same way `listenerDidStart()` does for a
+    /// restart. The sweep is left running: retention is about how long a quiet machine stays
+    /// listed, which does not depend on whether the process that logged it is alive right now.
+    func listenerDidStop() {
+        dropLiveSessions()
+        publishNow()
+    }
+
+    /// Shared by both lifecycle edges: the process that owned every open session is gone, but the
+    /// entries themselves — and their `lastSeen` — are not touched.
+    private func dropLiveSessions() {
         sessions.removeAll()
         // Array(): the keys view is being mutated through while it is iterated.
         for ip in Array(entries.keys) { entries[ip]?.liveSessions = 0 }
-        startSweep()
-        publishNow()
     }
 
     /// The share was switched off — nobody is connected to something that is not running.

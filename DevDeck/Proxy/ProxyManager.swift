@@ -69,6 +69,9 @@ final class ProxyManager {
     @ObservationIgnored private var exitIPToken: UUID?
     @ObservationIgnored private var observingDaemonState = false
     @ObservationIgnored private var observingSettings = false
+    /// Mirrors the daemon's own `.daemonRunning` state, independent of `isAdvertising` — see
+    /// `syncAdvertising()`. Edges drive `clientMonitor.listenerDidStart()` / `listenerDidStop()`.
+    @ObservationIgnored private var listenerUp = false
 
     init(
         discovering: any ProxyDiscovering = LiveProxyDiscovery(),
@@ -256,6 +259,26 @@ final class ProxyManager {
 
     private func syncAdvertising() {
         let up = processManager?.states[ProxyShare.daemonID] == .daemonRunning
+        // The monitor's bring-up/tear-down belongs to the LISTENER's own state, not to whether
+        // Bonjour ends up announcing it. Both diverge from `up`: `startAdvertising()` below also
+        // bails out with no LAN address, and advertising is withdrawn whenever the share toggle is
+        // off even though a still-running `gost` keeps logging real sessions. `listenerUp` mirrors
+        // `up` alone, so a listener with no LAN address still gets its sweep armed and a listener
+        // the watchdog gives up on still gets its dangling sessions zeroed.
+        if up != listenerUp {
+            listenerUp = up
+            if up {
+                // Idempotent per bring-up (including a watchdog restart) via the `listenerUp`
+                // guard above — sessions all died with whatever ran before, but the machines
+                // themselves stay listed.
+                clientMonitor.listenerDidStart()
+            } else {
+                // The listener is not merely unannounced — it is gone. Its live sessions die with
+                // it; the machine list itself is untouched (only an explicit `stopShare()` clears
+                // that, via `clear()`).
+                clientMonitor.listenerDidStop()
+            }
+        }
         if up, store?.config.settings.proxyShareEnabled == true {
             startAdvertising()
         } else {
@@ -276,9 +299,6 @@ final class ProxyManager {
                                     authRequired: share.authEnabled, host: host, exitIP: nil)
         advertiser.advertise(ad)
         isAdvertising = true
-        // Guarded by `isAdvertising`, so this runs exactly once per bring-up of the listener —
-        // including a watchdog restart, whose sessions all died with the previous process.
-        clientMonitor.listenerDidStart()
         resolveExitIP(for: ad, share: share)
     }
 
