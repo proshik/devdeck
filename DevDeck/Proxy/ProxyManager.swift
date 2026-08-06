@@ -35,6 +35,8 @@ final class ProxyManager {
     /// Maintains the generated `gost.json` the listener is started with. Owner-only, because it
     /// holds the share password in plaintext — the command line no longer does.
     @ObservationIgnored private let shareConfigFile: any PrivateFileWriting
+    /// Who is using our share, folded out of the listener's own output.
+    @ObservationIgnored let clientMonitor: ProxyClientMonitor
     /// Last contents handed to `envFile`, so a browse update that changes nothing doesn't rewrite
     /// the file. nil means the file is absent as far as we know.
     @ObservationIgnored private var lastProxyEnvContents: String?
@@ -79,7 +81,8 @@ final class ProxyManager {
         exitIPAttempts: Int = 4,
         exitIPRetryDelay: Duration = .seconds(1),
         envFile: any PrivateFileWriting = LivePrivateFile(url: proxyEnvFileURL),
-        shareConfigFile: any PrivateFileWriting = LivePrivateFile(url: ProxyShare.configURL)
+        shareConfigFile: any PrivateFileWriting = LivePrivateFile(url: ProxyShare.configURL),
+        clientMonitor: ProxyClientMonitor = ProxyClientMonitor()
     ) {
         self.discovering = discovering
         self.advertiser = advertiser
@@ -91,6 +94,7 @@ final class ProxyManager {
         self.exitIPRetryDelay = exitIPRetryDelay
         self.envFile = envFile
         self.shareConfigFile = shareConfigFile
+        self.clientMonitor = clientMonitor
     }
 
     // MARK: - Lifecycle
@@ -202,6 +206,7 @@ final class ProxyManager {
     func stopShare() {
         processManager?.stop(ProxyShare.daemonID)
         stopAdvertising()
+        clientMonitor.clear()
         _ = shareConfigFile.remove()
     }
 
@@ -270,6 +275,9 @@ final class ProxyManager {
                                     authRequired: share.authEnabled, host: host, exitIP: nil)
         advertiser.advertise(ad)
         isAdvertising = true
+        // Guarded by `isAdvertising`, so this runs exactly once per bring-up of the listener —
+        // including a watchdog restart, whose sessions all died with the previous process.
+        clientMonitor.listenerDidStart()
         resolveExitIP(for: ad, share: share)
     }
 
@@ -361,6 +369,18 @@ final class ProxyManager {
     var visibleProxies: [DiscoveredProxy] {
         guard let active = activeProxy, !active.isLive else { return discovered }
         return discovered + [active]
+    }
+
+    /// Machines that have used this share recently (host side).
+    var proxyClients: [ProxyClientMonitor.Client] { clientMonitor.clients }
+    /// How many of them count as connected right now — what the popover shows.
+    var connectedClientCount: Int { clientMonitor.activeCount }
+
+    /// Feed the listener's own output to the connected-clients monitor, and nothing else's: any
+    /// other daemon may legitimately print JSON that looks like a gost session.
+    func ingestDaemonOutput(_ commandID: UUID, _ line: String) {
+        guard commandID == ProxyShare.daemonID else { return }
+        clientMonitor.ingest(line)
     }
 
     /// The active proxy needs credentials we don't have yet (the UI asks for a password).

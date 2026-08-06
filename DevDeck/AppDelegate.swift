@@ -39,6 +39,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         manager.proxyRouting = { [weak proxyManager] command in
             proxyManager?.routing(for: command) ?? .notRouted
         }
+        // The listener's own log lines are where "who is connected" comes from.
+        manager.outputObserver = { [weak proxyManager] commandID, line, _ in
+            proxyManager?.ingestDaemonOutput(commandID, line)
+        }
         proxyManager.start()
         // Start Sparkle with the persisted auto-update preference; populates the indicator when off.
         updateController.configure(autoUpdateEnabled: store.config.settings.autoUpdateEnabled)
