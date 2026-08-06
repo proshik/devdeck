@@ -39,12 +39,14 @@ final class ProxyClientWiringTests: XCTestCase {
         let monitor = ProxyClientMonitor(naming: FakeProxyClientNaming(),
                                          publishInterval: .seconds(3600),
                                          sweepInterval: .seconds(3600))
-        // shareConfigFile: without this, the default resolves to the REAL
-        // ~/Library/Application Support/DevDeck/gost.json — see ProxyManagerShareTests for the
-        // established convention of always injecting a FakePrivateFile for it.
+        // envFile / shareConfigFile: without these, the defaults resolve to the REAL
+        // ~/.config/devdeck/proxy.env and ~/Library/Application Support/DevDeck/gost.json — see
+        // ProxyManagerShareTests for the established convention of always injecting a
+        // FakePrivateFile for every PrivateFileWriting dependency.
         let proxy = ProxyManager(discovering: FakeProxyDiscovering(),
                                  advertiser: FakeProxyAdvertising(),
                                  credentials: FakeProxyCredentialStore(),
+                                 envFile: FakePrivateFile(),
                                  shareConfigFile: FakePrivateFile(),
                                  clientMonitor: monitor)
 
@@ -61,11 +63,13 @@ final class ProxyClientWiringTests: XCTestCase {
         let monitor = ProxyClientMonitor(naming: FakeProxyClientNaming(),
                                          publishInterval: .seconds(3600),
                                          sweepInterval: .seconds(3600))
-        // shareConfigFile: `stopShare()` below unconditionally calls `.remove()` on it — without
-        // this override that is an unlink() on the REAL ~/Library/Application Support/DevDeck/gost.json.
+        // envFile / shareConfigFile: `stopShare()` below unconditionally touches both — without
+        // these overrides that is a write/unlink on the REAL ~/.config/devdeck/proxy.env and
+        // ~/Library/Application Support/DevDeck/gost.json.
         let proxy = ProxyManager(discovering: FakeProxyDiscovering(),
                                  advertiser: FakeProxyAdvertising(),
                                  credentials: FakeProxyCredentialStore(),
+                                 envFile: FakePrivateFile(),
                                  shareConfigFile: FakePrivateFile(),
                                  clientMonitor: monitor)
 
