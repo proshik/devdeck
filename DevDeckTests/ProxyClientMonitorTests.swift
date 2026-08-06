@@ -205,6 +205,36 @@ final class ProxyClientMonitorTests: XCTestCase {
                          message: "the retry after the delay never happened")
     }
 
+    func testAStaleResolveDoesNotNameTheEntryCreatedAfterAClear() async {
+        let monitor = makeMonitor()
+        naming.holdNextAnswer()
+        monitor.ingest(openLine("192.168.31.42:1000", sid: "a"))
+        await sleepUntil({ self.naming.calls == ["192.168.31.42"] },
+                         message: "the resolver was never asked")
+
+        // DHCP hands .42 to a different machine while that lookup is still in flight.
+        monitor.clear()
+        monitor.ingest(openLine("192.168.31.42:2000", sid: "b"))
+        await sleepUntil({ self.naming.calls.count == 2 },
+                         message: "the fresh entry's own lookup was never made")
+        monitor.publishNow()
+        XCTAssertEqual(monitor.clients.first?.hostname, "macbook-vasya",
+                       "the fresh entry should be named by its own lookup")
+
+        naming.releaseHeldAnswer("stale-machine")
+        // A probe lookup, sequenced after the release: by the time IT is recorded, the stale
+        // lookup's MainActor continuation — enqueued first — has already run to completion (or
+        // been discarded), with no real-time wait needed to prove it either way.
+        monitor.ingest(openLine("192.168.31.77:3000", sid: "c"))
+        await sleepUntil({ self.naming.calls.count == 3 },
+                         message: "the sequencing probe was never asked")
+        monitor.publishNow()
+
+        XCTAssertEqual(monitor.clients.first(where: { $0.ip == "192.168.31.42" })?.hostname,
+                       "macbook-vasya",
+                       "a lookup that started before clear() must not rename the entry created after it")
+    }
+
     func testActiveMachinesSortAboveRetiredOnes() {
         let monitor = makeMonitor()
         monitor.ingest(openLine("192.168.31.42:1000", sid: "a"))
