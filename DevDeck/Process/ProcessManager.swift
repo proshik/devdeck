@@ -170,6 +170,11 @@ final class ProcessManager {
     /// Resolves whether a command must be launched through the LAN proxy. Injected by `AppDelegate`
     /// (a closure, not a type dependency — `ProcessManager` stays unaware of `ProxyManager`).
     @ObservationIgnored var proxyRouting: (Command) -> ProxyRouting = { _ in .notRouted }
+    /// Every output line of every run, as it arrives. Injected by `AppDelegate` (a closure, not a
+    /// type dependency — `ProcessManager` stays unaware of `ProxyManager`), which points it at the
+    /// connected-clients monitor. The filtering for the proxy listener happens on the other side:
+    /// the hook is generic, and one closure call per log line costs nothing.
+    @ObservationIgnored var outputObserver: (UUID, String, OutputChannel) -> Void = { _, _, _ in }
     /// Last cluster-health snapshot for the popover; refreshed while the popover is open.
     private(set) var cachedClusterHealth: ClusterHealth?
 
@@ -1096,6 +1101,7 @@ final class ProcessManager {
             startVMSamplerIfNeeded()
         case .line(let text, let stream):
             appendLog(commandID, text, stream)
+            outputObserver(commandID, text, stream)
         case .terminated(let code):
             // Whether it was a live daemon before the terminal event distinguishes "dropped" vs "failed to start".
             let wasDaemonRunning = states[commandID] == .daemonRunning
