@@ -26,6 +26,7 @@ struct ProxyShareEditorView: View {
     var body: some View {
         Form {
             shareSection
+            connectedSection
             discoverySection
             terminalHelperSection
         }
@@ -103,6 +104,64 @@ struct ProxyShareEditorView: View {
         proxy.setSharePassword(draft.authEnabled ? sharePassword : nil)
         savedSharePassword = draft.authEnabled ? sharePassword : ""
         proxy.saveShare(draft)
+    }
+
+    // MARK: - Connected machines (host side)
+
+    /// Only meaningful while this Mac is sharing — a machine that only consumes has no clients.
+    @ViewBuilder
+    private var connectedSection: some View {
+        if store.config.settings.proxyShareEnabled {
+            Section(L10n.proxyConnectedSection) {
+                if proxy.proxyClients.isEmpty {
+                    Text(L10n.proxyNoConnections).font(.caption).foregroundStyle(.secondary)
+                } else {
+                    ForEach(proxy.proxyClients) { client in
+                        connectedRow(client)
+                    }
+                }
+            }
+        }
+    }
+
+    private func connectedRow(_ client: ProxyClientMonitor.Client) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "laptopcomputer").foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(client.displayName)
+                // Only when it adds something: an unnamed machine already shows its address above.
+                if client.hostname != nil {
+                    Text(client.ip)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Spacer()
+            connectedStatus(client)
+        }
+    }
+
+    @ViewBuilder
+    private func connectedStatus(_ client: ProxyClientMonitor.Client) -> some View {
+        HStack(spacing: 5) {
+            if client.isActive {
+                Circle().fill(.green).frame(width: 7, height: 7)
+                // Zero live sessions is normal for a machine idling between requests — say "active"
+                // rather than "sessions: 0", which reads like a bug.
+                Text(client.liveSessions > 0 ? L10n.proxySessions(client.liveSessions)
+                                             : L10n.proxyClientActive)
+            } else {
+                Text(L10n.proxyLastSeen(minutesSince(client.lastSeen)))
+            }
+        }
+        .font(.caption)
+        .foregroundStyle(.secondary)
+    }
+
+    /// Whole minutes since `date`. Evaluated during `body`, which is fine: the monitor republishes
+    /// on its sweep, so the label refreshes without a timer of its own here.
+    private func minutesSince(_ date: Date) -> Int {
+        max(0, Int(Date().timeIntervalSince(date) / 60))
     }
 
     // MARK: - Discovery (client side)
