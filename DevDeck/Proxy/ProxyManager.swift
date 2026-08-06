@@ -35,8 +35,9 @@ final class ProxyManager {
     /// Maintains the generated `gost.json` the listener is started with. Owner-only, because it
     /// holds the share password in plaintext — the command line no longer does.
     @ObservationIgnored private let shareConfigFile: any PrivateFileWriting
-    /// Who is using our share, folded out of the listener's own output.
-    @ObservationIgnored let clientMonitor: ProxyClientMonitor
+    /// Who is using our share, folded out of the listener's own output. Nothing outside this type
+    /// reads it — views and tests go through `proxyClients` / `connectedClientCount` below.
+    @ObservationIgnored private let clientMonitor: ProxyClientMonitor
     /// Last contents handed to `envFile`, so a browse update that changes nothing doesn't rewrite
     /// the file. nil means the file is absent as far as we know.
     @ObservationIgnored private var lastProxyEnvContents: String?
