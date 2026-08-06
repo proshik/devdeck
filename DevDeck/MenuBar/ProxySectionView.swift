@@ -65,6 +65,12 @@ struct ProxySectionView: View {
                     Text("·")
                     Text(exitIP).monospacedDigit()
                 }
+                // The popover stays a control deck: one segment on a line that already exists,
+                // never a list. The full roster lives on the Proxy page.
+                if proxy.connectedClientCount > 0 {
+                    Text("·")
+                    Text(L10n.proxyConnectedCount(proxy.connectedClientCount))
+                }
                 Spacer()
             }
             .font(.system(size: 10))
