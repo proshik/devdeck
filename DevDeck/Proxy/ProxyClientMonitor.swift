@@ -74,13 +74,16 @@ final class ProxyClientMonitor {
     /// This machine talking to its own listener — the exit-IP probe and a local `dp`. Not a peer.
     private static let ignoredIPs: Set<String> = ["127.0.0.1", "::1"]
 
-    init(naming: any ProxyClientNaming = ReverseDNSClientNaming(),
-         now: @escaping () -> Date = { Date() },
-         activeWindow: TimeInterval = 120,
-         retention: TimeInterval = 600,
-         nameRetryDelay: TimeInterval = 300,
-         publishInterval: Duration = .milliseconds(500),
-         sweepInterval: Duration = .seconds(15)) {
+    /// `nonisolated` — like `LiveAppController`, this only assigns injected dependencies, so it can
+    /// be built from any context, including as another main-actor type's default argument value
+    /// (`ProxyManager`'s `clientMonitor` parameter), which Swift would otherwise refuse to evaluate.
+    nonisolated init(naming: any ProxyClientNaming = ReverseDNSClientNaming(),
+                     now: @escaping () -> Date = { Date() },
+                     activeWindow: TimeInterval = 120,
+                     retention: TimeInterval = 600,
+                     nameRetryDelay: TimeInterval = 300,
+                     publishInterval: Duration = .milliseconds(500),
+                     sweepInterval: Duration = .seconds(15)) {
         self.naming = naming
         self.now = now
         self.activeWindow = activeWindow
