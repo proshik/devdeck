@@ -79,7 +79,8 @@ final class ProxyManagerShareTests: XCTestCase {
         lanIP: String? = "192.168.1.42",
         exitIP: String? = nil,
         exitIPProbe: (@Sendable (String) -> String?)? = nil,
-        share: ProxyShare = ProxyShare(port: 9999)
+        share: ProxyShare = ProxyShare(port: 9999),
+        clientMonitor: ProxyClientMonitor = ProxyClientMonitor()
     ) -> Rig {
         let store = CommandStore(configURL: url)
         store.upsertProxyShare(share)
@@ -102,7 +103,8 @@ final class ProxyManagerShareTests: XCTestCase {
             exitIPProbe: exitIPProbe ?? { _ in exitIP },
             exitIPRetryDelay: .milliseconds(1),   // the retry loop is exercised, not waited on
             envFile: FakePrivateFile(),
-            shareConfigFile: shareConfig
+            shareConfigFile: shareConfig,
+            clientMonitor: clientMonitor
         )
         manager.store = store
         manager.processManager = processManager
@@ -265,6 +267,66 @@ final class ProxyManagerShareTests: XCTestCase {
         XCTAssertFalse(rig.manager.isAdvertising,
                        "announcing an unreachable address is worse than not announcing at all")
         XCTAssertTrue(rig.advertiser.advertised.isEmpty)
+    }
+
+    /// Mutable clock for the connected-clients monitor — same idea as `ProxyClientMonitorTests`'
+    /// `TestClock`, needed here too so the retention window can be crossed without a real-time wait.
+    private final class ShareTestClock {
+        var now = Date(timeIntervalSince1970: 1_000_000)
+        func advance(_ seconds: TimeInterval) { now += seconds }
+    }
+
+    private func gostOpenLine(_ client: String, sid: String) -> String {
+        """
+        {"client":"\(client)","kind":"handler","level":"info","local":"192.168.1.42:9999",\
+        "msg":"\(client) <> 192.168.1.42:9999","service":"devdeck-proxy","sid":"\(sid)"}
+        """
+    }
+
+    /// Regression for the connected-clients monitor: `listenerDidStart()` used to be called only
+    /// from inside `startAdvertising()`, which returns early right here — with no LAN address at
+    /// all — before ever reaching it. That left two real bugs: a watchdog restart never zeroed the
+    /// live sessions a dead process left behind, and the sweep was never armed for the whole
+    /// session, so retention silently became infinite. Both must now follow the LISTENER's own
+    /// state, not whether Bonjour actually announced it.
+    func testListenerReachingDaemonRunningResetsSessionsAndArmsTheSweepEvenWithoutLAN() async {
+        let clock = ShareTestClock()
+        // publishInterval stays real-time-coalesced (the default) — `publishNow()` below drives the
+        // two deterministic checkpoints directly, the same way `ProxyClientMonitorTests` does, so
+        // only the thing this test actually needs real elapsed time for — the sweep's own repeating
+        // timer — depends on wall-clock time at all.
+        let monitor = ProxyClientMonitor(now: { clock.now }, retention: 5, sweepInterval: .milliseconds(20))
+        let rig = makeRig(lanIP: nil, clientMonitor: monitor)
+
+        rig.manager.startShare()
+        await rig.awaitLaunch()
+        rig.controller?.started(pid: 42)
+        await yieldUntil { rig.processManager.states[ProxyShare.daemonID] == .daemonRunning }
+        XCTAssertFalse(rig.manager.isAdvertising, "sanity: no LAN address means no announcement")
+
+        // A session left open — standing in for whatever gost's own state was the moment it died.
+        rig.manager.ingestDaemonOutput(ProxyShare.daemonID, gostOpenLine("192.168.1.99:1000", sid: "a"))
+        monitor.publishNow()
+        XCTAssertEqual(monitor.clients.first?.liveSessions, 1, "sanity: the session was recorded")
+
+        // The watchdog brings gost back. `isAdvertising` never turns on anywhere in this test — the
+        // old code, which reset sessions and armed the sweep only from inside `startAdvertising()`,
+        // would never run either step at all.
+        rig.controller?.terminate(1)
+        await sleepUntil { rig.runner.startedCommandIDs.count == 2 }
+        rig.controller?.started(pid: 43)
+        await yieldUntil { rig.processManager.states[ProxyShare.daemonID] == .daemonRunning }
+
+        monitor.publishNow()
+        XCTAssertEqual(monitor.clients.first?.liveSessions, 0,
+                       "the dead process's session was never reset without a LAN address")
+
+        // The sweep must be armed too: past the retention window the entry prunes on its own, with
+        // no `sweepNow()` call anywhere in this test — proving the automatic timer, not just the
+        // pruning logic `ProxyClientMonitorTests` already covers directly.
+        clock.advance(6)
+        await sleepUntil({ monitor.clients.isEmpty },
+                         message: "the sweep was never armed without a LAN address")
     }
 
     func testExitIPIsFoldedIntoTheTXTRecord() async {
