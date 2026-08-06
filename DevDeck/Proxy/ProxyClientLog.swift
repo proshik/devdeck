@@ -24,6 +24,12 @@ enum ProxyClientEvent: Equatable {
 /// startup lines, non-JSON output, and any future format change all fail closed into "no data"
 /// rather than into a wrong list.
 func parseGostLogLine(_ line: String) -> ProxyClientEvent? {
+    // Cheap discriminator before the JSON deserialization: on a busy listener the majority of
+    // lines are ` <-> ` / ` >-< ` destination dials, which get thrown away below anyway. Skipping
+    // straight past those means `JSONSerialization` never runs on the hot path, and — for this
+    // feature specifically — a dial's `host`/`dst` (somebody else's browsing history) is never even
+    // materialized into memory, not just left unread.
+    guard line.contains(" >< ") || line.contains(" <> ") else { return nil }
     guard let data = line.data(using: .utf8),
           let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
           let client = object["client"] as? String, !client.isEmpty,
