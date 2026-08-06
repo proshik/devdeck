@@ -218,6 +218,10 @@ final class ProxyClientMonitor {
         entries = entries.filter {
             $0.value.liveSessions > 0 || stamp.timeIntervalSince($0.value.lastSeen) < retention
         }
+        // Otherwise this grows monotonically with every distinct peer IP seen in the app session —
+        // only `clear()` ever emptied it. Pruned in lockstep with `entries`: an IP that is gone from
+        // one belongs in neither.
+        nameRetryAfter = nameRetryAfter.filter { entries[$0.key] != nil }
         publishNow()
     }
 
@@ -227,7 +231,10 @@ final class ProxyClientMonitor {
         sweepTask = Task { @MainActor [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(for: interval)
-                guard let self else { return }
+                // `Task.sleep` swallows its own `CancellationError` above, so a cancel that lands
+                // mid-sleep must be re-checked here — otherwise the task wakes, sweeps and
+                // publishes once more before the `while` condition gets a chance to catch it.
+                guard let self, !Task.isCancelled else { return }
                 self.sweepNow()
             }
         }
