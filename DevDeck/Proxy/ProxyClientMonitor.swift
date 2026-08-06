@@ -60,6 +60,16 @@ final class ProxyClientMonitor {
     @ObservationIgnored private var nameRetryAfter: [String: Date] = [:]
     @ObservationIgnored private var publishTask: Task<Void, Never>?
     @ObservationIgnored private var sweepTask: Task<Void, Never>?
+    /// In-flight reverse-name lookups, one per IP, so `clear()` can cancel them outright instead of
+    /// letting them run to completion unobserved.
+    @ObservationIgnored private var resolveTasks: [String: Task<Void, Never>] = [:]
+    /// Bumped by `clear()`. Every resolve captures it before the `await`; an answer that comes back
+    /// under a stale generation is discarded rather than written. `Task.cancel()` alone isn't enough
+    /// here — a resolver already suspended on its own I/O doesn't necessarily observe cancellation,
+    /// and even if it did, nothing stops a lease from moving the same IP to a different machine
+    /// between the cancel and the answer arriving. The generation check is what actually closes that
+    /// window: an entry created after a `clear()` can never be named by a lookup started before it.
+    @ObservationIgnored private var generation = 0
 
     /// This machine talking to its own listener — the exit-IP probe and a local `dp`. Not a peer.
     private static let ignoredIPs: Set<String> = ["127.0.0.1", "::1"]
@@ -123,6 +133,9 @@ final class ProxyClientMonitor {
     func clear() {
         sweepTask?.cancel(); sweepTask = nil
         publishTask?.cancel(); publishTask = nil
+        for task in resolveTasks.values { task.cancel() }
+        resolveTasks.removeAll()
+        generation += 1
         sessions.removeAll()
         entries.removeAll()
         nameRetryAfter.removeAll()
@@ -138,9 +151,16 @@ final class ProxyClientMonitor {
         // unnamed peer asks the resolver once, not once per request.
         nameRetryAfter[ip] = stamp.addingTimeInterval(nameRetryDelay)
         let naming = naming
-        Task { @MainActor [weak self] in
+        let gen = generation
+        resolveTasks[ip] = Task { @MainActor [weak self] in
             let name = await naming.hostname(for: ip)
-            guard let self, let name, !name.isEmpty else { return }
+            // A generation mismatch means a `clear()` happened while this was in flight — this IP
+            // may already belong to a different machine's entry by the time the answer lands, so
+            // touching `resolveTasks` here (let alone `entries`) would be reaching into a reset
+            // that has nothing to do with this lookup any more.
+            guard let self, self.generation == gen else { return }
+            self.resolveTasks[ip] = nil
+            guard let name, !name.isEmpty else { return }
             self.entries[ip]?.hostname = name
             self.schedulePublish()
         }
