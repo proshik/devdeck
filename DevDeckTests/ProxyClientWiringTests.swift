@@ -39,9 +39,13 @@ final class ProxyClientWiringTests: XCTestCase {
         let monitor = ProxyClientMonitor(naming: FakeProxyClientNaming(),
                                          publishInterval: .seconds(3600),
                                          sweepInterval: .seconds(3600))
+        // shareConfigFile: without this, the default resolves to the REAL
+        // ~/Library/Application Support/DevDeck/gost.json — see ProxyManagerShareTests for the
+        // established convention of always injecting a FakePrivateFile for it.
         let proxy = ProxyManager(discovering: FakeProxyDiscovering(),
                                  advertiser: FakeProxyAdvertising(),
                                  credentials: FakeProxyCredentialStore(),
+                                 shareConfigFile: FakePrivateFile(),
                                  clientMonitor: monitor)
 
         proxy.ingestDaemonOutput(ProxyShare.daemonID, openLine("192.168.31.42:1000", sid: "a"))
@@ -57,9 +61,12 @@ final class ProxyClientWiringTests: XCTestCase {
         let monitor = ProxyClientMonitor(naming: FakeProxyClientNaming(),
                                          publishInterval: .seconds(3600),
                                          sweepInterval: .seconds(3600))
+        // shareConfigFile: `stopShare()` below unconditionally calls `.remove()` on it — without
+        // this override that is an unlink() on the REAL ~/Library/Application Support/DevDeck/gost.json.
         let proxy = ProxyManager(discovering: FakeProxyDiscovering(),
                                  advertiser: FakeProxyAdvertising(),
                                  credentials: FakeProxyCredentialStore(),
+                                 shareConfigFile: FakePrivateFile(),
                                  clientMonitor: monitor)
 
         proxy.ingestDaemonOutput(ProxyShare.daemonID, openLine("192.168.31.42:1000", sid: "a"))
