@@ -28,6 +28,13 @@ versioning follows [SemVer](https://semver.org/).
     (both cases, plus `ALL_PROXY`/`NO_PROXY`) into that process only. With no usable proxy the run
     fails explicitly instead of silently going direct — the flag exists to prevent exactly that leak.
   - New "Proxy" page in the main window, a Proxy section in the popover, and two toggles in Settings.
+- **Connected machines on the Proxy page**: the share side now shows who is actually using it —
+  parsed straight out of the `gost` listener's own log stream (no new process, no new port). Each
+  peer is named by reverse DNS where possible, falls back to its bare IP otherwise, and shows a
+  green dot + live-session count while active or a "N min ago" caption once it goes quiet; the list
+  itself survives a watchdog restart, and only switching the share off clears it. A matching
+  `connected N` segment appears in the popover's announcement line, counting active peers only.
+  Read-only: no traffic counters, no destination hosts, no way to kick a client.
 - **Run through the proxy from anywhere**: a `dp` shell function (copy it from the Proxy page into
   `~/.zshrc`) routes any command through the active proxy from whatever directory you're in —
   `dp claude`. It reads `~/.config/devdeck/proxy.env`, which DevDeck keeps in step with the app's
