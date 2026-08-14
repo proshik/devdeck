@@ -224,6 +224,12 @@ enum L10n {
     static func notifMemoryHigh(_ target: String) -> String {
         t("\(target) memory is running low", "\(target): память на исходе")
     }
+    static var notifDiskFull: String {
+        t("colima VM disk almost full", "Диск colima VM почти заполнен")
+    }
+    static var diskPruneAdvice: String {
+        t("builds will slow down — run docker prune", "сборки замедлятся — рекомендуется docker prune")
+    }
 
     // MARK: - Process manager (user-visible log lines)
 
@@ -313,7 +319,7 @@ enum L10n {
     }
     static var swapRate: String { t("Swap rate", "Swap-rate") }
     static var cpuLoad: String { t("CPU load", "Загрузка CPU") }
-    static var compressor: String { t("Compressor", "Компрессор") }
+    static var diskVM: String { t("VM disk", "Диск VM") }
     static var clusterHealthToggle: String {
         t("Cluster health (colima + minikube status in the deck)",
           "Здоровье кластера (статус colima + minikube в деке)")
