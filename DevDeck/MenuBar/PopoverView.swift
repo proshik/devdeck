@@ -18,9 +18,10 @@ struct PopoverView: View {
         VStack(alignment: .leading, spacing: 0) {
             memoryHeader
                 .task {
-                    // Refresh colima/minikube health while the popover is open; idle when closed.
+                    // Refresh colima/minikube health and the VM disk while the popover is open.
                     while !Task.isCancelled {
                         await manager.refreshClusterHealth()
+                        await manager.refreshVMDisk()
                         try? await Task.sleep(for: .seconds(15))
                     }
                 }
@@ -85,6 +86,7 @@ struct PopoverView: View {
         .task {
             while !Task.isCancelled {
                 await manager.refreshVMSample()
+                await manager.refreshHostSample()
                 try? await Task.sleep(for: .seconds(2))
             }
         }
@@ -130,9 +132,15 @@ struct PopoverView: View {
                                color: health.map { clusterColor($0.level) } ?? Self.placeholderColor)
 
                     let hasSwap = memory.swapUsedBytes > 0
+                    let swapColor: Color = switch SystemMemory.swapSeverity(
+                        swapUsedBytes: memory.swapUsedBytes, totalRAMBytes: memory.totalBytes) {
+                    case .normal: .secondary
+                    case .elevated: .orange
+                    case .high: .red
+                    }
                     metricCell(L10n.swap,
                                hasSwap ? SystemMemory.formatGiB(memory.swapUsedBytes) : "",
-                               color: hasSwap ? .orange : Self.placeholderColor)
+                               color: hasSwap ? swapColor : Self.placeholderColor)
 
                     let vm = manager.vmMemorySample()
                     metricCell("VM colima",
@@ -150,9 +158,10 @@ struct PopoverView: View {
                                host.map { L10n.pressureValue($0.pressure) } ?? "",
                                color: host.map { pressureLevelColor($0.pressure) } ?? Self.placeholderColor)
 
-                    metricCell(L10n.compressor,
-                               host.map { "\(Int(($0.compressorFraction(pageSize: hostPageSize) * 100).rounded()))%" } ?? "",
-                               color: host == nil ? Self.placeholderColor : .secondary)
+                    let disk = manager.cachedVMDisk
+                    metricCell(L10n.diskVM,
+                               disk.map { $0.format() } ?? "",
+                               color: disk.map { pressureColor($0.fraction) } ?? Self.placeholderColor)
 
                     // Live swap rate (↑ out to disk, ↓ in from disk): distinguishes "full but stable"
                     // from "actively thrashing". Gate at ~0.1 MB/s so sub-rounding noise doesn't show.

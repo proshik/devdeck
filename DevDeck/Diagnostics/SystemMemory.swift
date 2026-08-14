@@ -1,6 +1,9 @@
 import Foundation
 import Darwin
 
+/// Alarm level of the swap-used cell (see `SystemMemory.swapSeverity`).
+enum SwapSeverity { case normal, elevated, high }
+
 /// A snapshot of system memory (like "Memory Used" in Activity Monitor).
 struct SystemMemory: Equatable {
     let usedBytes: UInt64
@@ -43,6 +46,16 @@ struct SystemMemory: Equatable {
         var size = MemoryLayout<xsw_usage>.size
         guard sysctlbyname("vm.swapusage", &usage, &size, nil, 0) == 0 else { return 0 }
         return usage.xsu_used
+    }
+
+    /// How alarming the swap usage is, as a fraction of physical RAM (machine-independent):
+    /// a couple of swapped GB is normal macOS housekeeping, not a signal.
+    static func swapSeverity(swapUsedBytes: UInt64, totalRAMBytes: UInt64) -> SwapSeverity {
+        guard totalRAMBytes > 0 else { return .normal }
+        let fraction = Double(swapUsedBytes) / Double(totalRAMBytes)
+        if fraction >= 0.25 { return .high }
+        if fraction >= 0.10 { return .elevated }
+        return .normal
     }
 
     /// "1.7 GB" — bytes in binary GiB. A pure function (for swap).

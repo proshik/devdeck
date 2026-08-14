@@ -178,6 +178,12 @@ final class ProcessManager {
     /// Last cluster-health snapshot for the popover; refreshed while the popover is open.
     private(set) var cachedClusterHealth: ClusterHealth?
 
+    // MARK: VM disk
+    @ObservationIgnored private let diskProbe: any VMDiskProbing
+    /// Last VM-disk snapshot for the popover; refreshed while the popover is open
+    /// (15 s cadence) and by the sampler during runs.
+    private(set) var cachedVMDisk: VMDiskInfo?
+
     init(
         runner: any CommandRunner,
         notifier: any Notifier = NoopNotifier(),
@@ -195,7 +201,8 @@ final class ProcessManager {
         hostProbe: any HostMetricsProbing = LiveHostMetricsProbe(),
         hostMonitoringEnabled: @escaping () -> Bool = { true },
         clusterProbe: any ClusterHealthProbing = LiveClusterHealthProbe(),
-        clusterHealthEnabled: @escaping () -> Bool = { false }
+        clusterHealthEnabled: @escaping () -> Bool = { false },
+        diskProbe: any VMDiskProbing = LiveVMDiskProbe()
     ) {
         self.runner = runner
         self.notifier = notifier
@@ -214,6 +221,7 @@ final class ProcessManager {
         self.isHostMonitoringEnabled = hostMonitoringEnabled
         self.clusterProbe = clusterProbe
         self.isClusterHealthEnabled = clusterHealthEnabled
+        self.diskProbe = diskProbe
     }
 
     /// Prod default: the real zsh/sudo router + a live app controller.
@@ -853,12 +861,29 @@ final class ProcessManager {
         }
     }
 
+    /// One disk warning per sampler session (same debounce set as the memory warnings):
+    /// a full docker disk degrades builds into buildkit GC churn.
+    func checkDiskThreshold(_ disk: VMDiskInfo?) {
+        guard let disk, disk.fraction >= memoryWarnThreshold,
+              warnedThresholds.insert("disk").inserted else { return }
+        notifier.post(.diskThreshold(detail: disk.format()))
+        DiagnosticLog.shared.log("colima disk high: \(disk.format())", level: .warn)
+    }
+
     /// Probe colima + minikube health OFF the main thread and publish it for the popover.
     /// No-op (and clears the cache) when disabled. Called while the popover is open.
     func refreshClusterHealth() async {
         guard isClusterHealthEnabled() else { cachedClusterHealth = nil; return }
         let probe = clusterProbe
         cachedClusterHealth = await Task.detached(priority: .utility) { probe.sample() }.value
+    }
+
+    /// Update cachedVMDisk by running the blocking ssh probe OFF the main thread.
+    /// Gated by the same toggle as the colima memory metric. Called while the popover is open.
+    func refreshVMDisk() async {
+        guard isVMMonitoringEnabled() else { cachedVMDisk = nil; return }
+        let probe = diskProbe
+        cachedVMDisk = await Task.detached(priority: .utility) { probe.sample() }.value
     }
 
     /// Resolve live colima cpus/limit for the `-j` advisory, OFF the main thread. Cached once known.
@@ -877,6 +902,17 @@ final class ProcessManager {
         let probe = vmProbe
         let s = await Task.detached(priority: .utility) { probe.sample() }.value
         cachedVMSample = s   // back on the MainActor after the await — the assignment is on main
+    }
+
+    /// Update cachedHostSample + the swap rate while the popover is open and no run is active
+    /// (during a run the 1 s sampler owns these caches — two writers would corrupt the rate).
+    func refreshHostSample() async {
+        guard isHostMonitoringEnabled(), active.isEmpty else { return }
+        let probe = hostProbe
+        let host = await Task.detached(priority: .utility) { probe.sample(buildPID: nil) }.value
+        guard active.isEmpty else { return }   // a run may have started during the await
+        cachedHostSample = host
+        updateSwapRate(cur: host, now: Date())
     }
 
     /// A single VM-RSS sample for run id (called from tests). Synchronous, don't touch.
@@ -1044,6 +1080,7 @@ final class ProcessManager {
         guard vmSamplerTask == nil,
               isVMMonitoringEnabled() || isMinikubeMonitoringEnabled() || isHostMonitoringEnabled() else { return }
         vmSamplerTask = Task { @MainActor [weak self] in
+            var diskTick = 0
             while let self, !self.active.isEmpty {
                 let vmProbe = self.isVMMonitoringEnabled() ? self.vmProbe : nil
                 let mkTargets = self.isMinikubeMonitoringEnabled() ? self.minikubeTargetIDs : []
@@ -1056,6 +1093,15 @@ final class ProcessManager {
                 self.cachedMinikubeSample = mk
                 if let mk { for id in mkTargets where self.active[id] != nil { self.absorbMinikube(mk, for: id) } }
                 self.checkMemoryThresholds(vm: s, minikube: mk)
+                // Disk changes slowly and the ssh probe isn't free: every ~15 ticks (≈15 s),
+                // so the disk warning fires even with the popover closed.
+                if self.isVMMonitoringEnabled(), diskTick % 15 == 0 {
+                    let diskProbe = self.diskProbe
+                    let disk = await Task.detached(priority: .utility) { diskProbe.sample() }.value
+                    if let disk { self.cachedVMDisk = disk }
+                    self.checkDiskThreshold(disk)
+                }
+                diskTick += 1
                 if self.isHostMonitoringEnabled() {
                     let pid = self.primaryBuildPID
                     let hostProbe = self.hostProbe

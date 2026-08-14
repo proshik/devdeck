@@ -50,6 +50,10 @@ final class LiveNotifier: Notifier {
             content.title = L10n.notifMemoryHigh(target)
             content.body = detail
             content.sound = .default
+        case .diskThreshold(let detail):
+            content.title = L10n.notifDiskFull
+            content.body = detail + " · " + L10n.diskPruneAdvice
+            content.sound = .default
         case .watchdogGaveUp(let name):
             content.title = L10n.notifWatchdogGaveUp
             content.body = name
