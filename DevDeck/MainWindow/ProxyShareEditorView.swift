@@ -18,6 +18,14 @@ struct ProxyShareEditorView: View {
     @State private var loadedFor: String?
     /// Flips to true for 2s after "Copy" — feedback that the snippet is on the clipboard.
     @State private var didCopy = false
+    /// The "Add remote proxy" sheet and its draft fields.
+    @State private var addingRemote = false
+    @State private var remoteName = ""
+    @State private var remoteDestination = ""
+    @State private var remoteLocalPort = 18888
+    @State private var remoteSocksPort = 1080
+    /// Shown when the browser launch finds no Chrome.
+    @State private var browserError = false
 
     init(share: ProxyShare) {
         _draft = State(initialValue: share)
@@ -28,6 +36,7 @@ struct ProxyShareEditorView: View {
             shareSection
             connectedSection
             discoverySection
+            remoteSection
             terminalHelperSection
         }
         .formStyle(.grouped)
@@ -38,6 +47,102 @@ struct ProxyShareEditorView: View {
             loadClientCredentials()
         }
         .onChange(of: proxy.activeProxy?.name) { _, _ in loadClientCredentials() }
+        .sheet(isPresented: $addingRemote) { addRemoteSheet }
+        .alert(L10n.proxyBrowserChromeMissing, isPresented: $browserError) {
+            Button(L10n.cancel, role: .cancel) {}
+        }
+    }
+
+    // MARK: - Remote proxies (SSH)
+
+    @ViewBuilder
+    private var remoteSection: some View {
+        Section(L10n.proxyRemoteSection) {
+            ForEach(store.config.remoteProxies) { remote in
+                remoteRow(remote)
+            }
+            Button(L10n.proxyRemoteAdd) { resetRemoteDraft(); addingRemote = true }
+
+            Divider()
+            HStack {
+                Button {
+                    if !proxy.openProxyBrowser() { browserError = true }
+                } label: {
+                    Label(L10n.proxyBrowserButton, systemImage: "globe")
+                }
+                .disabled(!proxy.canOpenProxyBrowser)
+                Spacer()
+            }
+            Text(L10n.proxyBrowserHint).font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    private func remoteRow(_ remote: RemoteProxy) -> some View {
+        let isActive = store.config.settings.activeRemoteProxyID == remote.id
+        let missing = remote.tunnelCommandID.flatMap { store.commandsByID[$0] } == nil
+        return VStack(alignment: .leading, spacing: 2) {
+            Button {
+                proxy.setActiveRemoteProxy(isActive ? nil : remote)
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: isActive ? "largecircle.fill.circle" : "circle")
+                        .foregroundStyle(isActive ? Color.accentColor : Color.secondary)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(remote.name)
+                        Text("127.0.0.1:\(String(remote.localPort)) · \(L10n.proxyRemoteVia)")
+                            .font(.caption).foregroundStyle(.secondary).monospacedDigit()
+                    }
+                    Spacer()
+                    if isActive { Text(L10n.proxyActive).font(.caption).foregroundStyle(.secondary) }
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(missing)
+
+            if missing { warning(L10n.proxyRemoteTunnelMissing) }
+        }
+        .contextMenu {
+            Button(L10n.proxyRemoteDelete, role: .destructive) {
+                proxy.deleteRemoteProxy(remote, alsoTunnelCommand: false)
+            }
+            Button(L10n.proxyRemoteDeleteTunnelToo, role: .destructive) {
+                proxy.deleteRemoteProxy(remote, alsoTunnelCommand: true)
+            }
+        }
+    }
+
+    private var addRemoteSheet: some View {
+        Form {
+            TextField(L10n.proxyRemoteName, text: $remoteName)
+            TextField(L10n.proxyRemoteDestination, text: $remoteDestination)
+            Text(L10n.proxyRemoteDestinationHint).font(.caption).foregroundStyle(.secondary)
+            TextField(L10n.proxyRemoteLocalPort, value: $remoteLocalPort, format: .number.grouping(.never))
+            TextField(L10n.proxyRemoteSocksPort, value: $remoteSocksPort, format: .number.grouping(.never))
+            HStack {
+                Button(L10n.cancel) { addingRemote = false }
+                Spacer()
+                Button(L10n.save) {
+                    proxy.addRemoteProxy(name: remoteName.trimmingCharacters(in: .whitespaces),
+                                         destination: remoteDestination.trimmingCharacters(in: .whitespaces),
+                                         localPort: remoteLocalPort, socksPort: remoteSocksPort)
+                    addingRemote = false
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(remoteName.trimmingCharacters(in: .whitespaces).isEmpty
+                          || remoteDestination.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+        }
+        .formStyle(.grouped)
+        .frame(width: 380)
+        .padding()
+    }
+
+    private func resetRemoteDraft() {
+        remoteName = ""
+        remoteDestination = ""
+        remoteLocalPort = 18888
+        remoteSocksPort = 1080
     }
 
     // MARK: - Share (host side)
