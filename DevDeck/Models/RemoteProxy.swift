@@ -46,4 +46,38 @@ struct RemoteProxy: Codable, Equatable, Identifiable {
 
     /// Stable id for the synthetic bridge daemon — same reasoning as `ProxyShare.daemonID`.
     static let bridgeDaemonID = UUID(uuidString: "6057D9E0-0000-4000-8000-000000000002")!
+
+    /// Where the generated bridge config lives — beside `gost.json`, same 0600 discipline.
+    static var bridgeConfigURL: URL {
+        PrivateFile.applicationSupportDirectory.appendingPathComponent("proxy-bridge.json")
+    }
+
+    /// The ssh tunnel as a REGULAR deck command — created once by the add flow, then owned and
+    /// editable by the user like any other daemon (`-J jumphost`, options — their business).
+    /// `-N` (no remote command) + `-D` (dynamic SOCKS on loopback): the VDS needs nothing but sshd.
+    ///
+    /// A fresh id on every call — this is a factory for the creation flow, not a stable mapping;
+    /// the link that persists is `tunnelCommandID`.
+    func makeTunnelCommand(destination: String) -> Command {
+        Command(
+            name: L10n.proxyTunnelCommandName(name),
+            command: "ssh -N -D 127.0.0.1:\(socksPort) \(destination)",
+            isDaemon: true,
+            watchdogEnabled: true,
+            port: socksPort
+        )
+    }
+
+    /// The synthetic bridge daemon: the built-in engine with a SOCKS upstream, expressed through
+    /// the SAME marker command as the share's listener — `RoutingCommandRunner` needs no new case.
+    func bridgeCommand(configPath: String) -> Command {
+        Command(
+            id: Self.bridgeDaemonID,
+            name: L10n.proxyBridgeDaemonName,
+            command: ProxyShare.builtInCommandPrefix + configPath,
+            isDaemon: true,
+            watchdogEnabled: true,
+            port: localPort
+        )
+    }
 }
