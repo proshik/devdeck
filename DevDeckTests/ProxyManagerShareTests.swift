@@ -79,7 +79,7 @@ final class ProxyManagerShareTests: XCTestCase {
         lanIP: String? = "192.168.1.42",
         exitIP: String? = nil,
         exitIPProbe: (@Sendable (String) -> String?)? = nil,
-        share: ProxyShare = ProxyShare(port: 9999),
+        share: ProxyShare = ProxyShare(port: 9999, engine: .gost),
         clientMonitor: ProxyClientMonitor = ProxyClientMonitor()
     ) -> Rig {
         let store = CommandStore(configURL: url)
@@ -134,7 +134,8 @@ final class ProxyManagerShareTests: XCTestCase {
         rig.manager.startShare()
         await rig.awaitLaunch()
 
-        XCTAssertEqual(rig.shareConfig.contents, ProxyShare(port: 9999).gostConfigJSON(password: nil),
+        XCTAssertEqual(rig.shareConfig.contents,
+                       ProxyShare(port: 9999, engine: .gost).gostConfigJSON(password: nil),
                        "gost -C reads the file at startup — writing it after the launch would race")
     }
 
@@ -160,6 +161,18 @@ final class ProxyManagerShareTests: XCTestCase {
         XCTAssertTrue(rig.runner.startedCommandIDs.isEmpty, "nothing is launched without gost")
     }
 
+    func testBuiltInEngineStartsWithoutGost() async {
+        // The whole point of the built-in engine: no external binary, no gostMissing warning.
+        let rig = makeRig(gostInstalled: false, share: ProxyShare(port: 9999, engine: .builtIn))
+
+        rig.manager.startShare()
+        await rig.awaitLaunch()
+
+        XCTAssertFalse(rig.manager.gostMissing)
+        XCTAssertEqual(rig.controller?.command.command, "devdeck:proxy-listen -C /fake/gost.json")
+        XCTAssertEqual(rig.controller?.command.name, L10n.proxyShareDaemonNameBuiltIn)
+    }
+
     func testStartShareDoesNotRestartALiveListener() async {
         let rig = makeRig()
         rig.manager.startShare()
@@ -174,7 +187,7 @@ final class ProxyManagerShareTests: XCTestCase {
     }
 
     func testSharePasswordIsReadFromTheCredentialStore() async {
-        let rig = makeRig(share: ProxyShare(port: 8888, authEnabled: true, username: "dev"))
+        let rig = makeRig(share: ProxyShare(port: 8888, authEnabled: true, username: "dev", engine: .gost))
         rig.manager.setSharePassword("s3cret")
 
         rig.manager.startShare()

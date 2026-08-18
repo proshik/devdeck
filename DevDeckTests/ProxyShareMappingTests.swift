@@ -8,9 +8,10 @@ final class ProxyShareMappingTests: XCTestCase {
 
     // MARK: - The command line
 
-    func testCommandCarriesOnlyTheConfigPath() {
-        let share = ProxyShare(port: 9999, authEnabled: true, username: "dev")
-        let command = share.toCommand(gostPath: "/opt/homebrew/bin/gost", configPath: "/tmp/gost.json")
+    func testCommandCarriesOnlyTheConfigPath() throws {
+        let share = ProxyShare(port: 9999, authEnabled: true, username: "dev", engine: .gost)
+        let command = try XCTUnwrap(
+            share.toCommand(gostPath: "/opt/homebrew/bin/gost", configPath: "/tmp/gost.json"))
 
         XCTAssertEqual(command.command, "'/opt/homebrew/bin/gost' -C '/tmp/gost.json'")
         XCTAssertTrue(command.isDaemon)
@@ -18,57 +19,107 @@ final class ProxyShareMappingTests: XCTestCase {
         XCTAssertEqual(command.port, 9999, "carrying the port enables the occupied-port panel for free")
     }
 
-    func testCommandLineNeverCarriesCredentials() {
+    func testCommandLineNeverCarriesCredentials() throws {
         // macOS lets every local account read any process's full argv, so a password on the command
         // line is a password published to the machine. It belongs in the 0600 config file instead.
-        let share = ProxyShare(port: 8888, authEnabled: true, username: "dev")
-        let command = share.toCommand(gostPath: "/opt/homebrew/bin/gost", configPath: "/tmp/gost.json")
+        let share = ProxyShare(port: 8888, authEnabled: true, username: "dev", engine: .gost)
+        let command = try XCTUnwrap(
+            share.toCommand(gostPath: "/opt/homebrew/bin/gost", configPath: "/tmp/gost.json"))
 
         XCTAssertFalse(command.command.contains("dev"))
         XCTAssertFalse(command.command.contains("auto://"))
     }
 
-    func testPathsAreShellQuoted() {
+    func testPathsAreShellQuoted() throws {
         // The real config path is under "Application Support" — a space in an unquoted command line
         // would split it into two arguments.
-        let command = ProxyShare().toCommand(
+        let command = try XCTUnwrap(ProxyShare(engine: .gost).toCommand(
             gostPath: "/opt/homebrew/bin/gost",
-            configPath: "/Users/x/Library/Application Support/DevDeck/gost.json")
+            configPath: "/Users/x/Library/Application Support/DevDeck/gost.json"))
 
         XCTAssertEqual(command.command,
                        "'/opt/homebrew/bin/gost' -C '/Users/x/Library/Application Support/DevDeck/gost.json'")
     }
 
-    func testCommandIsStableAcrossAPasswordChange() {
+    func testCommandIsStableAcrossAPasswordChange() throws {
         // It used to embed the password, so changing one changed the string. Adoption of this
         // daemon does not work either way (`findOrphan` compares a pre-shell string against
         // post-shell argv, and these quotes never reach argv) — the point here is only that the
         // command no longer varies with a secret.
         let path = ProxyShare.configURL.path
-        let before = ProxyShare(port: 9999, authEnabled: true, username: "dev")
-            .toCommand(gostPath: "/g", configPath: path)
-        let after = ProxyShare(port: 9999, authEnabled: true, username: "dev")
-            .toCommand(gostPath: "/g", configPath: path)
+        let before = try XCTUnwrap(ProxyShare(port: 9999, authEnabled: true, username: "dev", engine: .gost)
+            .toCommand(gostPath: "/g", configPath: path))
+        let after = try XCTUnwrap(ProxyShare(port: 9999, authEnabled: true, username: "dev", engine: .gost)
+            .toCommand(gostPath: "/g", configPath: path))
 
         XCTAssertEqual(before.command, after.command)
     }
 
-    func testDaemonIDIsStableAndUsedForSupervision() {
-        let first = ProxyShare(port: 1).toCommand(gostPath: "/g", configPath: "/c")
-        let second = ProxyShare(port: 2, authEnabled: true, username: "u")
-            .toCommand(gostPath: "/g", configPath: "/c")
+    func testDaemonIDIsStableAndUsedForSupervision() throws {
+        let first = try XCTUnwrap(ProxyShare(port: 1).toCommand(gostPath: "/g", configPath: "/c"))
+        let second = try XCTUnwrap(ProxyShare(port: 2, authEnabled: true, username: "u")
+            .toCommand(gostPath: "/g", configPath: "/c"))
 
         XCTAssertEqual(first.id, ProxyShare.daemonID)
         XCTAssertEqual(second.id, ProxyShare.daemonID,
                        "one stable id — supervision state and orphan adoption agree across sessions")
     }
 
-    func testDaemonNameCarriesNoPasswordSoLogsStayClean() {
-        let command = ProxyShare(port: 9999, authEnabled: true, username: "dev")
-            .toCommand(gostPath: "/opt/homebrew/bin/gost", configPath: "/c")
+    func testDaemonNameCarriesNoPasswordSoLogsStayClean() throws {
+        let command = try XCTUnwrap(ProxyShare(port: 9999, authEnabled: true, username: "dev", engine: .gost)
+            .toCommand(gostPath: "/opt/homebrew/bin/gost", configPath: "/c"))
 
         // DiagnosticLog logs `command.name`, never `command.command`.
         XCTAssertEqual(command.name, L10n.proxyShareDaemonName)
+    }
+
+    // MARK: - Engine
+
+    func testEngineDefaultsToBuiltInWhenAbsent() throws {
+        let json = #"{"port": 9999}"#
+        let share = try JSONDecoder().decode(ProxyShare.self, from: Data(json.utf8))
+        XCTAssertEqual(share.engine, .builtIn)
+    }
+
+    func testEngineDecodesAndSurvivesRoundTrip() throws {
+        var share = ProxyShare()
+        share.engine = .gost
+        let data = try JSONEncoder().encode(share)
+        let back = try JSONDecoder().decode(ProxyShare.self, from: data)
+        XCTAssertEqual(back.engine, .gost)
+    }
+
+    func testUnknownEngineStringFallsBackToBuiltIn() throws {
+        // A config written by a NEWER DevDeck must not fail the whole file here.
+        let json = #"{"engine": "socks-magic"}"#
+        let share = try JSONDecoder().decode(ProxyShare.self, from: Data(json.utf8))
+        XCTAssertEqual(share.engine, .builtIn)
+    }
+
+    func testBuiltInCommandUsesMarkerAndRawPath() throws {
+        var share = ProxyShare(port: 9999)
+        share.engine = .builtIn
+        let command = try XCTUnwrap(share.toCommand(gostPath: nil,
+                                                    configPath: "/tmp/dir with space/gost.json"))
+        // No shell ever parses the marker command, so the path travels verbatim, unquoted.
+        XCTAssertEqual(command.command, "devdeck:proxy-listen -C /tmp/dir with space/gost.json")
+        XCTAssertEqual(command.id, ProxyShare.daemonID)
+        XCTAssertTrue(command.isDaemon)
+        XCTAssertTrue(command.watchdogEnabled)
+        XCTAssertEqual(command.port, 9999)
+        XCTAssertEqual(command.name, L10n.proxyShareDaemonNameBuiltIn)
+    }
+
+    func testGostCommandNilWithoutBinary() {
+        var share = ProxyShare()
+        share.engine = .gost
+        XCTAssertNil(share.toCommand(gostPath: nil, configPath: "/tmp/gost.json"))
+    }
+
+    func testBuiltInCommandIgnoresMissingGost() {
+        var share = ProxyShare()
+        share.engine = .builtIn
+        XCTAssertNotNil(share.toCommand(gostPath: nil, configPath: "/tmp/gost.json"))
     }
 
     // MARK: - The generated config

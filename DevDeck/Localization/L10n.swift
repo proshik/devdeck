@@ -345,6 +345,7 @@ enum L10n {
     /// Name of the synthetic gost daemon — logs use this instead of the command line,
     /// which keeps the password out of the log.
     static var proxyShareDaemonName: String { t("Proxy (gost)", "Прокси (gost)") }
+    static var proxyShareDaemonNameBuiltIn: String { t("Proxy (built-in)", "Прокси (встроенный)") }
     static var proxyShareSection: String { t("Share this Mac’s proxy", "Раздавать прокси с этого мака") }
     static var proxyShareToggle: String {
         t("Share the proxy on the local network", "Раздавать прокси в локальной сети")
