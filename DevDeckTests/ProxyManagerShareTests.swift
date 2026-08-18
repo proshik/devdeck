@@ -236,6 +236,17 @@ final class ProxyManagerShareTests: XCTestCase {
         XCTAssertFalse(txt.keys.contains { $0.lowercased().contains("pass") })
     }
 
+    func testBuiltInShareAnnouncesHTTPProto() async {
+        // The built-in engine speaks no SOCKS — the TXT record must not promise it.
+        let rig = makeRig(gostInstalled: false, share: ProxyShare(port: 9999, engine: .builtIn))
+        rig.manager.startShare()
+        await rig.awaitLaunch()
+        rig.controller?.started(pid: 42)
+        await yieldUntil { rig.manager.isAdvertising }
+
+        XCTAssertEqual(proxyTXTRecord(rig.advertiser.advertised.first!)["proto"], "http")
+    }
+
     func testWithdrawsTheAnnouncementWhenTheListenerDies() async {
         // No watchdog restart in the way: an unsupervised listener that dies must be withdrawn.
         let rig = makeRig()

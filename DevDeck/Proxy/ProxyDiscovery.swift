@@ -39,6 +39,9 @@ struct ProxyAdvertisement: Equatable, Sendable {
     var host: String
     /// Egress IP through the VPN, resolved best-effort after the listener comes up.
     var exitIP: String?
+    /// Protocols the listener speaks — "http" (built-in engine) or "http+socks" (gost).
+    /// Defaulted so every existing construction site keeps announcing the historical value.
+    var proto: String = "http+socks"
 }
 
 /// Bonjour service type shared by the browser and the advertiser.
@@ -53,7 +56,7 @@ let proxyTXTSchemaVersion = 1
 func proxyTXTRecord(_ ad: ProxyAdvertisement) -> [String: String] {
     var txt = [
         "v": String(proxyTXTSchemaVersion),
-        "proto": "http+socks",
+        "proto": ad.proto,
         "auth": ad.authRequired ? "1" : "0",
         "host": ad.host,
         "port": String(ad.port),

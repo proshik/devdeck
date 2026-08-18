@@ -310,8 +310,9 @@ final class ProxyManager {
                                      level: .warn)
             return
         }
-        let ad = ProxyAdvertisement(serviceName: share.effectiveServiceName, port: share.port,
+        var ad = ProxyAdvertisement(serviceName: share.effectiveServiceName, port: share.port,
                                     authRequired: share.authEnabled, host: host, exitIP: nil)
+        ad.proto = share.engine == .builtIn ? "http" : "http+socks"
         advertiser.advertise(ad)
         isAdvertising = true
         resolveExitIP(for: ad, share: share)
