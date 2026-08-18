@@ -42,13 +42,19 @@ final class BuiltInProxyListener: @unchecked Sendable {
 
     /// Idempotent. The close lines of still-open sessions are deliberately NOT flushed — the
     /// terminal event ends the stream, exactly like SIGTERM ends a gost that never got to log.
+    ///
+    /// The terminal event is emitted from the `.cancelled` state, NOT here: `cancel()` closes the
+    /// socket asynchronously, and a `.terminated` sent while the port is still held invites the
+    /// next start (the `saveShare` restart cycle) to bind against our own not-yet-closed socket.
     func stop() {
         queue.async {
             for connection in self.connections.values { connection.cancel() }
             self.connections.removeAll()
-            self.listener?.stateUpdateHandler = nil
-            self.listener?.cancel()
-            self.send(.terminated(exitCode: 0))
+            guard let listener = self.listener else {
+                self.send(.terminated(exitCode: 0))   // never bound — nothing to wait for
+                return
+            }
+            listener.cancel()
         }
     }
 
@@ -57,12 +63,20 @@ final class BuiltInProxyListener: @unchecked Sendable {
     private func bind() {
         let listener: NWListener
         do {
-            // No local-endpoint reuse: an occupied port must FAIL here, so the existing
-            // occupied-port machinery upstream sees the same signal a dying gost gives it.
+            // SO_REUSEADDR, like every real server (gost included): without it, the previous
+            // listener's just-died sessions sit in TIME_WAIT on this port and every bind for the
+            // next ~30s gets EADDRINUSE — which is exactly the restart cycle (`saveShare` →
+            // stop → start, or a watchdog restart) and the gost→built-in upgrade path. Found the
+            // hard way on 2026-08-18: the watchdog burned all 3 restarts against TIME_WAIT
+            // remnants and gave up. An ACTIVELY listening occupant still fails the bind — reuse
+            // does not stack on a live listener — so the occupied-port machinery keeps its signal
+            // (asserted by testOccupiedPortEmitsTerminated1).
+            let params = NWParameters.tcp
+            params.allowLocalEndpointReuse = true
             if requestedPort == 0 {
-                listener = try NWListener(using: .tcp)
+                listener = try NWListener(using: params)
             } else {
-                listener = try NWListener(using: .tcp, on: NWEndpoint.Port(rawValue: requestedPort)!)
+                listener = try NWListener(using: params, on: NWEndpoint.Port(rawValue: requestedPort)!)
             }
         } catch {
             send(.line("built-in proxy: cannot listen on port \(requestedPort): \(error.localizedDescription)",
@@ -83,6 +97,10 @@ final class BuiltInProxyListener: @unchecked Sendable {
                                 stream: .stderr))
                 listener.cancel()
                 self.send(.terminated(exitCode: 1))
+            case .cancelled:
+                // The socket is actually closed now — the clean terminal for `stop()`. After a
+                // `.failed` the once-guard in `send` has already spent the terminal event.
+                self.send(.terminated(exitCode: 0))
             default:
                 break
             }
