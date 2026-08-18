@@ -67,7 +67,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// On quit with live daemons — show the "Kill / Keep in background / Cancel" dialog.
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        let daemons = manager.aliveDaemons
+        // The built-in proxy listener is in-process: it cannot be "kept in background", and the
+        // share auto-restores on the next launch (proxyShareEnabled) — so it neither triggers the
+        // dialog nor gets counted. The gost engine keeps today's behavior (a real process can
+        // survive us).
+        let daemons = manager.aliveDaemons.filter {
+            !($0 == ProxyShare.daemonID && store.config.proxy.engine == .builtIn)
+        }
         guard !daemons.isEmpty else {
             DiagnosticLog.shared.log("Quit (no live daemons)")
             return .terminateNow

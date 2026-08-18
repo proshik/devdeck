@@ -346,6 +346,13 @@ enum L10n {
     /// which keeps the password out of the log.
     static var proxyShareDaemonName: String { t("Proxy (gost)", "Прокси (gost)") }
     static var proxyShareDaemonNameBuiltIn: String { t("Proxy (built-in)", "Прокси (встроенный)") }
+    static var proxyEngine: String { t("Engine", "Движок") }
+    static var proxyEngineBuiltIn: String { t("Built-in", "Встроенный") }
+    static var proxyEngineGost: String { t("gost (system)", "gost (системный)") }
+    static var proxyEngineHint: String {
+        t("Built-in serves HTTP (CONNECT) — enough for every DevDeck client and dp. Pick gost if a peer needs SOCKS.",
+          "Встроенный отдаёт HTTP (CONNECT) — этого достаточно всем клиентам DevDeck и dp. gost нужен, только если пиру требуется SOCKS.")
+    }
     static var proxyShareSection: String { t("Share this Mac’s proxy", "Раздавать прокси с этого мака") }
     static var proxyShareToggle: String {
         t("Share the proxy on the local network", "Раздавать прокси в локальной сети")
