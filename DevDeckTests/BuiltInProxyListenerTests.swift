@@ -115,6 +115,61 @@ final class BuiltInProxyListenerTests: XCTestCase {
         XCTAssertFalse(sink.snapshot.contains { if case .line = $0 { return true }; return false })
     }
 
+    func testAbsoluteFormIsRewrittenAndForwardedToTheOrigin() throws {
+        // Mini origin: records what arrives, answers a fixed HTTP response.
+        let recorded = NSMutableData()
+        let origin = try NWListener(using: .tcp)
+        origin.newConnectionHandler = { connection in
+            connection.start(queue: .global())
+            connection.receive(minimumIncompleteLength: 1, maximumLength: 65_536) { data, _, _, _ in
+                if let data { recorded.append(data) }
+                let response = "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nhi"
+                connection.send(content: Data(response.utf8), completion: .contentProcessed { _ in
+                    connection.cancel()
+                })
+            }
+        }
+        let originReady = expectation(description: "origin ready")
+        origin.stateUpdateHandler = { if case .ready = $0 { originReady.fulfill() } }
+        origin.start(queue: .global())
+        wait(for: [originReady], timeout: 5)
+        defer { origin.cancel() }
+        let originPort = origin.port!.rawValue
+
+        let started = expectation(description: "started")
+        let proxy = BuiltInProxyListener(port: 0, auth: nil) { event in
+            if case .started = event { started.fulfill() }
+        }
+        proxy.start()
+        wait(for: [started], timeout: 5)
+        defer { proxy.stop() }
+        let proxyPort = try XCTUnwrap(awaitBoundPort(of: proxy))
+
+        let client = NWConnection(host: "127.0.0.1", port: NWEndpoint.Port(rawValue: proxyPort)!, using: .tcp)
+        let answered = expectation(description: "origin response relayed")
+        client.stateUpdateHandler = { state in
+            guard case .ready = state else { return }
+            let request = "GET http://127.0.0.1:\(originPort)/who HTTP/1.1\r\n"
+                + "Host: 127.0.0.1\r\nProxy-Connection: keep-alive\r\n\r\n"
+            client.send(content: Data(request.utf8), completion: .idempotent)
+            client.receive(minimumIncompleteLength: 1, maximumLength: 65_536) { data, _, _, _ in
+                let response = String(decoding: data ?? Data(), as: UTF8.self)
+                XCTAssertTrue(response.hasPrefix("HTTP/1.1 200 OK"), "got: \(response)")
+                XCTAssertTrue(response.hasSuffix("hi"))
+                answered.fulfill()
+            }
+        }
+        client.start(queue: .global())
+        wait(for: [answered], timeout: 10)
+        client.cancel()
+
+        let seenByOrigin = String(decoding: recorded as Data, as: UTF8.self)
+        XCTAssertTrue(seenByOrigin.hasPrefix("GET /who HTTP/1.1\r\n"),
+                      "the origin must see origin-form, not the absolute-form target: \(seenByOrigin)")
+        XCTAssertFalse(seenByOrigin.lowercased().contains("proxy-"),
+                       "hop-by-hop proxy headers must have been stripped")
+    }
+
     func testOccupiedPortEmitsTerminated1() throws {
         let (blocker, blockedPort) = try startEchoServer()
         defer { blocker.cancel() }
