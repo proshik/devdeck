@@ -170,6 +170,61 @@ final class BuiltInProxyListenerTests: XCTestCase {
                        "hop-by-hop proxy headers must have been stripped")
     }
 
+    /// Regression (2026-08-18): the restart cycle — `saveShare` → stop → start, a watchdog
+    /// restart, or the gost→built-in upgrade — rebinds the SAME port while the previous
+    /// listener's just-closed sessions are still in TIME_WAIT. Without SO_REUSEADDR every such
+    /// bind gets EADDRINUSE for ~30s and the watchdog burns all its restarts against it.
+    func testRebindsThePortRightAfterAStopWithLiveSessions() throws {
+        let (echo, echoPort) = try startEchoServer()
+        defer { echo.cancel() }
+
+        // First listener: take a fixed ephemeral port, run one real session through it.
+        let firstStarted = expectation(description: "first started")
+        let firstStopped = expectation(description: "first stopped")
+        let first = BuiltInProxyListener(port: 0, auth: nil) { event in
+            if case .started = event { firstStarted.fulfill() }
+            if case .terminated(0) = event { firstStopped.fulfill() }
+        }
+        first.start()
+        wait(for: [firstStarted], timeout: 5)
+        let port = try XCTUnwrap(awaitBoundPort(of: first))
+
+        let client = NWConnection(host: "127.0.0.1", port: NWEndpoint.Port(rawValue: port)!, using: .tcp)
+        let tunneled = expectation(description: "session established")
+        client.stateUpdateHandler = { state in
+            guard case .ready = state else { return }
+            client.send(content: Data("CONNECT 127.0.0.1:\(echoPort) HTTP/1.1\r\n\r\n".utf8),
+                        completion: .idempotent)
+            client.receive(minimumIncompleteLength: 1, maximumLength: 65_536) { data, _, _, _ in
+                XCTAssertTrue(String(decoding: data ?? Data(), as: UTF8.self).hasPrefix("HTTP/1.1 200"))
+                tunneled.fulfill()
+            }
+        }
+        client.start(queue: .global())
+        wait(for: [tunneled], timeout: 10)
+
+        // Stop with the session still open (its socket lands in TIME_WAIT). The terminal event
+        // means the LISTENING socket is really closed — that is the moment `ProcessManager`
+        // considers the daemon gone and a restart may bind again; the session's TIME_WAIT
+        // remnant is exactly what survives past it.
+        first.stop()
+        wait(for: [firstStopped], timeout: 5)
+        client.cancel()
+
+        let secondStarted = expectation(description: "second started")
+        let rebindFailed = expectation(description: "no bind failure")
+        rebindFailed.isInverted = true
+        let second = BuiltInProxyListener(port: port, auth: nil) { event in
+            if case .started = event { secondStarted.fulfill() }
+            if case .terminated(1) = event { rebindFailed.fulfill() }
+        }
+        second.start()
+        defer { second.stop() }
+        wait(for: [secondStarted], timeout: 5)
+        XCTAssertEqual(awaitBoundPort(of: second), port, "the same port must be usable immediately")
+        wait(for: [rebindFailed], timeout: 1)   // inverted: a terminated(1) within 1s fails the test
+    }
+
     func testOccupiedPortEmitsTerminated1() throws {
         let (blocker, blockedPort) = try startEchoServer()
         defer { blocker.cancel() }
