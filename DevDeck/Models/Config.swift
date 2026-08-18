@@ -30,6 +30,9 @@ struct Settings: Codable, Equatable {
     /// only meaningful on the network it came from — elsewhere the same `192.168.x.y` belongs to a
     /// stranger, and dialling it would hand them the proxy credentials.
     var activeProxyLANPrefix: String?
+    /// The remote (SSH) proxy chosen as active. Mutually exclusive with `activeProxyName`:
+    /// exactly one of the two selection kinds is ever set (`CommandStore` enforces it).
+    var activeRemoteProxyID: UUID?
 
     init(vmMemoryMonitoring: Bool = true, minikubeMemoryMonitoring: Bool = true,
          hostMemoryMonitoring: Bool = true, globalHotkeyEnabled: Bool = false,
@@ -37,7 +40,8 @@ struct Settings: Codable, Equatable {
          proxyShareEnabled: Bool = false, proxyDiscoveryEnabled: Bool = false,
          activeProxyName: String? = nil, activeProxyUsername: String? = nil,
          activeProxyHost: String? = nil, activeProxyPort: Int? = nil,
-         activeProxyAuthRequired: Bool = false, activeProxyLANPrefix: String? = nil) {
+         activeProxyAuthRequired: Bool = false, activeProxyLANPrefix: String? = nil,
+         activeRemoteProxyID: UUID? = nil) {
         self.vmMemoryMonitoring = vmMemoryMonitoring
         self.minikubeMemoryMonitoring = minikubeMemoryMonitoring
         self.hostMemoryMonitoring = hostMemoryMonitoring
@@ -52,13 +56,14 @@ struct Settings: Codable, Equatable {
         self.activeProxyPort = activeProxyPort
         self.activeProxyAuthRequired = activeProxyAuthRequired
         self.activeProxyLANPrefix = activeProxyLANPrefix
+        self.activeRemoteProxyID = activeRemoteProxyID
     }
 
     enum CodingKeys: String, CodingKey {
         case vmMemoryMonitoring, minikubeMemoryMonitoring, hostMemoryMonitoring, globalHotkeyEnabled,
              clusterHealthMonitoring, autoUpdateEnabled, proxyShareEnabled, proxyDiscoveryEnabled,
              activeProxyName, activeProxyUsername, activeProxyHost, activeProxyPort,
-             activeProxyAuthRequired, activeProxyLANPrefix
+             activeProxyAuthRequired, activeProxyLANPrefix, activeRemoteProxyID
     }
 
     init(from decoder: Decoder) throws {
@@ -77,6 +82,7 @@ struct Settings: Codable, Equatable {
         activeProxyPort = try c.decodeIfPresent(Int.self, forKey: .activeProxyPort)
         activeProxyAuthRequired = try c.decodeIfPresent(Bool.self, forKey: .activeProxyAuthRequired) ?? false
         activeProxyLANPrefix = try c.decodeIfPresent(String.self, forKey: .activeProxyLANPrefix)
+        activeRemoteProxyID = try c.decodeIfPresent(UUID.self, forKey: .activeRemoteProxyID)
     }
 }
 
@@ -91,25 +97,29 @@ struct Config: Codable, Equatable {
     var commands: [Command]
     var chains: [Chain]
     var settings: Settings
-    /// Host-side proxy sharing (the `gost` listener announced over Bonjour).
+    /// Host-side proxy sharing (the listener announced over Bonjour).
     var proxy: ProxyShare
+    /// Client-side remote (SSH) proxies — egress through a VDS, no LAN peer involved.
+    var remoteProxies: [RemoteProxy]
 
     init(
         schemaVersion: Int = Config.currentSchemaVersion,
         commands: [Command] = [],
         chains: [Chain] = [],
         settings: Settings = Settings(),
-        proxy: ProxyShare = ProxyShare()
+        proxy: ProxyShare = ProxyShare(),
+        remoteProxies: [RemoteProxy] = []
     ) {
         self.schemaVersion = schemaVersion
         self.commands = commands
         self.chains = chains
         self.settings = settings
         self.proxy = proxy
+        self.remoteProxies = remoteProxies
     }
 
     enum CodingKeys: String, CodingKey {
-        case schemaVersion, commands, chains, settings, proxy
+        case schemaVersion, commands, chains, settings, proxy, remoteProxies
     }
 
     init(from decoder: Decoder) throws {
@@ -119,6 +129,7 @@ struct Config: Codable, Equatable {
         chains = try c.decodeIfPresent([Chain].self, forKey: .chains) ?? []
         settings = try c.decodeIfPresent(Settings.self, forKey: .settings) ?? Settings()
         proxy = try c.decodeIfPresent(ProxyShare.self, forKey: .proxy) ?? ProxyShare()
+        remoteProxies = try c.decodeIfPresent([RemoteProxy].self, forKey: .remoteProxies) ?? []
     }
 
     /// 2 — added the `proxy` block and the proxy settings/`routeThroughProxy` flag.
