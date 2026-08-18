@@ -28,6 +28,8 @@ versioning follows [SemVer](https://semver.org/).
   the `localhost` callback stays direct. Works for LAN and remote proxies alike.
 
 ### Changed
+- The per-command flag is now **"Route through the active proxy"** (was "Route through the LAN
+  proxy"). Behaviour is unchanged — the old wording made the remote/VDS proxy look unsupported.
 - The `dp` shell helper honors a network-independent scope (`DEVDECK_PROXY_LAN=*`) for loopback
   (remote) proxies — **re-paste the snippet** from the Proxy page if you use `dp`.
 
