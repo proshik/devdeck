@@ -166,28 +166,28 @@ struct ProxyShare: Codable, Equatable {
 /// gost v3's config schema, only the slice we generate. Encode-only — DevDeck writes this file and
 /// never reads it back. Verified against `gost -L 'auto://user:pass@:port' -O yaml`, which prints
 /// the canonical config for a listener spec.
-struct GostConfig: Encodable, Equatable {
+struct GostConfig: Codable, Equatable {
     let services: [GostService]
 }
 
-struct GostService: Encodable, Equatable {
+struct GostService: Codable, Equatable {
     let name: String
     let addr: String
     let handler: GostHandler
     let listener: GostListener
 }
 
-struct GostHandler: Encodable, Equatable {
+struct GostHandler: Codable, Equatable {
     let type: String
     /// Absent for an open proxy — the key is omitted, not sent empty.
     let auth: GostAuth?
 }
 
-struct GostAuth: Encodable, Equatable {
+struct GostAuth: Codable, Equatable {
     let username: String
     let password: String
 }
 
-struct GostListener: Encodable, Equatable {
+struct GostListener: Codable, Equatable {
     let type: String
 }
