@@ -182,6 +182,32 @@ a region where the services you need are available. Nothing is installed on the 
 engine dialing through that SOCKS), presenting the whole thing as an ordinary
 `http://127.0.0.1:<port>` proxy. Hostnames are resolved on the VDS, not locally.
 
+### Before you start
+
+DevDeck runs `ssh` as a background daemon — **with no terminal attached**. Anything ssh would
+normally ask a human cannot be answered, so it must already be settled:
+
+- **Key-based auth, no passphrase prompt.** A password login, or a key whose passphrase is not in
+  the agent, leaves the tunnel dead on arrival. Use a key and make sure the agent holds it
+  (`ssh-add -l`); on macOS, `UseKeychain yes` in `~/.ssh/config` makes that survive reboots.
+- **The host key must already be trusted.** The first connection to an unknown host asks
+  "Are you sure you want to continue connecting?" — nobody is there to type `yes`.
+- **`AllowTcpForwarding` must be on at the VDS** (sshd's default, but hardened images disable it).
+  Without it the tunnel connects and then forwards nothing, which looks like "everything is up but
+  nothing works".
+
+One check covers all three — run it in a terminal once. It must finish instantly, printing nothing
+and asking nothing:
+
+```sh
+ssh <your-host> true          # silence = ready; any prompt = fix it before adding the proxy
+```
+
+No software is installed on the VDS and no root is needed there — an ordinary account with `sshd`
+is the whole requirement.
+
+### Setting it up
+
 1. **Proxy page → Remote proxies (SSH) → Add remote proxy…** — give it a name and an SSH
    destination (a host from `~/.ssh/config`, or `user@host`). The local HTTP port (18888) and SOCKS
    port (1080) have sane defaults. DevDeck creates a regular, editable `ssh -N -D …` daemon command
@@ -189,8 +215,8 @@ engine dialing through that SOCKS), presenting the whole thing as an ordinary
 2. **Select it** in the list. DevDeck holds the tunnel and the bridge up (with watchdog restarts,
    and across app restarts) while it stays selected. The check button shows the VDS's public IP —
    proof traffic egresses there.
-3. **Flag a command** with "Route through the LAN proxy" (the flag serves both proxy kinds), or use
-   the `dp` helper from any terminal — `dp claude`.
+3. **Flag a command** with "Route through the active proxy", or use the `dp` helper from any
+   terminal — `dp claude`.
 4. **Browser logins** (`/login` in Claude Code): click **Browser via proxy**. It opens a separate
    Chrome window that egresses through the proxy, with its own profile, without touching your
    default browser. Paste the printed login URL there; the `localhost` callback stays direct and
@@ -198,6 +224,21 @@ engine dialing through that SOCKS), presenting the whole thing as an ordinary
 
 > The `dp` snippet changed for this release (it now honors a network-independent scope). If you
 > pasted an older one, re-copy it from **Proxy page → terminal helper**.
+
+### When it doesn't work
+
+The tunnel is an ordinary daemon in the deck, so it fails visibly: its row goes red and the
+watchdog keeps retrying, and the proxy stays unusable (a flagged command fails loudly rather than
+going direct). What the log — **"Log" button → `devdeck.log`** — will tell you:
+
+| Symptom | Cause |
+|---|---|
+| Tunnel dies immediately, over and over | ssh wants something a daemon can't answer — see [Before you start](#before-you-start) |
+| Tunnel stays up, the check button fails | `AllowTcpForwarding no` on the VDS, or the SOCKS port is taken locally |
+| "Port 1080 is occupied" panel | something else holds the port — the panel offers to kill it, or change the port on the proxy |
+
+To see the raw error, run the tunnel command by hand once: open it from the deck, or paste its
+`ssh -N -D …` line into a terminal — there ssh can finally tell you what it wanted.
 
 ## Language
 

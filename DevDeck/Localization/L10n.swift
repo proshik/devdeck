@@ -366,8 +366,11 @@ enum L10n {
     static var proxyDiscoveryToggle: String {
         t("Look for proxies on the local network", "Искать прокси в локальной сети")
     }
+    /// Deliberately says nothing about WHERE the proxy is: the flag serves a LAN peer and a
+    /// remote (SSH/VDS) proxy alike, and the old "LAN" wording made the remote kind look
+    /// unsupported.
     static var routeThroughProxyToggle: String {
-        t("Route through the LAN proxy", "Пускать через прокси из локальной сети")
+        t("Route through the active proxy", "Пускать через активный прокси")
     }
     static var proxyActive: String { t("Active", "Активный") }
     static var proxyNone: String { t("none", "нет") }
