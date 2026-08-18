@@ -14,6 +14,9 @@ struct ProxySectionView: View {
     @Environment(\.openWindow) private var openWindow
 
     @AppStorage("popover.section.proxy.collapsed") private var collapsed = false
+    /// Flips on for a moment when the browser button finds no Chrome — inline, since a popover
+    /// has no room for an alert.
+    @State private var browserMissingChrome = false
 
     private var shareEnabled: Bool { store.config.settings.proxyShareEnabled }
     private var discoveryEnabled: Bool { store.config.settings.proxyDiscoveryEnabled }
@@ -26,6 +29,7 @@ struct ProxySectionView: View {
                 if shareEnabled { shareRows }
                 if discoveryEnabled { discoveryRows }
                 if hasRemoteProxies { remoteRows }
+                if proxy.canOpenProxyBrowser { browserRow }
             }
         }
     }
@@ -230,6 +234,33 @@ struct ProxySectionView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+
+    // MARK: browser via proxy
+
+    /// The same launch the Proxy page offers, one tap from the tray — the browser half of an OAuth
+    /// login (`/login`). Shown only when a proxy actually resolves, so the tap always has a target.
+    @ViewBuilder
+    private var browserRow: some View {
+        Button {
+            browserMissingChrome = !proxy.openProxyBrowser()
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: "globe").font(.system(size: 9))
+                Text(L10n.proxyBrowserButton)
+                Spacer()
+            }
+            .font(.system(size: 10))
+            .foregroundStyle(.secondary)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .padding(.leading, 34)
+        .padding(.trailing, 16)
+        .padding(.bottom, 2)
+        if browserMissingChrome {
+            proxyNote(L10n.proxyBrowserChromeMissing, icon: "exclamationmark.triangle.fill", color: .orange)
+        }
     }
 
     // MARK: shared bits
