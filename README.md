@@ -32,6 +32,10 @@ Launch, stop, and monitor local dev commands and long-running daemons
 - **Memory freeing** — gracefully quit memory-hungry GUI apps before a heavy build and
   relaunch them afterwards (for a memory-hungry `just dev-build`).
 - **Memory header** — RAM (used/total/%), swap, color by pressure; auto-refreshes once a second.
+- **Proxy Manager** — share this Mac's VPN egress with another machine over the LAN: a supervised
+  [`gost`](https://github.com/go-gost/gost) listener announced over Bonjour, and a per-command
+  "route through the LAN proxy" flag on the client side. The share side requires `gost`
+  (see [Requirements](#requirements)).
 - **Diagnostics** — a file log + crash reports; the "Log" button reveals `devdeck.log` in Finder.
 - **JSON config**, editable both by hand and from the UI; external edits are picked up by a FileWatcher,
   broken JSON → an error in the UI while the last valid version is kept in memory.
@@ -89,6 +93,10 @@ Grab the `.dmg` from [Releases](https://github.com/proshik/devdeck/releases) and
   It can't go below 14.0 — the code uses macOS 14+ API (`@Observable`, `.focusEffectDisabled()`).
 - **Xcode 16+** to build.
 - Optional: [`just`](https://github.com/casey/just) — for the short commands in the `justfile`.
+- Optional: [`gost`](https://github.com/go-gost/gost) (`brew install gost`) — only to **share** your
+  VPN egress as a LAN proxy (the Proxy page). DevDeck looks for it at `/opt/homebrew/bin/gost` or
+  `/usr/local/bin/gost`; without it the share can't start (the editor shows a warning), everything
+  else — including using someone else's proxy — works without it.
 
 ## Stack
 
