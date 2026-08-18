@@ -61,6 +61,10 @@ struct MainWindowView: View {
             detail
         }
         .frame(minWidth: 760, minHeight: 480)
+        // The sidebar's toolbar makes AppKit draw its titlebar separator, which on macOS 26 lands
+        // across the traffic lights. Nothing here is separated by it — the sidebar has its own
+        // divider above the pinned buttons.
+        .background(WindowAccessor { $0.titlebarSeparatorStyle = .none })
     }
 
     @ViewBuilder
