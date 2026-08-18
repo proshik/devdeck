@@ -1,0 +1,35 @@
+name: Tests
+
+# Runs on every push to the default branch, so breakage surfaces immediately instead of at
+# release time. The release workflow gates on the same suite — this one only makes the failure
+# arrive earlier.
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: macos-15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Cache SwiftPM
+        uses: actions/cache@v6
+        with:
+          path: ~/Library/Caches/org.swift.swiftpm
+          key: spm-${{ hashFiles('DevDeck.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved') }}
+
+      # No pipe: the default shell has no `pipefail`, and piping would swallow xcodebuild's
+      # exit code.
+      - name: Run tests
+        run: |
+          xcodebuild test \
+            -project DevDeck.xcodeproj \
+            -scheme DevDeck \
+            -destination 'platform=macOS'
