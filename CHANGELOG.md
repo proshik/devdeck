@@ -7,6 +7,24 @@ versioning follows [SemVer](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Remote proxy (VDS over SSH)** — route flagged commands through a VDS reachable over SSH, with
+  nothing installed on it but `sshd`. DevDeck holds an `ssh -N -D` dynamic-SOCKS tunnel (created as
+  a regular, editable deck command) plus a local **bridge** — the built-in engine dialing targets
+  through that SOCKS upstream — and presents the pair as an ordinary `http://127.0.0.1:<port>`
+  proxy. Hostnames are resolved on the VDS (SOCKS domain addresses), so blocked domains resolve
+  where they work. Selectable alongside LAN proxies on the Proxy page; held up while selected
+  (watchdog + across app restarts). Config: `remoteProxies` + `settings.activeRemoteProxyID`
+  (mutually exclusive with the discovered selection).
+- **Browser via proxy** — a button on the Proxy page opens a separate Chrome instance that egresses
+  through the active proxy, with its own profile, without touching the default browser. Fills the
+  browser half of OAuth logins like Claude Code's `/login`: the page loads through the proxy while
+  the `localhost` callback stays direct. Works for LAN and remote proxies alike.
+
+### Changed
+- The `dp` shell helper honors a network-independent scope (`DEVDECK_PROXY_LAN=*`) for loopback
+  (remote) proxies — **re-paste the snippet** from the Proxy page if you use `dp`.
+
+### Added (earlier this cycle)
 - **Built-in proxy engine** — the share side no longer needs `gost`: an in-process HTTP listener
   (`Network.framework`, CONNECT + absolute-form, optional Basic auth from the Keychain) serves the
   share by default. A new **Engine** picker on the Proxy page chooses between **Built-in** and
