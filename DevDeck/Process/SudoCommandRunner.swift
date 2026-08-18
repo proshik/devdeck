@@ -5,18 +5,23 @@ struct RoutingCommandRunner: CommandRunner {
     let zsh: any CommandRunner
     let sudo: any CommandRunner
     let terminal: any CommandRunner
+    let builtInProxy: any CommandRunner
 
     init(
         zsh: any CommandRunner = ZshCommandRunner(),
         sudo: any CommandRunner = SudoCommandRunner(),
-        terminal: any CommandRunner = GhosttyCommandRunner()
+        terminal: any CommandRunner = GhosttyCommandRunner(),
+        builtInProxy: any CommandRunner = BuiltInProxyRunner()
     ) {
         self.zsh = zsh
         self.sudo = sudo
         self.terminal = terminal
+        self.builtInProxy = builtInProxy
     }
 
     func start(_ command: Command) -> any RunningProcess {
+        // The marker never reaches a shell: an in-process listener, not a process.
+        if command.command.hasPrefix(ProxyShare.builtInCommandPrefix) { return builtInProxy.start(command) }
         if command.openInTerminal { return terminal.start(command) }   // priority: terminal
         return command.needsSudo ? sudo.start(command) : zsh.start(command)
     }
