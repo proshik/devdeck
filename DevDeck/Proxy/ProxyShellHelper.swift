@@ -9,6 +9,9 @@ let proxyEnvFileDisplayPath = "~/.config/devdeck/proxy.env"
 /// **English-only on purpose.** This is code the user pastes into their shell, not app UI, so it
 /// does not go through `L10n` — only the section title, hint and button around it do.
 ///
+/// `DEVDECK_PROXY_LAN=*` means the endpoint is loopback (a remote/SSH proxy) and valid on any
+/// network — the interface scan is skipped; the tunnel, not the LAN, is the scope.
+///
 /// Two things here are load-bearing and must not be "simplified":
 /// - It READS two keys rather than `source`-ing the file: a data file must not be able to run code.
 /// - It finds the LAN address by scanning `en*`, NOT from `route -n get default`. Under a
@@ -31,10 +34,12 @@ dp() {
   url=$(sed -n 's/^DEVDECK_PROXY_URL=//p' $f)
   lan=$(sed -n 's/^DEVDECK_PROXY_LAN=//p' $f)
   [[ -n $url && -n $lan ]] || { print -u2 "dp: proxy.env is incomplete"; return 1; }
-  for iface in ${(f)"$(ifconfig -l | tr ' ' '\\n')"}; do
-    [[ $iface == en* ]] && ip=$(ipconfig getifaddr $iface 2>/dev/null) && [[ -n $ip && $ip != 169.254.* ]] && break
-  done
-  [[ -n $ip && ${ip%.*} == $lan ]] || { print -u2 "dp: proxy $lan is not on this network"; return 1; }
+  if [[ $lan != "*" ]]; then
+    for iface in ${(f)"$(ifconfig -l | tr ' ' '\\n')"}; do
+      [[ $iface == en* ]] && ip=$(ipconfig getifaddr $iface 2>/dev/null) && [[ -n $ip && $ip != 169.254.* ]] && break
+    done
+    [[ -n $ip && ${ip%.*} == $lan ]] || { print -u2 "dp: proxy $lan is not on this network"; return 1; }
+  fi
   HTTPS_PROXY=$url HTTP_PROXY=$url ALL_PROXY=$url \\
   https_proxy=$url http_proxy=$url all_proxy=$url \\
   NO_PROXY=localhost,127.0.0.1,::1 no_proxy=localhost,127.0.0.1,::1 "$@"

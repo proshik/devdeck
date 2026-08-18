@@ -62,6 +62,30 @@ final class ProxyShellHelperTests: XCTestCase {
         XCTAssertFalse(result.output.contains("MARKER"))
     }
 
+    /// A remote (SSH) proxy is loopback and valid on ANY network — DevDeck writes the `*` scope
+    /// and the helper must skip the interface scan entirely (deterministic on every machine).
+    func testWildcardScopeSkipsTheNetworkCheck() throws {
+        try writeEnvFile("""
+        DEVDECK_PROXY_URL=http://127.0.0.1:18888
+        DEVDECK_PROXY_LAN=*
+
+        """)
+
+        let result = try runHelper()
+
+        XCTAssertEqual(result.status, 0, "the wildcard scope must run regardless of the LAN: \(result.output)")
+        XCTAssertTrue(result.output.contains("MARKER"))
+    }
+
+    func testWildcardStillRequiresACompleteFile() throws {
+        try writeEnvFile("DEVDECK_PROXY_LAN=*\n")
+
+        let result = try runHelper()
+
+        XCTAssertNotEqual(result.status, 0, "a wildcard without a URL is an incomplete file, not a pass")
+        XCTAssertFalse(result.output.contains("MARKER"))
+    }
+
     func testRefusesWhenTheEnvFileIsIncomplete() throws {
         try writeEnvFile("DEVDECK_PROXY_URL=http://192.168.31.117:9999\n")
 
