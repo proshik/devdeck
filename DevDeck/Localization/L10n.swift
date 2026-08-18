@@ -367,6 +367,9 @@ enum L10n {
     static var proxyPassword: String { t("Password", "Пароль") }
     static var proxyAuthToggle: String { t("Require a password", "Требовать пароль") }
     static var proxyPort: String { t("Port", "Порт") }
+    static var proxyCheck: String { t("Check", "Проверить") }
+    static var proxyChecking: String { t("Checking…", "Проверяем…") }
+    static var proxyCheckFailed: String { t("No response through the proxy", "Прокси не отвечает") }
     static var proxySearching: String { t("Searching…", "Идёт поиск…") }
     static var proxyNoneFound: String { t("No proxies found yet", "Прокси пока не найдены") }
     static var proxyLastKnownAddress: String {

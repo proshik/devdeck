@@ -64,9 +64,24 @@ final class ProxyManager {
     /// selection, the browse results, or the stored credentials change.
     private(set) var activeProxyHasCredentials = false
 
+    /// Client-side check verdict — one probe through the active proxy, driven by the popover button.
+    enum ClientCheck: Equatable {
+        case idle
+        case running
+        /// The egress IP the internet reported through the proxy — the check's proof.
+        case success(String)
+        case failed
+    }
+
+    /// What the popover's check row shows. Reset whenever the active proxy changes — a green check
+    /// for one proxy must not survive onto another.
+    private(set) var clientCheck: ClientCheck = .idle
+
     @ObservationIgnored private var discoveryTask: Task<Void, Never>?
     /// Token of the in-flight exit-IP probe — a restart preempts an older, slower probe.
     @ObservationIgnored private var exitIPToken: UUID?
+    /// Same preemption for the client-side check: a proxy switch must orphan a probe still out.
+    @ObservationIgnored private var clientCheckToken: UUID?
     @ObservationIgnored private var observingDaemonState = false
     @ObservationIgnored private var observingSettings = false
     /// Mirrors the daemon's own `.daemonRunning` state, independent of `isAdvertising` — see
@@ -439,9 +454,35 @@ final class ProxyManager {
         if on { startDiscovery() } else { stopDiscovery() }
     }
 
+    /// One probe through the ACTIVE proxy from THIS machine — the popover's check button.
+    /// Deliberately the same resolution as `routing(for:)` (endpoint, credentials, URL builder),
+    /// so a green check proves exactly what a flagged command will get. One attempt: unlike the
+    /// host-side probe there is no just-spawned gost to wait out, and the button is a retry.
+    func checkActiveProxy() {
+        guard let resolved = resolvedEndpoint() else {
+            clientCheckToken = nil
+            clientCheck = .idle
+            return
+        }
+        let url = proxyURL(host: resolved.proxy.host, port: resolved.proxy.port,
+                           user: resolved.user, pass: resolved.pass)
+        let token = UUID()
+        clientCheckToken = token
+        clientCheck = .running
+        let probe = exitIPProbe
+        Task { @MainActor [weak self] in
+            let output = await Task.detached(priority: .utility) { probe(url) }.value
+            guard let self, self.clientCheckToken == token else { return }
+            let ip = output?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            self.clientCheck = ip.isEmpty ? .failed : .success(ip)
+        }
+    }
+
     /// Choose the active proxy. Switching to a DIFFERENT peer drops the stored username —
     /// credentials are per-peer, and silently reusing another host's login would just fail.
     func setActiveProxy(_ proxy: DiscoveredProxy?) {
+        clientCheckToken = nil
+        clientCheck = .idle
         defer { refreshDerivedState() }
         guard let proxy else {
             store?.setActiveProxy(name: nil, username: nil)
