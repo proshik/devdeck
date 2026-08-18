@@ -241,6 +241,52 @@ final class BuiltInProxyListenerTests: XCTestCase {
         XCTAssertTrue(sink.snapshot.contains { if case .line = $0 { return true }; return false })
     }
 
+    // MARK: - SOCKS upstream (the remote-proxy bridge)
+
+    /// The bridge: same listener, but the target dial goes through a SOCKS5 upstream. The
+    /// recorded request must carry the HOSTNAME (ATYP=domain) — resolution belongs to the VDS,
+    /// and a locally-resolved blocked domain would be poisoned or fail outright.
+    func testUpstreamDialForwardsTheHostnameToSOCKS() throws {
+        let socks = try FakeSOCKSServer.start()
+        defer { socks.stop() }
+
+        let started = expectation(description: "bridge started")
+        let bridge = BuiltInProxyListener(
+            port: 0, auth: nil,
+            upstream: .hostPort(host: "127.0.0.1", port: NWEndpoint.Port(rawValue: socks.port)!)
+        ) { event in
+            if case .started = event { started.fulfill() }
+        }
+        bridge.start()
+        wait(for: [started], timeout: 5)
+        defer { bridge.stop() }
+        let bridgePort = try XCTUnwrap(awaitBoundPort(of: bridge))
+
+        let client = NWConnection(host: "127.0.0.1", port: NWEndpoint.Port(rawValue: bridgePort)!, using: .tcp)
+        let echoed = expectation(description: "tunnel established through SOCKS and bytes echoed")
+        client.stateUpdateHandler = { state in
+            guard case .ready = state else { return }
+            let connect = "CONNECT devdeck-spike.test:4444 HTTP/1.1\r\nHost: devdeck-spike.test\r\n\r\n"
+            client.send(content: Data(connect.utf8), completion: .idempotent)
+            client.receive(minimumIncompleteLength: 1, maximumLength: 65_536) { data, _, _, _ in
+                let response = String(decoding: data ?? Data(), as: UTF8.self)
+                XCTAssertTrue(response.hasPrefix("HTTP/1.1 200"), "got: \(response)")
+                client.send(content: Data("via-socks".utf8), completion: .idempotent)
+                client.receive(minimumIncompleteLength: 1, maximumLength: 65_536) { back, _, _, _ in
+                    XCTAssertEqual(String(decoding: back ?? Data(), as: UTF8.self), "via-socks")
+                    echoed.fulfill()
+                }
+            }
+        }
+        client.start(queue: .global())
+        wait(for: [echoed], timeout: 10)
+        client.cancel()
+
+        XCTAssertEqual(socks.requests,
+                       [FakeSOCKSServer.Request(atyp: 0x03, address: "devdeck-spike.test", port: 4444)],
+                       "the hostname must reach SOCKS unresolved, as a domain address")
+    }
+
     /// `boundPort` is set on the listener's queue around the `.started` emit — poll briefly
     /// rather than assuming the write is visible the instant the expectation fulfils.
     private func awaitBoundPort(of proxy: BuiltInProxyListener) -> UInt16? {
