@@ -38,6 +38,8 @@ final class ProxyManager {
     /// Maintains the generated `proxy-bridge.json` the remote proxy's bridge is started with.
     /// No secrets inside — owner-only purely for consistency with its siblings.
     @ObservationIgnored private let bridgeConfigFile: any PrivateFileWriting
+    /// Launches the proxied Chrome instance. Injected so tests record the argument vector.
+    @ObservationIgnored private let browserLauncher: @MainActor ([String]) -> Bool
     /// Who is using our share, folded out of the listener's own output. Nothing outside this type
     /// reads it — views and tests go through `proxyClients` / `connectedClientCount` below.
     @ObservationIgnored private let clientMonitor: ProxyClientMonitor
@@ -106,6 +108,7 @@ final class ProxyManager {
         envFile: any PrivateFileWriting = LivePrivateFile(url: proxyEnvFileURL),
         shareConfigFile: any PrivateFileWriting = LivePrivateFile(url: ProxyShare.configURL),
         bridgeConfigFile: any PrivateFileWriting = LivePrivateFile(url: RemoteProxy.bridgeConfigURL),
+        browserLauncher: @escaping @MainActor ([String]) -> Bool = { launchProxyBrowser(arguments: $0) },
         clientMonitor: ProxyClientMonitor = ProxyClientMonitor()
     ) {
         self.discovering = discovering
@@ -119,6 +122,7 @@ final class ProxyManager {
         self.envFile = envFile
         self.shareConfigFile = shareConfigFile
         self.bridgeConfigFile = bridgeConfigFile
+        self.browserLauncher = browserLauncher
         self.clientMonitor = clientMonitor
     }
 
@@ -597,6 +601,21 @@ final class ProxyManager {
     func setDiscoveryEnabled(_ on: Bool) {
         store?.setProxyDiscoveryEnabled(on)
         if on { startDiscovery() } else { stopDiscovery() }
+    }
+
+    // MARK: - Proxied browser
+
+    /// The browser button's enablement: exactly what a launch would use.
+    var canOpenProxyBrowser: Bool { resolvedEndpoint() != nil }
+
+    /// Open the separate proxied Chrome instance pointed at the ACTIVE proxy — the browser half
+    /// of an OAuth login (`/login` in Claude Code). Same resolution as `routing(for:)`, so the
+    /// browser egresses exactly where a flagged command would.
+    func openProxyBrowser() {
+        guard let resolved = resolvedEndpoint() else { return }
+        let url = proxyURL(host: resolved.proxy.host, port: resolved.proxy.port,
+                           user: resolved.user, pass: resolved.pass)
+        _ = browserLauncher(proxyBrowserArguments(proxyURL: url, profileDir: proxyBrowserProfileURL.path))
     }
 
     /// One probe through the ACTIVE proxy from THIS machine — the popover's check button.
