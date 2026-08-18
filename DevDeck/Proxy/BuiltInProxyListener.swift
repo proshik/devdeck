@@ -20,6 +20,9 @@ final class BuiltInProxyListener: @unchecked Sendable {
     private let lock = NSLock()
     private let requestedPort: UInt16
     private let auth: GostAuth?
+    /// Optional SOCKS5 proxy the target dial goes through — the remote-proxy BRIDGE mode.
+    /// nil (the share) dials targets directly.
+    private let upstream: NWEndpoint?
     private let emit: @Sendable (RunnerOutput) -> Void
     private var listener: NWListener?
     private var connections: [ObjectIdentifier: ProxyConnection] = [:]
@@ -29,9 +32,11 @@ final class BuiltInProxyListener: @unchecked Sendable {
     /// How long a dial to the target may sit unconnected before the client gets a 502.
     static let dialTimeout: TimeInterval = 15
 
-    init(port: UInt16, auth: GostAuth?, emit: @escaping @Sendable (RunnerOutput) -> Void) {
+    init(port: UInt16, auth: GostAuth?, upstream: NWEndpoint? = nil,
+         emit: @escaping @Sendable (RunnerOutput) -> Void) {
         self.requestedPort = port
         self.auth = auth
+        self.upstream = upstream
         self.emit = emit
     }
 
@@ -111,6 +116,7 @@ final class BuiltInProxyListener: @unchecked Sendable {
             let proxied = ProxyConnection(
                 connection: connection,
                 auth: self.auth,
+                upstream: self.upstream,
                 queue: self.queue,
                 listenPort: port,
                 emitLine: { [weak self] line in self?.send(.line(line, stream: .stderr)) },
@@ -143,6 +149,7 @@ final class BuiltInProxyListener: @unchecked Sendable {
 private final class ProxyConnection {
     private let connection: NWConnection
     private let auth: GostAuth?
+    private let upstream: NWEndpoint?
     private let queue: DispatchQueue
     private let listenPort: () -> Int
     private let emitLine: (String) -> Void
@@ -157,11 +164,12 @@ private final class ProxyConnection {
     private let sid = String(UUID().uuidString.prefix(13)).lowercased()
     private let client: String
 
-    init(connection: NWConnection, auth: GostAuth?, queue: DispatchQueue,
+    init(connection: NWConnection, auth: GostAuth?, upstream: NWEndpoint?, queue: DispatchQueue,
          listenPort: @escaping () -> Int, emitLine: @escaping (String) -> Void,
          onFinish: @escaping (ProxyConnection) -> Void) {
         self.connection = connection
         self.auth = auth
+        self.upstream = upstream
         self.queue = queue
         self.listenPort = listenPort
         self.emitLine = emitLine
@@ -239,7 +247,17 @@ private final class ProxyConnection {
         guard let nwPort = NWEndpoint.Port(rawValue: UInt16(clamping: port)) else {
             return replyAndClose(proxyResponse502())
         }
-        let target = NWConnection(host: NWEndpoint.Host(host), port: nwPort, using: .tcp)
+        let params = NWParameters.tcp
+        if let upstream {
+            // Bridge mode: the connection is made BY the SOCKS proxy (sshd on the VDS). The
+            // hostname travels to SOCKS as a domain address and is resolved THERE — verified by
+            // spike on 2026-08-18; local resolution would hand blocked domains to a poisoned DNS.
+            let proxy = ProxyConfiguration(socksv5Proxy: upstream)
+            let context = NWParameters.PrivacyContext(description: "devdeck-bridge")
+            context.proxyConfigurations = [proxy]
+            params.setPrivacyContext(context)
+        }
+        let target = NWConnection(host: NWEndpoint.Host(host), port: nwPort, using: params)
         self.target = target
         target.stateUpdateHandler = { [weak self] state in
             guard let self, !self.closed else { return }

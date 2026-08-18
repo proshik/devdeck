@@ -28,4 +28,26 @@ final class BuiltInProxyConfigTests: XCTestCase {
             #"{"services":[{"name":"x","addr":"nonsense","handler":{"type":"auto"},"listener":{"type":"tcp"}}]}"#
                 .utf8)))
     }
+
+    // MARK: - The bridge's config (remote proxy)
+
+    func testShareConfigCarriesNoUpstream() throws {
+        let json = try XCTUnwrap(ProxyShare(port: 9999).gostConfigJSON(password: nil))
+        let parsed = try XCTUnwrap(parseBuiltInProxyConfig(Data(json.utf8)))
+        XCTAssertNil(parsed.upstreamSocks, "the share dials directly — no upstream, ever")
+    }
+
+    func testBridgeConfigRoundTrip() throws {
+        let json = try XCTUnwrap(bridgeConfigJSON(localPort: 18888, socksPort: 1080))
+        let parsed = try XCTUnwrap(parseBuiltInProxyConfig(Data(json.utf8)))
+        XCTAssertEqual(parsed.port, 18888)
+        XCTAssertNil(parsed.auth, "the bridge is loopback-only — auth is the ssh key")
+        XCTAssertEqual(parsed.upstreamSocks, "127.0.0.1:1080")
+    }
+
+    func testBridgeConfigIsDeterministic() throws {
+        // Sorted keys, like gostConfigJSON — the tests and the restart-on-change guard rely on it.
+        XCTAssertEqual(bridgeConfigJSON(localPort: 18888, socksPort: 1080),
+                       bridgeConfigJSON(localPort: 18888, socksPort: 1080))
+    }
 }

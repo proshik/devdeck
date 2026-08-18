@@ -163,11 +163,15 @@ struct ProxyShare: Codable, Equatable {
 
 // MARK: - gost config file
 
-/// gost v3's config schema, only the slice we generate. Encode-only — DevDeck writes this file and
-/// never reads it back. Verified against `gost -L 'auto://user:pass@:port' -O yaml`, which prints
-/// the canonical config for a listener spec.
+/// gost v3's config schema, only the slice we generate — plus one extension key of our own.
+/// Verified against `gost -L 'auto://user:pass@:port' -O yaml`, which prints the canonical
+/// config for a listener spec; the built-in engine reads the same file back.
 struct GostConfig: Codable, Equatable {
     let services: [GostService]
+    /// DevDeck extension, present only in the remote-proxy BRIDGE's generated config: the local
+    /// SOCKS endpoint (`host:port`) the listener dials targets through. Never written into the
+    /// share's config, so gost — which would ignore it anyway — never even sees the key.
+    var upstreamSocks: String? = nil
 }
 
 struct GostService: Codable, Equatable {
