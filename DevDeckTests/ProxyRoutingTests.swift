@@ -132,6 +132,15 @@ final class ProxyRoutingTests: XCTestCase {
         XCTAssertEqual(txt["v"], "1")
     }
 
+    func testTXTRecordCarriesTheEngineProto() {
+        var ad = ProxyAdvertisement(serviceName: "mac", port: 9999, authRequired: false,
+                                    host: "192.168.31.5", exitIP: nil)
+        ad.proto = "http"
+        XCTAssertEqual(proxyTXTRecord(ad)["proto"], "http")
+        // The default stays the historical value — a gost share announces exactly what it used to
+        // (asserted in full by testTXTRecordNeverCarriesAPassword above).
+    }
+
     func testTXTOmitsExitIPWhenUnknown() {
         let ad = ProxyAdvertisement(serviceName: "m", port: 1, authRequired: false, host: "h", exitIP: nil)
         XCTAssertNil(proxyTXTRecord(ad)["vpnip"])
