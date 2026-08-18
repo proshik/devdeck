@@ -99,6 +99,11 @@ struct ProxySectionView: View {
                 if !found.isLive {
                     proxyNote(L10n.proxyLastKnownAddress, icon: "clock.arrow.circlepath", color: .secondary)
                 }
+                // The check lives under the ACTIVE proxy only — it probes what routing would use,
+                // and for a locked peer without credentials the orange lock is already the message.
+                if proxy.activeProxy?.name == found.name && !proxy.activeProxyNeedsCredentials {
+                    checkRow
+                }
             }
         }
     }
@@ -123,7 +128,7 @@ struct ProxySectionView: View {
                                          ? Color.orange : Color.secondary.opacity(0.5))
                 }
                 Spacer(minLength: 6)
-                Text(found.exitIP ?? L10n.proxyEndpoint(found.host, found.port))
+                Text(endpointLabel(found))
                     .font(.system(size: 10))
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
@@ -136,6 +141,51 @@ struct ProxySectionView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+
+    /// Both addresses at once: where to dial, and — once the host reported it — where traffic
+    /// exits. Showing only the exit IP hid the one address a manual `curl -x` actually needs.
+    private func endpointLabel(_ found: DiscoveredProxy) -> String {
+        let endpoint = L10n.proxyEndpoint(found.host, found.port)
+        guard let exitIP = found.exitIP else { return endpoint }
+        return "\(endpoint) → \(exitIP)"
+    }
+
+    /// The in-app equivalent of `curl -x http://host:port https://api.ipify.org`, run from THIS
+    /// machine through the active proxy. The whole line is the button, so a failed or stale
+    /// verdict is re-checked by clicking it again.
+    private var checkRow: some View {
+        Button {
+            proxy.checkActiveProxy()
+        } label: {
+            HStack(spacing: 5) {
+                switch proxy.clientCheck {
+                case .idle:
+                    Image(systemName: "checkmark.shield").font(.system(size: 9))
+                    Text(L10n.proxyCheck)
+                case .running:
+                    ProgressView().controlSize(.mini)
+                    Text(L10n.proxyChecking)
+                case .success(let ip):
+                    Image(systemName: "checkmark.circle.fill").font(.system(size: 9))
+                        .foregroundStyle(.green)
+                    Text(ip).monospacedDigit()
+                case .failed:
+                    Image(systemName: "xmark.circle.fill").font(.system(size: 9))
+                        .foregroundStyle(.red)
+                    Text(L10n.proxyCheckFailed)
+                }
+                Spacer()
+            }
+            .font(.system(size: 10))
+            .foregroundStyle(.secondary)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(proxy.clientCheck == .running)
+        .padding(.leading, 34)
+        .padding(.trailing, 16)
+        .padding(.bottom, 2)
     }
 
     // MARK: shared bits
