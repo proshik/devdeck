@@ -414,6 +414,37 @@ enum L10n {
     }
     static func proxyEndpoint(_ host: String, _ port: Int) -> String { "\(host):\(port)" }
 
+    // MARK: - Proxy: remote (SSH) proxies
+
+    static var proxyRemoteSection: String { t("Remote proxies (SSH)", "Удалённые прокси (SSH)") }
+    static var proxyRemoteAdd: String { t("Add remote proxy…", "Добавить удалённый прокси…") }
+    static var proxyRemoteVia: String { t("via SSH tunnel", "через SSH-туннель") }
+    static var proxyRemoteName: String { t("Name", "Название") }
+    static var proxyRemoteDestination: String { t("SSH destination", "SSH-назначение") }
+    static var proxyRemoteDestinationHint: String {
+        t("A host from ~/.ssh/config, or user@host — nothing but sshd is needed on the VDS.",
+          "Хост из ~/.ssh/config или user@host — на VDS не нужно ничего, кроме sshd.")
+    }
+    static var proxyRemoteLocalPort: String { t("Local HTTP port", "Локальный HTTP-порт") }
+    static var proxyRemoteSocksPort: String { t("Local SOCKS port", "Локальный SOCKS-порт") }
+    static var proxyRemoteTunnelCommand: String { t("Tunnel command", "Команда туннеля") }
+    static var proxyRemoteTunnelMissing: String {
+        t("The linked tunnel command is missing — re-create the proxy.",
+          "Привязанная команда туннеля отсутствует — пересоздайте прокси.")
+    }
+    static var proxyRemoteDelete: String { t("Delete remote proxy", "Удалить удалённый прокси") }
+    static var proxyRemoteDeleteTunnelToo: String {
+        t("Also delete its SSH tunnel command", "Удалить и её команду SSH-туннеля")
+    }
+    static var proxyBrowserButton: String { t("Browser via proxy", "Браузер через прокси") }
+    static var proxyBrowserHint: String {
+        t("Opens a separate Chrome window that egresses through the active proxy — for logins like Claude Code’s /login.",
+          "Открывает отдельное окно Chrome, выходящее через активный прокси — для логинов вроде /login в Claude Code.")
+    }
+    static var proxyBrowserChromeMissing: String {
+        t("Google Chrome not found in /Applications.", "Google Chrome не найден в /Applications.")
+    }
+
     // MARK: - Proxy: connected machines (host side)
 
     static var proxyConnectedSection: String { t("Connected machines", "Подключённые машины") }

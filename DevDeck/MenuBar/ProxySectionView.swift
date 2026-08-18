@@ -17,25 +17,29 @@ struct ProxySectionView: View {
 
     private var shareEnabled: Bool { store.config.settings.proxyShareEnabled }
     private var discoveryEnabled: Bool { store.config.settings.proxyDiscoveryEnabled }
+    private var hasRemoteProxies: Bool { !store.config.remoteProxies.isEmpty }
 
     var body: some View {
-        if shareEnabled || discoveryEnabled {
+        if shareEnabled || discoveryEnabled || hasRemoteProxies {
             CollapsibleSection(title: title, count: rowCount,
                                runningCount: runningCount, collapsed: $collapsed) {
                 if shareEnabled { shareRows }
                 if discoveryEnabled { discoveryRows }
+                if hasRemoteProxies { remoteRows }
             }
         }
     }
 
     /// While consuming, name the active proxy in the header so it's readable without expanding.
     private var title: String {
-        guard discoveryEnabled else { return L10n.proxy }
+        guard discoveryEnabled || hasRemoteProxies else { return L10n.proxy }
         return "\(L10n.proxy) · \(proxy.activeProxy?.name ?? L10n.proxyNone)"
     }
 
     private var rowCount: Int {
-        (shareEnabled ? 1 : 0) + (discoveryEnabled ? proxy.visibleProxies.count : 0)
+        (shareEnabled ? 1 : 0)
+            + (discoveryEnabled ? proxy.visibleProxies.count : 0)
+            + store.config.remoteProxies.count
     }
 
     /// Green counter when this deck is actively sharing or has a LIVE active proxy — a
@@ -186,6 +190,46 @@ struct ProxySectionView: View {
         .padding(.leading, 34)
         .padding(.trailing, 16)
         .padding(.bottom, 2)
+    }
+
+    // MARK: remote proxies (SSH)
+
+    @ViewBuilder
+    private var remoteRows: some View {
+        ForEach(store.config.remoteProxies) { remote in
+            remoteRow(remote)
+            if proxy.activeRemoteProxy?.id == remote.id {
+                checkRow
+            }
+        }
+    }
+
+    private func remoteRow(_ remote: RemoteProxy) -> some View {
+        let isActive = proxy.activeRemoteProxy?.id == remote.id
+        let live = isActive && proxy.activeProxy?.isLive == true
+        return Button {
+            proxy.setActiveRemoteProxy(isActive ? nil : remote)
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: isActive ? "largecircle.fill.circle" : "circle")
+                    .font(.system(size: 11))
+                    .foregroundStyle(isActive ? (live ? Color.accentColor : Color.secondary)
+                                              : Color.secondary)
+                    .frame(width: 14)
+                Text(remote.name).lineLimit(1).truncationMode(.tail)
+                Image(systemName: "network").font(.system(size: 9)).foregroundStyle(.secondary)
+                Spacer(minLength: 6)
+                Text("127.0.0.1:\(String(remote.localPort))")
+                    .font(.system(size: 10)).monospacedDigit()
+                    .foregroundStyle(.secondary).lineLimit(1)
+            }
+            .font(.system(size: 13))
+            .padding(.leading, 12)
+            .padding(.trailing, 16)
+            .padding(.vertical, 3)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: shared bits
