@@ -7,11 +7,17 @@
 Launch, stop, and monitor local dev commands and long-running daemons
 (`colima`, `minikube`, `just`, `kubectl port-forward`, …) — without the chore of juggling terminals.
 
+[![Tests](https://github.com/proshik/devdeck/actions/workflows/tests.yml/badge.svg)](https://github.com/proshik/devdeck/actions/workflows/tests.yml)
+[![Coverage](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fproshik%2Fdevdeck%2Fbadges%2Fcoverage.json)](https://github.com/proshik/devdeck/actions/workflows/tests.yml)
+[![Release](https://img.shields.io/github/v/release/proshik/devdeck?logo=github&color=1575F9)](https://github.com/proshik/devdeck/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/proshik/devdeck/total?color=2EA043)](https://github.com/proshik/devdeck/releases)
+
 [![Platform](https://img.shields.io/badge/platform-macOS%2015%2B-1575F9?logo=apple&logoColor=white)](#requirements)
 [![Swift](https://img.shields.io/badge/Swift-5-F05138?logo=swift&logoColor=white)](https://swift.org)
 [![UI](https://img.shields.io/badge/UI-SwiftUI%20%2B%20AppKit-1575F9)](#stack)
 [![Languages](https://img.shields.io/badge/i18n-EN%20%2F%20RU-2EA043)](#language)
-[![Dependencies](https://img.shields.io/badge/dependencies-none-2EA043)](#packaging-a-dmg)
+[![Dependencies](https://img.shields.io/badge/dependencies-Sparkle%20only-2EA043)](#stack)
+[![Homebrew](https://img.shields.io/badge/homebrew-proshik%2Ftap-FBB040?logo=homebrew&logoColor=white)](#homebrew-recommended)
 [![License](https://img.shields.io/badge/license-MIT-2EA043)](LICENSE)
 
 </div>
@@ -116,7 +122,8 @@ Grab the `.dmg` from [Releases](https://github.com/proshik/devdeck/releases) and
   and live previews out of the box; the path to eventual distribution (Mac App Store / notarization).
 - **`Info.plist`:** `LSUIElement = true` (no Dock icon, menu bar only). No sandbox — it needs to launch
   external processes and reach arbitrary working directories.
-- **Zero third-party dependencies.**
+- **One third-party dependency:** [Sparkle](https://sparkle-project.org) (in-app updates), pulled in
+  via SwiftPM. Nothing else — no networking, UI or utility libraries.
 
 ## Build & run
 
