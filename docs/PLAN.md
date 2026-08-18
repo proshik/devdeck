@@ -331,8 +331,59 @@ not show the user what is about to run as root.
 
 ---
 
+## Built-in Proxy Engine — ✅ DONE 2026-08-18 (0.12.0)
+
+`gost` stopped being a requirement: the share side now runs an in-process HTTP listener
+(`Network.framework`, CONNECT + absolute-form, Basic auth read from the same generated 0600 config).
+Design: `docs/superpowers/specs/2026-08-18-builtin-proxy-engine-design.md`.
+
+- **Engine choice** lives in `ProxyShare.engine` (`builtIn` default / `gost`), picked in the editor.
+  Absent in an old config → `builtIn`, so existing installs switched over on update; SOCKS users
+  switch back.
+- **Thin by construction:** the listener is a fourth `CommandRunner` behind a marker command
+  (`devdeck:proxy-listen -C <path>`), so supervision, the popover row, the occupied-port panel and
+  the Bonjour announcement are the existing engine's, unchanged. Session lines are emitted in gost's
+  own JSON shape, so `ProxyClientMonitor` needed no changes at all.
+- **Found by dogfooding:** a listener rebinding its port right after a stop hit `EADDRINUSE` from
+  TIME_WAIT and burned the watchdog's restarts. Fixed with `allowLocalEndpointReuse` plus emitting
+  the terminal event from `.cancelled` (when the socket is really closed), covered by a regression
+  test.
+
+## Remote Proxy over SSH — ✅ DONE 2026-08-18 (0.13.0)
+
+Egress through a VDS when there is no second Mac, with **nothing installed on the VDS but `sshd`**.
+Design: `docs/superpowers/specs/2026-08-18-remote-proxy-design.md`.
+
+- **Transport:** `ssh -N -D` (dynamic SOCKS), created as a regular, user-editable daemon command;
+  the `RemoteProxy` entry only stores its id.
+- **Bridge:** a second instance of the built-in engine with a SOCKS upstream
+  (`ProxyConfiguration(socksv5Proxy:)`), presenting the whole thing as `http://127.0.0.1:<port>` —
+  so env injection, `dp`, the check probe and the browser button work unchanged. A spike confirmed
+  hostnames travel to SOCKS as domain addresses and are resolved on the VDS, which is the point.
+- **Both daemons are held while the proxy is selected**; `resolvedEndpoint()` returns nil unless
+  both are `daemonRunning`, so a flagged command still fails loudly rather than going direct.
+- **Browser via proxy:** a separate Chrome instance (own profile, `--proxy-server`,
+  `--proxy-bypass-list` for the localhost callback) — the missing half of OAuth logins like Claude
+  Code's `/login`. Works for LAN proxies too.
+- `dp` learned the `DEVDECK_PROXY_LAN=*` scope: a loopback endpoint is valid on any network.
+- **Not yet verified on a real VDS** — the loop was exercised locally with a stand-in SOCKS server.
+
+---
+
 ## Possible Extensions (NOT in MVP)
 
 - [x] ~~Adopting daemons by PID after restart~~ — done (command-string matching, not `state.json`). pre-squash
-- [ ] Buttons for myproject-loop: `just dev-status`, `just dev-logs <svc>`, `just dev-forward`.
-- [ ] Hotkeys, launch at login (`SMAppService`), cluster health indicator in the menu bar icon.
+- [x] ~~Hotkeys, launch at login (`SMAppService`), cluster health indicator in the menu bar icon~~ — all done.
+- ~~Buttons for myproject-loop: `just dev-status`, `just dev-logs <svc>`, `just dev-forward`~~ —
+  dropped 2026-08-18: the app is deliberately generic and not tied to any one project, and these
+  are one `Command` each in anyone's config.
+
+## Open Items
+
+Nothing else is planned. What remains is the backlog recorded in the security review above — the
+endpoint pinning (~30 lines) is the one worth doing first, and the client-side TLS forwarder got
+substantially cheaper now that the remote-proxy bridge already IS a local forwarder on
+`127.0.0.1:PORT` (it would need to speak TLS with a pinned key to the peer instead of SOCKS to a
+tunnel). Plus one known defect: `findOrphan` cannot adopt the proxy listener (pre-shell string vs
+post-shell argv) — now mostly moot, since the default built-in engine is in-process and never needs
+adopting.
