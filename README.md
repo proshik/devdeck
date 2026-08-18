@@ -37,10 +37,14 @@ Launch, stop, and monitor local dev commands and long-running daemons
   flag on the client side. Works out of the box; an alternative
   [`gost`](https://github.com/go-gost/gost) engine covers SOCKS clients
   (see [Requirements](#requirements)).
-- **Remote proxy (VDS over SSH)** — no second Mac needed: route flagged commands (and a dedicated
-  browser window for logins) through a VDS reachable over SSH. Nothing runs on the VDS but `sshd`
-  — DevDeck holds an `ssh -N -D` tunnel plus a local bridge and presents it as an ordinary
-  `http://127.0.0.1` proxy. See [Remote proxy over SSH](#remote-proxy-over-ssh).
+- **Remote proxy (VDS over SSH)** — no second Mac needed: route flagged commands through a VDS
+  reachable over SSH. Nothing runs on the VDS but `sshd` — DevDeck holds an `ssh -N -D` tunnel plus
+  a local bridge and presents it as an ordinary `http://127.0.0.1` proxy.
+  See [Remote proxy over SSH](#remote-proxy-over-ssh).
+- **Browser via proxy** — one click (in the popover or on the Proxy page) opens a separate Chrome
+  window that egresses through the active proxy — LAN or remote — with its own profile and without
+  touching your default browser. This is what makes browser logins like Claude Code's `/login`
+  work: the page loads through the proxy while the `localhost` callback stays direct.
 - **Diagnostics** — a file log + crash reports; the "Log" button reveals `devdeck.log` in Finder.
 - **JSON config**, editable both by hand and from the UI; external edits are picked up by a FileWatcher,
   broken JSON → an error in the UI while the last valid version is kept in memory.
