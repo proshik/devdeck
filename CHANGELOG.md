@@ -7,6 +7,17 @@ versioning follows [SemVer](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Built-in proxy engine** — the share side no longer needs `gost`: an in-process HTTP listener
+  (`Network.framework`, CONNECT + absolute-form, optional Basic auth from the Keychain) serves the
+  share by default. A new **Engine** picker on the Proxy page chooses between **Built-in** and
+  **gost (system)**; `gost` remains only for peers that need SOCKS. The engine is stored as
+  `proxy.engine` in config.json (`"builtIn"` / `"gost"`, absent = built-in — **existing configs
+  switch to the built-in engine on update**; SOCKS users: pick gost back in the editor). From the
+  outside nothing changes: the same synthetic daemon in the popover (watchdog, occupied-port
+  panel), the same Bonjour announcement (TXT `proto` now says `http` for the built-in engine), the
+  same connected-clients list, fed by the listener's own gost-shaped session lines. Quitting the
+  app never offers to keep the built-in listener "in background" — an in-process listener dies
+  with the app and comes back on the next launch by itself.
 - **Proxy Manager** — share one Mac's VPN egress with another over the LAN, without copying IP
   addresses by hand or touching the system proxy:
   - **Share side**: supervises a `gost` listener (HTTP+SOCKS on one port) as a synthetic daemon, so
