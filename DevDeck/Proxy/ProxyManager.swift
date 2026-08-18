@@ -160,13 +160,13 @@ final class ProxyManager {
     /// Run state of the synthetic `gost` daemon (drives the popover row).
     var shareState: ProcessManager.RunState? { processManager?.states[ProxyShare.daemonID] }
 
-    /// Build the synthetic daemon command. nil when `gost` isn't installed.
+    /// Build the synthetic daemon command. nil only for the gost engine without an installed
+    /// binary — the built-in engine always resolves.
     ///
     /// The credentials are NOT here any more — they live in the config file this command points at,
     /// so the command string is safe to log and to show.
     func shareCommand() -> Command? {
-        guard let path = gostPath(share) else { return nil }
-        return share.toCommand(gostPath: path, configPath: shareConfigFile.url.path)
+        share.toCommand(gostPath: gostPath(share), configPath: shareConfigFile.url.path)
     }
 
     /// Write the config the listener is started with. False → do not start: `gost -C` on a missing

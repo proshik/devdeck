@@ -1,11 +1,19 @@
 import Foundation
 
+/// Which implementation serves the share. `builtIn` is the default: an in-process HTTP
+/// CONNECT/absolute-form listener with no external dependency. `gost` remains for peers
+/// that need SOCKS.
+enum ProxyEngine: String, Codable, CaseIterable {
+    case builtIn, gost
+}
+
 /// Host-side proxy sharing configuration, persisted in config.json under the `proxy` key.
 ///
-/// This machine runs a `gost` listener (HTTP+SOCKS on one port) that other machines on the LAN
-/// reach through the VPN tunnel this machine holds. The listener itself is NOT a new subsystem:
-/// it is expressed as a synthetic daemon `Command` and handed to the existing supervision engine
-/// (watchdog restarts, orphan adoption, occupied-port panel).
+/// This machine runs a proxy listener that other machines on the LAN reach through the VPN tunnel
+/// this machine holds — either the built-in in-process engine or an external `gost` (HTTP+SOCKS on
+/// one port). The listener itself is NOT a new subsystem: it is expressed as a synthetic daemon
+/// `Command` and handed to the existing supervision engine (watchdog restarts, orphan adoption,
+/// occupied-port panel).
 ///
 /// The password is deliberately NOT stored here — it lives in the Keychain
 /// (`ProxyCredentialStore`), so config.json stays safe to share and hand-edit.
@@ -19,16 +27,20 @@ struct ProxyShare: Codable, Equatable {
     var username: String
     /// Bonjour service name to announce. Empty → the host name is used.
     var serviceName: String
+    /// Which implementation serves the share (see `ProxyEngine`).
+    var engine: ProxyEngine
 
-    init(port: Int = 9999, authEnabled: Bool = false, username: String = "", serviceName: String = "") {
+    init(port: Int = 9999, authEnabled: Bool = false, username: String = "", serviceName: String = "",
+         engine: ProxyEngine = .builtIn) {
         self.port = port
         self.authEnabled = authEnabled
         self.username = username
         self.serviceName = serviceName
+        self.engine = engine
     }
 
     enum CodingKeys: String, CodingKey {
-        case port, authEnabled, username, serviceName
+        case port, authEnabled, username, serviceName, engine
     }
 
     init(from decoder: Decoder) throws {
@@ -37,6 +49,10 @@ struct ProxyShare: Codable, Equatable {
         authEnabled = try c.decodeIfPresent(Bool.self, forKey: .authEnabled) ?? false
         username = try c.decodeIfPresent(String.self, forKey: .username) ?? ""
         serviceName = try c.decodeIfPresent(String.self, forKey: .serviceName) ?? ""
+        // Resilient like every other key — and an unknown STRING (a config written by a newer
+        // version) falls back rather than failing the whole config.
+        let rawEngine = try c.decodeIfPresent(String.self, forKey: .engine)
+        engine = rawEngine.flatMap(ProxyEngine.init(rawValue:)) ?? .builtIn
     }
 
     /// Stable id for the synthetic `gost` daemon. Fixed (not random) so supervision state,
@@ -68,30 +84,45 @@ struct ProxyShare: Codable, Equatable {
         PrivateFile.applicationSupportDirectory.appendingPathComponent("gost.json")
     }
 
-    /// The synthetic daemon `Command` fed to `ProcessManager`.
+    /// Marker command for the built-in engine. `RoutingCommandRunner` dispatches on this prefix;
+    /// no shell ever parses the string, so the path after `-C ` is verbatim, not quoted.
+    static let builtInCommandPrefix = "devdeck:proxy-listen -C "
+
+    /// The synthetic daemon `Command` fed to `ProcessManager`, per engine.
+    /// nil only for `.gost` without an installed binary (→ the UI warns, nothing starts).
     ///
-    /// gost v3 `auto://` serves HTTP and SOCKS on one listener. Credentials used to travel in the
-    /// listener spec — `gost -L 'auto://user:pass@:9999'` — which put the password in the process's
-    /// argv, and macOS lets **every** local account read the full argv of every process, root's
-    /// included. So the whole service definition moves into a 0600 config file and the command line
-    /// carries nothing but its path.
+    /// Both engines point at the generated 0600 config file rather than carrying credentials:
+    /// gost v3 `auto://` used to take them in the listener spec — `gost -L 'auto://user:pass@:9999'`
+    /// — which put the password in the process's argv, and macOS lets **every** local account read
+    /// the full argv of every process, root's included. So the whole service definition moves into
+    /// the config file and the command line carries nothing but its path.
     ///
     /// A second problem disappears with it: the password no longer passes through a shell string,
     /// so a quote in it can no longer close the literal and run the remainder as commands.
     ///
-    /// The string is also stable across a password change now, where it used to differ. That does
-    /// NOT yet buy orphan adoption for this daemon: `findOrphan` matches a pre-shell command string
-    /// against post-shell argv from `ps`, and the quotes here (needed — the config path can contain
-    /// a space) never appear in argv. Adoption of the listener has therefore never worked, before
-    /// this change or after it; a surviving gost surfaces as an occupied port instead. Recorded
-    /// rather than fixed here, because the defect is in the matching, not in this string.
+    /// The gost string is also stable across a password change now, where it used to differ. That
+    /// does NOT yet buy orphan adoption for this daemon: `findOrphan` matches a pre-shell command
+    /// string against post-shell argv from `ps`, and the quotes here (needed — the config path can
+    /// contain a space) never appear in argv. Adoption of the listener has therefore never worked,
+    /// before this change or after it; a surviving gost surfaces as an occupied port instead.
+    /// Recorded rather than fixed here, because the defect is in the matching, not in this string.
+    /// (The built-in marker never matches `ps` argv either — correct, since an in-process listener
+    /// cannot outlive the app.)
     ///
-    /// `watchdogEnabled` is what gives the "gost keeps dying" problem its auto-restart.
-    func toCommand(gostPath: String, configPath: String) -> Command {
-        Command(
+    /// `watchdogEnabled` is what gives the "listener keeps dying" problem its auto-restart.
+    func toCommand(gostPath: String?, configPath: String) -> Command? {
+        let commandLine: String
+        switch engine {
+        case .gost:
+            guard let gostPath else { return nil }
+            commandLine = "\(shellQuote(gostPath)) -C \(shellQuote(configPath))"
+        case .builtIn:
+            commandLine = Self.builtInCommandPrefix + configPath
+        }
+        return Command(
             id: Self.daemonID,
-            name: L10n.proxyShareDaemonName,
-            command: "\(shellQuote(gostPath)) -C \(shellQuote(configPath))",
+            name: engine == .builtIn ? L10n.proxyShareDaemonNameBuiltIn : L10n.proxyShareDaemonName,
+            command: commandLine,
             isDaemon: true,
             watchdogEnabled: true,
             port: port
