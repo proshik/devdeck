@@ -37,6 +37,10 @@ Launch, stop, and monitor local dev commands and long-running daemons
   flag on the client side. Works out of the box; an alternative
   [`gost`](https://github.com/go-gost/gost) engine covers SOCKS clients
   (see [Requirements](#requirements)).
+- **Remote proxy (VDS over SSH)** — no second Mac needed: route flagged commands (and a dedicated
+  browser window for logins) through a VDS reachable over SSH. Nothing runs on the VDS but `sshd`
+  — DevDeck holds an `ssh -N -D` tunnel plus a local bridge and presents it as an ordinary
+  `http://127.0.0.1` proxy. See [Remote proxy over SSH](#remote-proxy-over-ssh).
 - **Diagnostics** — a file log + crash reports; the "Log" button reveals `devdeck.log` in Finder.
 - **JSON config**, editable both by hand and from the UI; external edits are picked up by a FileWatcher,
   broken JSON → an error in the UI while the last valid version is kept in memory.
@@ -158,6 +162,31 @@ File: `~/Library/Application Support/DevDeck/config.json` (copied from the bundl
   ]
 }
 ```
+
+## Remote proxy over SSH
+
+When there is no second Mac to share from, egress through a **VDS** reachable over SSH — a server in
+a region where the services you need are available. Nothing is installed on the VDS: it needs only
+`sshd`. DevDeck holds an `ssh -N -D` dynamic-SOCKS tunnel and a local **bridge** (the built-in
+engine dialing through that SOCKS), presenting the whole thing as an ordinary
+`http://127.0.0.1:<port>` proxy. Hostnames are resolved on the VDS, not locally.
+
+1. **Proxy page → Remote proxies (SSH) → Add remote proxy…** — give it a name and an SSH
+   destination (a host from `~/.ssh/config`, or `user@host`). The local HTTP port (18888) and SOCKS
+   port (1080) have sane defaults. DevDeck creates a regular, editable `ssh -N -D …` daemon command
+   and links it — add `-J jumphost` or other options by editing that command later.
+2. **Select it** in the list. DevDeck holds the tunnel and the bridge up (with watchdog restarts,
+   and across app restarts) while it stays selected. The check button shows the VDS's public IP —
+   proof traffic egresses there.
+3. **Flag a command** with "Route through the LAN proxy" (the flag serves both proxy kinds), or use
+   the `dp` helper from any terminal — `dp claude`.
+4. **Browser logins** (`/login` in Claude Code): click **Browser via proxy**. It opens a separate
+   Chrome window that egresses through the proxy, with its own profile, without touching your
+   default browser. Paste the printed login URL there; the `localhost` callback stays direct and
+   reaches the waiting CLI. A real Chrome means Google SSO and passkeys work normally.
+
+> The `dp` snippet changed for this release (it now honors a network-independent scope). If you
+> pasted an older one, re-copy it from **Proxy page → terminal helper**.
 
 ## Language
 
