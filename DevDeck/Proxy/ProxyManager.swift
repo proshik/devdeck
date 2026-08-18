@@ -611,11 +611,16 @@ final class ProxyManager {
     /// Open the separate proxied Chrome instance pointed at the ACTIVE proxy — the browser half
     /// of an OAuth login (`/login` in Claude Code). Same resolution as `routing(for:)`, so the
     /// browser egresses exactly where a flagged command would.
-    func openProxyBrowser() {
-        guard let resolved = resolvedEndpoint() else { return }
+    ///
+    /// Returns false ONLY when a launch was attempted and Chrome was missing (the UI reports it);
+    /// true when it launched, and true when there was nothing to launch (the button is disabled
+    /// in that state anyway, so "no proxy" is not an error to surface).
+    @discardableResult
+    func openProxyBrowser() -> Bool {
+        guard let resolved = resolvedEndpoint() else { return true }
         let url = proxyURL(host: resolved.proxy.host, port: resolved.proxy.port,
                            user: resolved.user, pass: resolved.pass)
-        _ = browserLauncher(proxyBrowserArguments(proxyURL: url, profileDir: proxyBrowserProfileURL.path))
+        return browserLauncher(proxyBrowserArguments(proxyURL: url, profileDir: proxyBrowserProfileURL.path))
     }
 
     /// One probe through the ACTIVE proxy from THIS machine — the popover's check button.
