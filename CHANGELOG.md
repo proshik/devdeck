@@ -6,6 +6,13 @@ versioning follows [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- **A hairline through the traffic lights.** Any window with a toolbar gets AppKit's automatic
+  titlebar separator, and on macOS 26 the toolbar metrics put that line at the height of the
+  close/minimise/zoom buttons — it looked like a rendering glitch cutting the buttons in half.
+  The main window now sets `titlebarSeparatorStyle = .none`; it separated nothing (the sidebar
+  keeps its own divider above the pinned Proxy/Settings buttons).
+
 ### Added
 - **Remote proxy (VDS over SSH)** — route flagged commands through a VDS reachable over SSH, with
   nothing installed on it but `sshd`. DevDeck holds an `ssh -N -D` dynamic-SOCKS tunnel (created as
