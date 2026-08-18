@@ -35,6 +35,9 @@ final class ProxyManager {
     /// Maintains the generated `gost.json` the listener is started with. Owner-only, because it
     /// holds the share password in plaintext — the command line no longer does.
     @ObservationIgnored private let shareConfigFile: any PrivateFileWriting
+    /// Maintains the generated `proxy-bridge.json` the remote proxy's bridge is started with.
+    /// No secrets inside — owner-only purely for consistency with its siblings.
+    @ObservationIgnored private let bridgeConfigFile: any PrivateFileWriting
     /// Who is using our share, folded out of the listener's own output. Nothing outside this type
     /// reads it — views and tests go through `proxyClients` / `connectedClientCount` below.
     @ObservationIgnored private let clientMonitor: ProxyClientMonitor
@@ -83,6 +86,7 @@ final class ProxyManager {
     /// Same preemption for the client-side check: a proxy switch must orphan a probe still out.
     @ObservationIgnored private var clientCheckToken: UUID?
     @ObservationIgnored private var observingDaemonState = false
+    @ObservationIgnored private var observingRemoteState = false
     @ObservationIgnored private var observingSettings = false
     /// Mirrors the daemon's own `.daemonRunning` state, independent of `isAdvertising` — see
     /// `syncAdvertising()`. Edges drive `clientMonitor.listenerDidStart()` / `listenerDidStop()`.
@@ -101,6 +105,7 @@ final class ProxyManager {
         exitIPRetryDelay: Duration = .seconds(1),
         envFile: any PrivateFileWriting = LivePrivateFile(url: proxyEnvFileURL),
         shareConfigFile: any PrivateFileWriting = LivePrivateFile(url: ProxyShare.configURL),
+        bridgeConfigFile: any PrivateFileWriting = LivePrivateFile(url: RemoteProxy.bridgeConfigURL),
         clientMonitor: ProxyClientMonitor = ProxyClientMonitor()
     ) {
         self.discovering = discovering
@@ -113,6 +118,7 @@ final class ProxyManager {
         self.exitIPRetryDelay = exitIPRetryDelay
         self.envFile = envFile
         self.shareConfigFile = shareConfigFile
+        self.bridgeConfigFile = bridgeConfigFile
         self.clientMonitor = clientMonitor
     }
 
@@ -124,6 +130,7 @@ final class ProxyManager {
         refreshDerivedState()
         if store?.config.settings.proxyShareEnabled == true { startShare() }
         if store?.config.settings.proxyDiscoveryEnabled == true { startDiscovery() }
+        if activeRemoteProxy != nil { startRemote() }
     }
 
     /// Re-arm an observation of the persisted settings — same pattern as `observeDaemonState`.
@@ -251,6 +258,141 @@ final class ProxyManager {
         credentials.setPassword(password, for: ProxyCredentialAccount.share)
     }
 
+    // MARK: - Remote proxy (client side, over SSH)
+
+    /// The remote (SSH) proxy chosen as active, or nil. Pure read — SwiftUI evaluates it in `body`.
+    var activeRemoteProxy: RemoteProxy? {
+        guard let id = store?.config.settings.activeRemoteProxyID else { return nil }
+        return store?.config.remoteProxies.first { $0.id == id }
+    }
+
+    /// Both halves of the remote route are alive: the ssh tunnel AND the local bridge.
+    /// This is the ONLY definition of "usable" for the remote kind — the endpoint is loopback,
+    /// so reachability says nothing; process state is everything.
+    private func remoteDaemonsRunning(_ remote: RemoteProxy) -> Bool {
+        guard let tunnelID = remote.tunnelCommandID, let processManager else { return false }
+        return processManager.states[tunnelID] == .daemonRunning
+            && processManager.states[RemoteProxy.bridgeDaemonID] == .daemonRunning
+    }
+
+    /// The remote proxy as the rest of the client side sees it — the same shape a Bonjour find
+    /// has, so `routing`, the check button and the URL builder are reused verbatim.
+    private func syntheticProxy(for remote: RemoteProxy) -> DiscoveredProxy {
+        DiscoveredProxy(name: remote.name, host: "127.0.0.1", port: remote.localPort,
+                        authRequired: false, exitIP: nil, proto: "http",
+                        schema: proxyTXTSchemaVersion, isLive: remoteDaemonsRunning(remote))
+    }
+
+    /// Create a remote proxy AND its tunnel command in one step. The command is a regular,
+    /// visible, user-editable daemon from this moment on; only its id is remembered here.
+    func addRemoteProxy(name: String, destination: String, localPort: Int, socksPort: Int) {
+        var remote = RemoteProxy(name: name, localPort: localPort, socksPort: socksPort)
+        let tunnel = remote.makeTunnelCommand(destination: destination)
+        remote.tunnelCommandID = tunnel.id
+        store?.upsert(tunnel)
+        store?.upsertRemoteProxy(remote)
+    }
+
+    /// Choose (or clear) the active remote proxy — the mirror of `setActiveProxy`.
+    func setActiveRemoteProxy(_ remote: RemoteProxy?) {
+        clientCheckToken = nil
+        clientCheck = .idle
+        defer { refreshDerivedState() }
+        guard let remote else {
+            store?.setActiveRemoteProxy(id: nil)
+            stopRemote()
+            return
+        }
+        store?.setActiveRemoteProxy(id: remote.id)
+        startRemote()
+    }
+
+    /// Save edits to a remote proxy; a live pair is restarted so a port change takes effect.
+    func saveRemoteProxy(_ updated: RemoteProxy) {
+        let wasActive = store?.config.settings.activeRemoteProxyID == updated.id
+        store?.upsertRemoteProxy(updated)
+        guard wasActive else { return }
+        stopRemote()
+        startRemote()
+    }
+
+    /// Delete a remote proxy (and optionally its tunnel command). The store clears the selection;
+    /// the daemons must not outlive it.
+    func deleteRemoteProxy(_ remote: RemoteProxy, alsoTunnelCommand: Bool) {
+        if store?.config.settings.activeRemoteProxyID == remote.id { stopRemote() }
+        store?.deleteRemoteProxy(id: remote.id)
+        if alsoTunnelCommand, let tunnelID = remote.tunnelCommandID {
+            store?.delete(commandID: tunnelID)
+        }
+        refreshDerivedState()
+    }
+
+    /// Bring the pair up: config first (the bridge reads it at start), then both daemons.
+    /// Mirror of `startShare` — already-running daemons are left alone, not fought over the port.
+    private func startRemote() {
+        guard let processManager, let remote = activeRemoteProxy else { return }
+        guard let tunnelID = remote.tunnelCommandID,
+              let tunnel = store?.commandsByID[tunnelID] else {
+            DiagnosticLog.shared.log(
+                "Remote proxy “\(remote.name)”: no tunnel command linked — nothing started", level: .warn)
+            return
+        }
+        guard let json = bridgeConfigJSON(localPort: remote.localPort, socksPort: remote.socksPort),
+              bridgeConfigFile.write(json) else {
+            DiagnosticLog.shared.log(
+                "Remote proxy: could not write \(bridgeConfigFile.url.path) — nothing started",
+                level: .error)
+            return
+        }
+        observeRemoteDaemonState()
+        for command in [tunnel, remote.bridgeCommand(configPath: bridgeConfigFile.url.path)] {
+            switch processManager.states[command.id] {
+            case .running, .daemonRunning: break
+            default: processManager.run(command)
+            }
+        }
+    }
+
+    /// Stop the pair and take the generated config back off the disk. Mirror of `stopShare`.
+    private func stopRemote() {
+        if let tunnelID = store?.config.remoteProxies
+            .first(where: { $0.id == store?.config.settings.activeRemoteProxyID })?.tunnelCommandID {
+            processManager?.stop(tunnelID)
+        } else {
+            // The selection may already be cleared (deselect clears first) — stop every linked
+            // tunnel that is up rather than leaving an orphan behind.
+            for remote in store?.config.remoteProxies ?? [] {
+                if let id = remote.tunnelCommandID,
+                   processManager?.states[id] == .daemonRunning || processManager?.states[id] == .running {
+                    processManager?.stop(id)
+                }
+            }
+        }
+        processManager?.stop(RemoteProxy.bridgeDaemonID)
+        _ = bridgeConfigFile.remove()
+    }
+
+    /// Re-arm an observation of the remote pair's run states — the same pattern as
+    /// `observeDaemonState`. What hangs off it is `proxy.env`: the file must appear when the
+    /// tunnel finishes coming up (seconds after selection) and vanish when either half dies.
+    private func observeRemoteDaemonState() {
+        guard let processManager, !observingRemoteState else { return }
+        observingRemoteState = true
+        let tunnelID = activeRemoteProxy?.tunnelCommandID
+        withObservationTracking {
+            _ = processManager.states[RemoteProxy.bridgeDaemonID]
+            if let tunnelID { _ = processManager.states[tunnelID] }
+        } onChange: { [weak self] in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.observingRemoteState = false
+                self.refreshDerivedState()
+                // Keep observing while a remote proxy is still the active choice.
+                if self.activeRemoteProxy != nil { self.observeRemoteDaemonState() }
+            }
+        }
+    }
+
     // MARK: - Advertising (driven by the daemon's state)
 
     /// Re-arm an observation of the `gost` daemon's run state. Announcement follows the LISTENER,
@@ -374,6 +516,8 @@ final class ProxyManager {
     ///
     /// Pure read: SwiftUI evaluates this during `body`, so it must never persist anything.
     var activeProxy: DiscoveredProxy? {
+        // The remote kind first — the two selections are mutually exclusive by construction.
+        if let remote = activeRemoteProxy { return syntheticProxy(for: remote) }
         guard let settings = store?.config.settings, let name = settings.activeProxyName else { return nil }
         if let live = discovered.first(where: { $0.name == name }) { return live }
         return rememberedProxy(named: name, settings: settings)
@@ -489,6 +633,10 @@ final class ProxyManager {
             store?.setActiveProxy(name: nil, username: nil)
             return
         }
+        // Choosing a discovered proxy displaces a remote one — its daemons must not keep running
+        // for a selection that no longer exists. Stop BEFORE the store clears the id (stopRemote
+        // resolves the tunnel command through the still-current selection).
+        if store?.config.settings.activeRemoteProxyID != nil { stopRemote() }
         let sameAsBefore = store?.config.settings.activeProxyName == proxy.name
         store?.setActiveProxy(name: proxy.name,
                               username: sameAsBefore ? store?.config.settings.activeProxyUsername : nil)
@@ -538,6 +686,12 @@ final class ProxyManager {
     /// Shared by `routing(for:)` and the terminal helper's env file, so the two can never disagree
     /// about whether a proxy is usable.
     private func resolvedEndpoint() -> (proxy: DiscoveredProxy, user: String?, pass: String?)? {
+        // Remote kind: the endpoint is loopback, so reachability proves nothing — usable means
+        // BOTH halves of the route (tunnel + bridge) are alive, and nothing less.
+        if let remote = activeRemoteProxy {
+            guard remoteDaemonsRunning(remote) else { return nil }
+            return (syntheticProxy(for: remote), nil, nil)
+        }
         guard let proxy = activeProxy else { return nil }
         guard proxy.authRequired else { return (proxy, nil, nil) }
         guard let username = store?.config.settings.activeProxyUsername, !username.isEmpty,
@@ -555,8 +709,10 @@ final class ProxyManager {
     /// one control the design calls the safe state: we would believe a file that grants proxy access
     /// — and holds the password — was gone, and never try again.
     private func refreshProxyEnvFile() {
-        guard let resolved = resolvedEndpoint(),
-              let ip = lanIP(), let prefix = lanPrefix(of: ip) else {
+        // A remote proxy's loopback endpoint is valid on any network — the tunnel is the scope,
+        // so the helper gets the `*` wildcard and no LAN address is required at all.
+        let scope = activeRemoteProxy != nil ? "*" : lanIP().flatMap(lanPrefix(of:))
+        guard let resolved = resolvedEndpoint(), let prefix = scope else {
             guard !proxyEnvStateDetermined || lastProxyEnvContents != nil else { return }
             guard envFile.remove() else { return }
             lastProxyEnvContents = nil
