@@ -266,10 +266,12 @@ final class CommandStore {
     }
 
     /// Pick the active proxy by its Bonjour name (nil — none). The username is persisted next to it;
-    /// the password stays in the Keychain.
+    /// the password stays in the Keychain. Choosing a discovered proxy deselects a remote one —
+    /// exactly one selection kind is ever set.
     func setActiveProxy(name: String?, username: String? = nil) {
         guard config.settings.activeProxyName != name
-                || config.settings.activeProxyUsername != username else { return }
+                || config.settings.activeProxyUsername != username
+                || (name != nil && config.settings.activeRemoteProxyID != nil) else { return }
         var updated = config
         updated.settings.activeProxyName = name
         updated.settings.activeProxyUsername = username
@@ -280,6 +282,49 @@ final class CommandStore {
             updated.settings.activeProxyPort = nil
             updated.settings.activeProxyAuthRequired = false
             updated.settings.activeProxyLANPrefix = nil
+        } else {
+            updated.settings.activeRemoteProxyID = nil
+        }
+        persist(updated)
+    }
+
+    /// Pick the active remote (SSH) proxy (nil — none). The mirror of `setActiveProxy`: a non-nil
+    /// choice clears the discovered selection AND its endpoint cache — a remote choice must not
+    /// leave a stale LAN address around to resurrect later.
+    func setActiveRemoteProxy(id: UUID?) {
+        guard config.settings.activeRemoteProxyID != id else { return }
+        var updated = config
+        updated.settings.activeRemoteProxyID = id
+        if id != nil {
+            updated.settings.activeProxyName = nil
+            updated.settings.activeProxyUsername = nil
+            updated.settings.activeProxyHost = nil
+            updated.settings.activeProxyPort = nil
+            updated.settings.activeProxyAuthRequired = false
+            updated.settings.activeProxyLANPrefix = nil
+        }
+        persist(updated)
+    }
+
+    /// Save a remote proxy (insert or replace by id).
+    func upsertRemoteProxy(_ proxy: RemoteProxy) {
+        var updated = config
+        if let index = updated.remoteProxies.firstIndex(where: { $0.id == proxy.id }) {
+            guard updated.remoteProxies[index] != proxy else { return }
+            updated.remoteProxies[index] = proxy
+        } else {
+            updated.remoteProxies.append(proxy)
+        }
+        persist(updated)
+    }
+
+    /// Delete a remote proxy; the selection cannot outlive the entry it points at.
+    func deleteRemoteProxy(id: UUID) {
+        guard config.remoteProxies.contains(where: { $0.id == id }) else { return }
+        var updated = config
+        updated.remoteProxies.removeAll { $0.id == id }
+        if updated.settings.activeRemoteProxyID == id {
+            updated.settings.activeRemoteProxyID = nil
         }
         persist(updated)
     }
