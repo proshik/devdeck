@@ -50,6 +50,13 @@ struct ProxyShareEditorView: View {
                 set: { proxy.setShareEnabled($0) }
             ))
 
+            Picker(L10n.proxyEngine, selection: $draft.engine) {
+                Text(L10n.proxyEngineBuiltIn).tag(ProxyEngine.builtIn)
+                Text(L10n.proxyEngineGost).tag(ProxyEngine.gost)
+            }
+            .pickerStyle(.segmented)
+            Text(L10n.proxyEngineHint).font(.caption).foregroundStyle(.secondary)
+
             TextField(L10n.proxyPort, value: $draft.port, format: .number.grouping(.never))
             Text(L10n.proxyPortHint).font(.caption).foregroundStyle(.secondary)
 
@@ -70,7 +77,8 @@ struct ProxyShareEditorView: View {
                 shareStatus
             }
 
-            if proxy.gostMissing {
+            // About the engine the user is CHOOSING, not the one that failed last.
+            if draft.engine == .gost && proxy.gostMissing {
                 warning(L10n.gostNotFound)
             }
             Text(L10n.proxyIsolatedNetworkHint).font(.caption).foregroundStyle(.secondary)
