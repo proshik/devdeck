@@ -12,6 +12,9 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: write   # only to force-push the one-file `badges` branch
+
 jobs:
   test:
     runs-on: macos-15
@@ -32,4 +35,34 @@ jobs:
           xcodebuild test \
             -project DevDeck.xcodeproj \
             -scheme DevDeck \
-            -destination 'platform=macOS'
+            -destination 'platform=macOS' \
+            -enableCodeCoverage YES \
+            -resultBundlePath TestResults.xcresult
+
+      # Coverage of the APP target only — the test target's own coverage measures tests covering
+      # themselves and would inflate the number to ~70%. Published as a shields.io endpoint JSON on
+      # the orphan `badges` branch: no external service, no secret beyond GITHUB_TOKEN, nothing
+      # added to the main history, and no retrigger (this workflow only watches `main`).
+      - name: Publish coverage badge
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PCT=$(xcrun xccov view --report --json TestResults.xcresult \
+            | python3 -c "import json,sys; t=[x for x in json.load(sys.stdin)['targets'] if x['name'].startswith('DevDeck.app')][0]; print(round(t['lineCoverage']*100))")
+          echo "App-target line coverage: ${PCT}%"
+          if   [ "$PCT" -ge 80 ]; then COLOR=brightgreen
+          elif [ "$PCT" -ge 60 ]; then COLOR=green
+          elif [ "$PCT" -ge 40 ]; then COLOR=yellow
+          else                         COLOR=red; fi
+          printf '{"schemaVersion":1,"label":"coverage","message":"%s%%","color":"%s"}\n' \
+            "$PCT" "$COLOR" > coverage.json
+          mkdir badges-branch && cd badges-branch
+          cp ../coverage.json .
+          git init -q
+          git checkout -q --orphan badges
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add coverage.json
+          git commit -q -m "coverage: ${PCT}%"
+          git push -qf "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" badges
