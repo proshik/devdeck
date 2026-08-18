@@ -67,12 +67,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// On quit with live daemons — show the "Kill / Keep in background / Cancel" dialog.
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        // The built-in proxy listener is in-process: it cannot be "kept in background", and the
-        // share auto-restores on the next launch (proxyShareEnabled) — so it neither triggers the
-        // dialog nor gets counted. The gost engine keeps today's behavior (a real process can
-        // survive us).
+        // In-process listeners cannot be "kept in background", and both auto-restore on the next
+        // launch — so neither triggers the dialog nor gets counted: the share's built-in engine
+        // and the remote proxy's bridge. The gost engine and the ssh tunnel are real processes
+        // and keep today's daemon semantics.
         let daemons = manager.aliveDaemons.filter {
             !($0 == ProxyShare.daemonID && store.config.proxy.engine == .builtIn)
+                && $0 != RemoteProxy.bridgeDaemonID
         }
         guard !daemons.isEmpty else {
             DiagnosticLog.shared.log("Quit (no live daemons)")

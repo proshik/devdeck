@@ -346,6 +346,11 @@ enum L10n {
     /// which keeps the password out of the log.
     static var proxyShareDaemonName: String { t("Proxy (gost)", "Прокси (gost)") }
     static var proxyShareDaemonNameBuiltIn: String { t("Proxy (built-in)", "Прокси (встроенный)") }
+    /// Name given to the auto-created ssh tunnel command of a remote proxy.
+    static func proxyTunnelCommandName(_ name: String) -> String {
+        t("SSH tunnel: \(name)", "SSH-туннель: \(name)")
+    }
+    static var proxyBridgeDaemonName: String { t("Proxy bridge", "Прокси-мост") }
     static var proxyEngine: String { t("Engine", "Движок") }
     static var proxyEngineBuiltIn: String { t("Built-in", "Встроенный") }
     static var proxyEngineGost: String { t("gost (system)", "gost (системный)") }
