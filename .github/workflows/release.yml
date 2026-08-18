@@ -33,6 +33,17 @@ jobs:
           path: ~/Library/Caches/org.swift.swiftpm
           key: spm-${{ hashFiles('DevDeck.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved') }}
 
+      # The gate runs BEFORE anything with side effects (version bump, build, commit, release),
+      # so a red suite leaves the repository and the tap exactly as they were.
+      # No pipe here on purpose: the default shell has no `pipefail`, and piping would swallow
+      # xcodebuild's exit code — turning the gate into decoration.
+      - name: Run tests
+        run: |
+          xcodebuild test \
+            -project DevDeck.xcodeproj \
+            -scheme DevDeck \
+            -destination 'platform=macOS'
+
       - name: Compute version + build number
         id: ver
         run: |
