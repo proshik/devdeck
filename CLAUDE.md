@@ -26,7 +26,9 @@ generic and not tied to any specific project.
   up automatically — never edit `project.pbxproj` by hand.
 - **Releases** are produced only by the `release.yml` GitHub workflow
   (`gh workflow run release.yml -f bump=patch|minor|major`) — it signs, builds the DMG, updates the
-  Sparkle appcast and the Homebrew cask. It has **no test gate**: run the suite before triggering.
+  Sparkle appcast and the Homebrew cask. The suite runs as the FIRST step, before the version bump
+  and every other side effect, so a red test aborts the release without publishing anything.
+  `tests.yml` runs the same suite on every push to `main` and on pull requests.
 
 ## Architectural decisions (locked)
 
