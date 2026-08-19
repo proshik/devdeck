@@ -1,6 +1,36 @@
 import Foundation
 import Network
 
+/// Bind parameters for the built-in engine.
+///
+/// The SHARE (`isBridge == false`) exists to be dialled by other machines, so it binds every
+/// interface. The BRIDGE is the opposite animal: a local adapter that fronts an ssh SOCKS tunnel
+/// purely so local clients can say `http://127.0.0.1:<port>`. It has no credentials of its own —
+/// `RemoteProxy` carries no auth fields at all — so a wildcard bind hands every machine on the
+/// LAN a free exit through the user's VDS. Pin it to loopback.
+///
+/// IPv4 loopback specifically: every URL DevDeck hands out for the bridge is literal
+/// `http://127.0.0.1:<port>` (`proxyEnvFile`, the browser arguments, the remote-proxy URL), so
+/// there is no `::1` client to strand.
+///
+/// `allowLocalEndpointReuse` stays on both paths: SO_REUSEADDR, like every real server (gost
+/// included). Without it, the previous listener's just-died sessions sit in TIME_WAIT on this
+/// port and every bind for the next ~30s gets EADDRINUSE — which is exactly the restart cycle
+/// (`saveShare` → stop → start, or a watchdog restart) and the gost→built-in upgrade path. Found
+/// the hard way on 2026-08-18: the watchdog burned all 3 restarts against TIME_WAIT remnants and
+/// gave up. An ACTIVELY listening occupant still fails the bind — reuse does not stack on a live
+/// listener — so the occupied-port machinery keeps its signal (asserted by
+/// testOccupiedPortEmitsTerminated1).
+func builtInProxyBindParameters(port: UInt16, isBridge: Bool) -> NWParameters {
+    let params = NWParameters.tcp
+    params.allowLocalEndpointReuse = true
+    if isBridge {
+        params.requiredLocalEndpoint = .hostPort(host: .ipv4(.loopback),
+                                                 port: NWEndpoint.Port(rawValue: port) ?? .any)
+    }
+    return params
+}
+
 /// The in-process share listener: HTTP CONNECT + absolute-form forwarding on one port.
 ///
 /// Event contract mirrors a gost PROCESS so `ProcessManager` cannot tell them apart:
@@ -68,16 +98,8 @@ final class BuiltInProxyListener: @unchecked Sendable {
     private func bind() {
         let listener: NWListener
         do {
-            // SO_REUSEADDR, like every real server (gost included): without it, the previous
-            // listener's just-died sessions sit in TIME_WAIT on this port and every bind for the
-            // next ~30s gets EADDRINUSE — which is exactly the restart cycle (`saveShare` →
-            // stop → start, or a watchdog restart) and the gost→built-in upgrade path. Found the
-            // hard way on 2026-08-18: the watchdog burned all 3 restarts against TIME_WAIT
-            // remnants and gave up. An ACTIVELY listening occupant still fails the bind — reuse
-            // does not stack on a live listener — so the occupied-port machinery keeps its signal
-            // (asserted by testOccupiedPortEmitsTerminated1).
-            let params = NWParameters.tcp
-            params.allowLocalEndpointReuse = true
+            // Scope and reuse both live in `builtInProxyBindParameters` — see its comment.
+            let params = builtInProxyBindParameters(port: requestedPort, isBridge: upstream != nil)
             if requestedPort == 0 {
                 listener = try NWListener(using: params)
             } else {

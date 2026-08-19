@@ -287,6 +287,65 @@ final class BuiltInProxyListenerTests: XCTestCase {
                        "the hostname must reach SOCKS unresolved, as a domain address")
     }
 
+    // MARK: - bind scope
+
+    /// The BRIDGE is a purely local adapter: it exists so local clients can say
+    /// `http://127.0.0.1:<port>` in front of an ssh SOCKS tunnel. Nothing on the network has any
+    /// business reaching it, and it carries no credentials of its own — so the bind is pinned to
+    /// loopback rather than left on the wildcard the share needs.
+    func testBridgeParametersPinTheBindToLoopback() {
+        let params = builtInProxyBindParameters(port: 18_888, isBridge: true)
+        XCTAssertEqual(params.requiredLocalEndpoint,
+                       NWEndpoint.hostPort(host: .ipv4(.loopback),
+                                           port: NWEndpoint.Port(rawValue: 18_888)!))
+    }
+
+    /// The SHARE has the opposite job — LAN clients dial it by this Mac's address — so it must
+    /// keep binding every interface.
+    func testShareParametersLeaveTheBindOnEveryInterface() {
+        let params = builtInProxyBindParameters(port: 9_999, isBridge: false)
+        XCTAssertNil(params.requiredLocalEndpoint)
+    }
+
+    /// Port 0 (the ephemeral bind the tests use) must be pinned too, not silently widened.
+    func testBridgeParametersPinAnEphemeralPortToLoopback() {
+        let params = builtInProxyBindParameters(port: 0, isBridge: true)
+        XCTAssertEqual(params.requiredLocalEndpoint,
+                       NWEndpoint.hostPort(host: .ipv4(.loopback), port: .any))
+    }
+
+    /// End-to-end on real sockets: a running bridge answers on loopback and is not there at all
+    /// on this Mac's LAN address. Skipped on a machine with no LAN IPv4 — nothing to be exposed on.
+    func testBridgeListenerAcceptsLoopbackAndRefusesTheLANAddress() throws {
+        let lan = try XCTUnwrap(currentLANIPv4(), "no LAN IPv4 on this machine")
+
+        let started = expectation(description: "listener started")
+        let proxy = BuiltInProxyListener(port: 0, auth: nil,
+                                         upstream: .hostPort(host: "127.0.0.1", port: 9_050)) { event in
+            if case .started = event { started.fulfill() }
+        }
+        proxy.start()
+        wait(for: [started], timeout: 5)
+        defer { proxy.stop() }
+        let port = NWEndpoint.Port(rawValue: try XCTUnwrap(awaitBoundPort(of: proxy)))!
+
+        XCTAssertTrue(connects(host: "127.0.0.1", port: port), "the bridge must serve loopback")
+        XCTAssertFalse(connects(host: NWEndpoint.Host(lan), port: port),
+                       "the bridge must not be reachable on \(lan) — that is the whole point")
+    }
+
+    /// True when a TCP connection to `host:port` reaches `.ready` inside the timeout. A refused
+    /// port leaves NWConnection in `.waiting`/`.failed`, so "never ready" is the negative signal.
+    private func connects(host: NWEndpoint.Host, port: NWEndpoint.Port, timeout: TimeInterval = 3) -> Bool {
+        let ready = expectation(description: "connected to \(host)")
+        ready.assertForOverFulfill = false
+        let connection = NWConnection(host: host, port: port, using: .tcp)
+        connection.stateUpdateHandler = { if case .ready = $0 { ready.fulfill() } }
+        connection.start(queue: .global())
+        defer { connection.cancel() }
+        return XCTWaiter().wait(for: [ready], timeout: timeout) == .completed
+    }
+
     /// `boundPort` is set on the listener's queue around the `.started` emit — poll briefly
     /// rather than assuming the write is visible the instant the expectation fulfils.
     private func awaitBoundPort(of proxy: BuiltInProxyListener) -> UInt16? {
