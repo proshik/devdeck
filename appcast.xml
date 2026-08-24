@@ -6,6 +6,14 @@
         <description>DevDeck updates feed</description>
         <language>en</language>
         <item>
+            <title>0.14.0</title>
+            <pubDate>Mon, 24 Aug 2026 21:46:49 +0000</pubDate>
+            <sparkle:version>142</sparkle:version>
+            <sparkle:shortVersionString>0.14.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+            <enclosure url="https://github.com/proshik/devdeck/releases/download/v0.14.0/DevDeck-0.14.0.dmg" length="3433545" type="application/octet-stream" sparkle:edSignature="AxTxTNXqWQEl+owxrn1xzi2uIwK1JDf0O9BUvUbTboa86yZHLSEln0S3di2ZztXWSfxWiqxLuWpdIUxD8XmOAw=="/>
+        </item>
+        <item>
             <title>0.13.3</title>
             <pubDate>Wed, 19 Aug 2026 14:29:22 +0000</pubDate>
             <sparkle:version>138</sparkle:version>
@@ -20,14 +28,6 @@
             <sparkle:shortVersionString>0.13.2</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
             <enclosure url="https://github.com/proshik/devdeck/releases/download/v0.13.2/DevDeck-0.13.2.dmg" length="3277074" type="application/octet-stream" sparkle:edSignature="wLzdjYN9ea3jyBC9O4soapwYzPxnGCV3mZT2xsf+q5b2w8lEDwpjRe3Nt1uOU8vBsXFZTRSqhWnMJpLEBTFJDQ=="/>
-        </item>
-        <item>
-            <title>0.13.1</title>
-            <pubDate>Tue, 18 Aug 2026 19:44:26 +0000</pubDate>
-            <sparkle:version>130</sparkle:version>
-            <sparkle:shortVersionString>0.13.1</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/proshik/devdeck/releases/download/v0.13.1/DevDeck-0.13.1.dmg" length="3296757" type="application/octet-stream" sparkle:edSignature="5F+ORAV/ggLXhhC31hDHAzJ9eKnWZuAfnZdNfgxlBHwUq4yWp6ZogZBGOEVPzZ6WaEW3LLESv0GoAL+akCJWBQ=="/>
         </item>
     </channel>
 </rss>
