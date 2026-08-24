@@ -915,7 +915,7 @@ final class ProcessManager {
         updateSwapRate(cur: host, now: Date())
     }
 
-    /// A single VM-RSS sample for run id (called from tests). Synchronous, don't touch.
+    /// A single VM memory sample for run id (called from tests). Synchronous, don't touch.
     func recordVMSample(for id: UUID) {
         guard isVMMonitoringEnabled(), let s = vmProbe.sample() else { return }
         accumulateVMPeak(s, for: id)
