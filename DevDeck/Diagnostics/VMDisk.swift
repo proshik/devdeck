@@ -9,6 +9,10 @@ struct VMDiskInfo: Equatable {
 
     var fraction: Double { totalBytes > 0 ? Double(usedBytes) / Double(totalBytes) : 0 }
 
+    /// Above this the popover points at the Cleanup page. Same line where the cell turns red;
+    /// minikube's kubelet ships with image GC and eviction disabled, so nothing else will react.
+    static let cleanupHintFraction = 0.85
+
     /// "40 / 97 GB · 41%" — whole GiB (disk sizes don't need decimals).
     func format() -> String {
         let gib = 1_073_741_824.0

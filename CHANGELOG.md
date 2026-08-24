@@ -14,6 +14,19 @@ versioning follows [SemVer](https://semver.org/).
   keeps its own divider above the pinned Proxy/Settings buttons).
 
 ### Added
+- **Cleanup page** — a pinned sidebar entry next to Proxy/Settings that shows where the colima
+  disk goes (`docker system df` for the VM's own docker *and* for the docker inside the minikube
+  node, where `minikube docker-env` builds and the cluster's images live) with one button per
+  reclaimable category: dead containers plus their anonymous volumes (testcontainers leftovers),
+  the BuildKit cache, and unused images. Each button confirms with docker's own reclaimable
+  estimate and runs through the normal runner, so its output lands in Logs. Named volumes and
+  running containers are never touched; the images button warns about `imagePullPolicy: Never`.
+  A **Restart colima** button (followed by `minikube start`, the node container does not come back
+  on its own) covers the one thing that actually returns VM memory to the Mac. A trash icon in
+  the popover footer (orange past 85%) and the "VM disk" cell open the page, and past 85% an
+  orange hint line appears under the metrics —
+  minikube's kubelet ships with image GC and eviction disabled, so nothing else will react before
+  the disk hits 100%.
 - **Remote proxy (VDS over SSH)** — route flagged commands through a VDS reachable over SSH, with
   nothing installed on it but `sshd`. DevDeck holds an `ssh -N -D` dynamic-SOCKS tunnel (created as
   a regular, editable deck command) plus a local **bridge** — the built-in engine dialing targets
@@ -28,6 +41,13 @@ versioning follows [SemVer](https://semver.org/).
   the `localhost` callback stays direct. Works for LAN and remote proxies alike.
 
 ### Changed
+- **"VM colima" now measures memory used inside the VM** (`MemTotal − MemAvailable` from the
+  guest's `/proc/meminfo`, one `colima ssh` per sample) instead of the hypervisor's footprint on
+  the Mac. With lima/vz the guest's page cache stays resident in the host process for good — no
+  balloon deflate, no free-page reporting — so the old number climbed to ~100% after the first big
+  build and never came back, and the per-run peak and the 90% warning were noise. The new figure
+  has the same meaning as the minikube line, and the `colima --memory` hint in the run summary
+  is grounded again. Host-side effects remain visible in Pressure / Swap.
 - The per-command flag is now **"Route through the active proxy"** (was "Route through the LAN
   proxy"). Behaviour is unchanged — the old wording made the remote/VDS proxy look unsupported.
 - The `dp` shell helper honors a network-independent scope (`DEVDECK_PROXY_LAN=*`) for loopback
