@@ -10,11 +10,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let appModel = AppModel()
     let updateController = UpdateController()
     let proxyManager = ProxyManager()
+    let cleanupModel: CleanupModel
 
     private var menuBar: MenuBarController?
 
     override init() {
         manager = ProcessManager(runner: RoutingCommandRunner(), notifier: notifier)
+        cleanupModel = CleanupModel(manager: manager)
         super.init()
     }
 

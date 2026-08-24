@@ -38,6 +38,9 @@ Launch, stop, and monitor local dev commands and long-running daemons
 - **Memory freeing** — gracefully quit memory-hungry GUI apps before a heavy build and
   relaunch them afterwards (for a memory-hungry `just dev-build`).
 - **Memory header** — RAM (used/total/%), swap, color by pressure; auto-refreshes once a second.
+- **Cleanup page** — where the colima disk goes (`docker system df` for the VM and for the docker
+  inside the minikube node) with one confirm-first button per reclaimable category, and a colima
+  restart for when the VM's page cache has eaten the Mac. The popover points at it past 85%.
 - **Proxy Manager** — share this Mac's VPN egress with another machine over the LAN: a built-in
   HTTP proxy listener announced over Bonjour, and a per-command "route through the LAN proxy"
   flag on the client side. Works out of the box; an alternative
@@ -261,6 +264,7 @@ devdeck/
 │   ├── MainWindow/      # MainWindowView, CommandEditorView, ChainEditorView, LogView, SettingsView
 │   ├── Localization/    # LocalizationManager (live language switch) + L10n catalog (EN/RU)
 │   ├── Diagnostics/     # DiagnosticLog (file log + crashes), SystemMemory (RAM/swap/pressure)
+│   ├── Cleanup/         # docker system df probe, cleanup commands, CleanupModel
 │   └── Resources/       # Assets.xcassets (tray glyph + AppIcon), default-config.json
 └── DevDeckTests/        # state machine, chains, store, codec, memory, runners
 ```

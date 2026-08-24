@@ -42,6 +42,7 @@ struct MainWindowView: View {
                     Divider()
                     VStack(spacing: 2) {
                         pinnedButton(L10n.proxy, icon: "network", selection: .proxy)
+                        pinnedButton(L10n.cleanup, icon: "trash", selection: .cleanup)
                         pinnedButton(L10n.settings, icon: "gearshape", selection: .settings)
                     }
                     .padding(8)
@@ -86,6 +87,8 @@ struct MainWindowView: View {
             SettingsView()
         case .proxy:
             ProxyShareEditorView(share: store.config.proxy)
+        case .cleanup:
+            CleanupView()
         case nil:
             placeholder
         }

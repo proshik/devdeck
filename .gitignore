@@ -7,6 +7,9 @@
 # Superpowers brainstorm mockups
 .superpowers/
 
+# Lavish review artifacts (agent-generated HTML, session-local)
+.lavish/
+
 # Xcode — user data and build artifacts
 xcuserdata/
 *.xcuserstate
