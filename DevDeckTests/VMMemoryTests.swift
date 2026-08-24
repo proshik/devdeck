@@ -25,3 +25,31 @@ final class VMMemoryTests: XCTestCase {
         XCTAssertNil(VMMemoryInfo.parseColimaCpus("not json"))
     }
 }
+
+final class VMMemoryMeminfoTests: XCTestCase {
+    // Real `/proc/meminfo` head from the colima guest (only the first lines matter).
+    private let sample = """
+    MemTotal:       30737808 kB
+    MemFree:         5597800 kB
+    MemAvailable:   19553980 kB
+    Buffers:          928384 kB
+    Cached:         12693564 kB
+    """
+
+    func testParseMeminfoUsesTotalMinusAvailable() throws {
+        let info = try XCTUnwrap(VMMemoryInfo.parseMeminfo(sample))
+        XCTAssertEqual(info.limitBytes, 30_737_808 * 1024)
+        XCTAssertEqual(info.usedBytes, (30_737_808 - 19_553_980) * 1024)
+    }
+
+    func testParseMeminfoRejectsGarbage() {
+        XCTAssertNil(VMMemoryInfo.parseMeminfo(""))
+        XCTAssertNil(VMMemoryInfo.parseMeminfo("cat: /proc/meminfo: No such file or directory"))
+        // Without MemAvailable (pre-3.14 kernels) we'd rather show nothing than a wrong number.
+        XCTAssertNil(VMMemoryInfo.parseMeminfo("MemTotal:       30737808 kB\nMemFree:         5597800 kB"))
+        // Zero total must not produce a division-by-zero cell.
+        XCTAssertNil(VMMemoryInfo.parseMeminfo("MemTotal:       0 kB\nMemAvailable:   0 kB"))
+        // Available > total is nonsense — treat as unparsable rather than clamp silently.
+        XCTAssertNil(VMMemoryInfo.parseMeminfo("MemTotal:       10 kB\nMemAvailable:   20 kB"))
+    }
+}
