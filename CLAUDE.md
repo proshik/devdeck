@@ -76,6 +76,8 @@ devdeck/
 │   ├── MainWindow/      # MainWindowView, editors, LogView, SettingsView, WindowAccessor
 │   ├── Localization/    # LocalizationManager (live EN/RU switch) + L10n catalog
 │   ├── Diagnostics/     # DiagnosticLog, memory/disk/cluster metrics, notifications
+│   ├── Cleanup/         # DockerUsage (docker system df probe), CleanupCommands (synthetic prune
+│   │                    # commands per daemon), CleanupModel — behind the main window's Cleanup page
 │   ├── Update/          # UpdateController (Sparkle)
 │   ├── Support/         # PrivateFile (0600 files), ShellQuoting
 │   └── Resources/       # Assets.xcassets, default-config.json

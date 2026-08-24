@@ -7,6 +7,7 @@ enum MainSelection: Hashable {
     case chain(UUID)
     case settings
     case proxy
+    case cleanup
 }
 
 /// UI state of the application (separate from data and processes).

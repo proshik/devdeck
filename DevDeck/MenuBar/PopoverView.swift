@@ -162,6 +162,9 @@ struct PopoverView: View {
                     metricCell(L10n.diskVM,
                                disk.map { $0.format() } ?? "",
                                color: disk.map { pressureColor($0.fraction) } ?? Self.placeholderColor)
+                        .contentShape(Rectangle())
+                        .onTapGesture { openItem(.cleanup) }
+                        .help(L10n.cleanup)
 
                     // Live swap rate (↑ out to disk, ↓ in from disk): distinguishes "full but stable"
                     // from "actively thrashing". Gate at ~0.1 MB/s so sub-rounding noise doesn't show.
@@ -185,6 +188,18 @@ struct PopoverView: View {
                     metricCell(L10n.cpuLoad,
                                gotLoad ? String(format: "%.2f", loads[0]) : "",
                                color: gotLoad ? pressureColor(loads[0] / cores) : Self.placeholderColor)
+                }
+
+                // Past the cleanup threshold the disk cell alone is easy to miss — one orange line
+                // that opens the Cleanup page, where the buttons live (the popover stays a deck).
+                if let disk = manager.cachedVMDisk, disk.fraction >= VMDiskInfo.cleanupHintFraction {
+                    Button { openItem(.cleanup) } label: {
+                        Label(L10n.cleanupDiskHint, systemImage: "trash")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.orange)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.top, 2)
                 }
             }
             .padding(.horizontal, 14)
@@ -291,6 +306,13 @@ struct PopoverView: View {
             .buttonStyle(.plain)
             .foregroundStyle(.secondary)
             .help(L10n.revealLogHelp)
+            // Straight to the Cleanup page; lights up orange once the VM disk is past the threshold.
+            Button { openItem(.cleanup) } label: {
+                Image(systemName: "trash")
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(diskNeedsCleanup ? Color.orange : Color.secondary)
+            .help(L10n.cleanupHelp)
             Button(L10n.quit) { confirmQuit() }
                 .buttonStyle(.plain)
                 .foregroundStyle(.secondary)
@@ -298,6 +320,10 @@ struct PopoverView: View {
         .font(.system(size: 12))
         .padding(.horizontal, 16)
         .padding(.vertical, 11)
+    }
+
+    private var diskNeedsCleanup: Bool {
+        (manager.cachedVMDisk?.fraction ?? 0) >= VMDiskInfo.cleanupHintFraction
     }
 
     private func revealLog() {

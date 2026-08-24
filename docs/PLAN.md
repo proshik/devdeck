@@ -180,6 +180,15 @@ it **cannot see** individual `rustc` processes, their count, or the current crat
   `Config.settings.vmMemoryMonitoring` + "Settings"; probe off the main thread.
   Real dev-build peak: **6.2/10 GiB (headroom 38%)** → colima --memory can be lowered to ~8.
   Spec: `docs/superpowers/specs/2026-06-10-vm-memory-monitoring-design.md`.
+  **Superseded 2026-08-24:** the footprint is a one-way ratchet with lima/vz (guest page cache
+  never returns to the host — verified: `drop_caches` freed 21 GB in the guest, footprint stayed
+  at 29 GB), so the line now reads the guest's `/proc/meminfo` (`MemTotal − MemAvailable`) over
+  `colima ssh`. Same semantics as the minikube line; the host side stays in Pressure/Swap.
+- [x] **[P4] Cleanup page** — `docker system df` for the colima docker and the docker inside the
+  minikube node, prune buttons per category (confirm-first, through the normal runner), colima
+  restart with `minikube start`. The popover's disk cell opens it; ≥ 85% adds a hint line.
+  minikube's kubelet has image GC (`100%`) and eviction (`0%`) disabled, so the disk just fills
+  to 100% otherwise. — ✅ DONE 2026-08-24
 - [x] **[P5] OOM/non-zero exit detection + crate name** — cheap and unambiguous: `signal: 9` /
   `could not compile X` → X = the monster crate. `terminationStatus==9` + regex over the log tail (exit code already available). → log. — ✅ DONE 2026-06-14
 - [x] **[P4] Peak memory per build → to log** — teaches "build peaks at X GB". `DiagnosticLog` already records

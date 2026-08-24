@@ -144,6 +144,74 @@ enum L10n {
     static var logEmpty: String { t("Log is empty", "Лог пуст") }
     static var clear: String { t("Clear", "Очистить") }
 
+    // MARK: - Cleanup (VM disk & memory)
+
+    static var cleanup: String { t("Cleanup", "Очистка") }
+    static var cleanupIntro: String {
+        t("Where the colima disk goes and what can be freed. Named volumes (databases, module caches) and running containers are never touched.",
+          "Куда уходит диск colima и что можно освободить. Именованные volumes (базы, кэши модулей) и работающие контейнеры не трогаются.")
+    }
+    static func dockerHostTitle(_ host: DockerHost) -> String {
+        switch host {
+        case .colima: return t("colima — the docker VM", "colima — docker в VM")
+        case .minikube: return t("minikube — inside the cluster node", "minikube — внутри ноды кластера")
+        }
+    }
+    static var dockerHostUnavailable: String { t("Not running or unreachable", "Не запущен или недоступен") }
+    static var usageImages: String { t("Images", "Образы") }
+    static var usageContainers: String { t("Containers", "Контейнеры") }
+    static var usageVolumes: String { t("Volumes", "Volumes") }
+    static var usageBuildCache: String { t("Build cache", "Build cache") }
+    static func usageRow(_ size: String, active: Int, total: Int, reclaimable: String) -> String {
+        t("\(size) · \(active) of \(total) in use · \(reclaimable) reclaimable",
+          "\(size) · в работе \(active) из \(total) · можно освободить \(reclaimable)")
+    }
+    static func cleanupActionTitle(_ action: CleanupAction) -> String {
+        switch action {
+        case .deadContainers: return t("Dead containers + their volumes", "Мёртвые контейнеры и их volumes")
+        case .buildCache: return t("Build cache", "Build cache")
+        case .unusedImages: return t("Unused images", "Неиспользуемые образы")
+        }
+    }
+    static func cleanupConfirmTitle(_ action: CleanupAction, _ host: DockerHost) -> String {
+        t("Free “\(cleanupActionTitle(action))” in \(host.rawValue)?",
+          "Освободить «\(cleanupActionTitle(action))» в \(host.rawValue)?")
+    }
+    static func cleanupConfirmMessage(_ action: CleanupAction) -> String {
+        switch action {
+        case .deadContainers:
+            return t("Removes stopped containers and the anonymous volumes nobody references any more (testcontainers leftovers). Named volumes stay.",
+                     "Удалит остановленные контейнеры и анонимные volumes, на которые больше никто не ссылается (остатки testcontainers). Именованные volumes останутся.")
+        case .buildCache:
+            return t("Removes the whole BuildKit cache. Nothing breaks; the next build is a cold one.",
+                     "Удалит весь кэш BuildKit. Ничего не сломается, но следующая сборка будет холодной.")
+        case .unusedImages:
+            return t("Removes every image no container uses right now — including locally built ones that a pod with imagePullPolicy: Never will need on its next restart. Pull or rebuild them afterwards.",
+                     "Удалит все образы, которые сейчас не использует ни один контейнер — включая собранные локально, которые под с imagePullPolicy: Never потребует при следующем рестарте. Потом их придётся скачать или собрать заново.")
+        }
+    }
+    static var cleanupConfirmButton: String { t("Free up", "Освободить") }
+    static var cleanupRefresh: String { t("Refresh", "Обновить") }
+    static var cleanupMemorySection: String { t("VM memory", "Память VM") }
+    static var cleanupMemoryNote: String {
+        t("The hypervisor keeps every page the guest ever touched — mostly Linux page cache — so its footprint on the Mac only grows until colima restarts. Inside the VM the figure above is what matters; restart only when the Mac itself is under pressure.",
+          "Гипервизор держит все страницы, которых гость хоть раз коснулся, — в основном это page cache Linux, — поэтому его след на Mac только растёт до перезапуска colima. Внутри VM важна цифра выше; перезапускайте, только если давит сам Mac.")
+    }
+    static var restartColima: String { t("Restart colima", "Перезапустить colima") }
+    static var restartColimaConfirmTitle: String { t("Restart colima?", "Перезапустить colima?") }
+    static var restartColimaConfirmMessage: String {
+        t("Every container stops — the minikube node, port-forwards and running builds included. minikube is started again afterwards; the whole thing takes a minute or two.",
+          "Остановятся все контейнеры — включая ноду minikube, port-forward’ы и идущие сборки. Потом minikube запустится заново; всё вместе занимает минуту-две.")
+    }
+    static var restartColimaConfirmButton: String { t("Restart", "Перезапустить") }
+    static var cleanupLastRun: String { t("Last action", "Последнее действие") }
+    static var cleanupHelp: String { t("Cleanup: VM disk & memory", "Очистка: диск и память VM") }
+    static var cleanupDiskHint: String { t("VM disk is almost full — free up space…", "Диск VM почти заполнен — освободить…") }
+    static func cleanupCommandName(_ action: CleanupAction, _ host: DockerHost) -> String {
+        t("Cleanup: \(cleanupActionTitle(action).lowercased()) (\(host.rawValue))",
+          "Очистка: \(cleanupActionTitle(action).lowercased()) (\(host.rawValue))")
+    }
+
     // MARK: - Settings
 
     static var memoryMonitoringSection: String { t("Memory monitoring", "Мониторинг памяти") }
