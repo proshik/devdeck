@@ -144,6 +144,41 @@ enum L10n {
     static var logEmpty: String { t("Log is empty", "Лог пуст") }
     static var clear: String { t("Clear", "Очистить") }
 
+    // MARK: - Header metrics: what each figure means (popover tooltips + Settings reference)
+
+    static var metricsHelpTitle: String { t("What the metrics mean", "Что значат метрики") }
+    static func metricHelp(_ metric: HeaderMetric) -> String {
+        switch metric {
+        case .memory:
+            return t("RAM of this Mac: used / total. macOS compresses and swaps on its own, so 80–90% is normal — look at Pressure for whether it is actually short.",
+                     "RAM этого Mac: занято / всего. macOS сама сжимает и свопит, поэтому 80–90 % — норма; действительно ли тесно, показывает «Давление».")
+        case .swap:
+            return t("How much macOS has moved out to disk. It sits there for days and is harmless by itself; growing before your eyes — see Swap rate.",
+                     "Сколько macOS вынесла на диск. Лежит там днями и само по себе не страшно; растёт на глазах — смотрите Swap-rate.")
+        case .cluster:
+            return t("colima list + minikube status. Healthy — the VM runs and the node is Running; Degraded — the VM is up but minikube is not fully Running; Down — colima is stopped.",
+                     "colima list + minikube status. В норме — VM запущена и нода Running; Деградация — VM есть, minikube не полностью Running; Не работает — colima остановлена.")
+        case .vmColima:
+            return t("Memory really used inside the colima VM (MemTotal − MemAvailable) against its limit; Linux page cache is not counted. Above 90% during a run — a notification.",
+                     "Память, реально занятая внутри VM colima (MemTotal − MemAvailable), против её лимита; page cache Linux не считается. Выше 90 % во время прогона — уведомление.")
+        case .vmMinikube:
+            return t("Non-reclaimable (anon) memory of the minikube node against its cgroup limit (minikube --memory) — this is where the OOM killer takes rustc. Sampled every second during a build, every 15 s while the popover is open; “rustc N” — compilers running.",
+                     "Невыгружаемая память (anon) ноды minikube против её cgroup-лимита (minikube --memory) — именно здесь OOM-киллер убивает rustc. Во время сборки — раз в секунду, при открытом попапе — раз в 15 с; «rustc N» — сколько компиляторов работает.")
+        case .pressure:
+            return t("The macOS kernel's verdict on this Mac's memory. Normal; Warning — actively compressing and swapping, things stutter; Critical — about to kill processes. The usual culprit is the colima hypervisor holding stale VM page cache — Cleanup → Restart colima returns it.",
+                     "Вердикт ядра macOS о памяти этого Mac. Норма; Тревога — активно сжимает и свопит, всё подтормаживает; Критично — вот-вот начнёт убивать процессы. Обычный виновник — гипервизор colima с залежавшимся page cache VM; Очистка → «Перезапустить colima» возвращает память.")
+        case .diskVM:
+            return t("How full /var/lib/docker inside the colima VM is: images, volumes, build cache and everything inside minikube. minikube's kubelet never cleans it; from 85% a hint appears. Cleanup is the trash icon below.",
+                     "Заполненность /var/lib/docker внутри VM colima: образы, volumes, build cache и всё, что внутри minikube. kubelet minikube его не чистит; от 85 % появляется подсказка. Очистка — корзина внизу.")
+        case .swapRate:
+            return t("Swap traffic right now (↑ out to disk, ↓ back in). Shown only while it is actually thrashing (≥ 0.1 MB/s) — tells “full but stable” from “slow right now”.",
+                     "Обмен со свопом прямо сейчас (↑ на диск, ↓ обратно). Показывается только при реальном трэшинге (≥ 0.1 МБ/с) — отличает «полно, но стабильно» от «тормозит сейчас».")
+        case .cpuLoad:
+            return t("1-minute load average; coloured relative to this Mac's core count (1.0 per core = every core busy).",
+                     "Load average за минуту; цвет — относительно числа ядер Mac (1.0 на ядро = все ядра заняты).")
+        }
+    }
+
     // MARK: - Cleanup (VM disk & memory)
 
     static var cleanup: String { t("Cleanup", "Очистка") }
