@@ -7,6 +7,11 @@ versioning follows [SemVer](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- **"VM minikube" was blank almost always.** The node probe only runs while a command is
+  building, but the 1 s sampler also runs for as long as any daemon is alive — and it wrote an
+  empty value into the line on every tick, so with a port-forward up the figure never showed.
+  The sampler now touches the line only when it actually probed, and the popover refreshes it
+  every 15 s while open (one `minikube ssh`), alongside the cluster and disk probes.
 - **A hairline through the traffic lights.** Any window with a toolbar gets AppKit's automatic
   titlebar separator, and on macOS 26 the toolbar metrics put that line at the height of the
   close/minimise/zoom buttons — it looked like a rendering glitch cutting the buttons in half.
@@ -14,6 +19,10 @@ versioning follows [SemVer](https://semver.org/).
   keeps its own divider above the pinned Proxy/Settings buttons).
 
 ### Added
+- **What the metrics mean.** Every cell in the popover header (Memory, Swap, Cluster, VM colima,
+  VM minikube, Pressure, VM disk, Swap rate, CPU load) now carries a tooltip explaining what the
+  figure measures, where it comes from and what a bad value means; the same texts sit under
+  Settings → Memory monitoring → "What the metrics mean" for reading without hovering.
 - **Cleanup page** — a pinned sidebar entry next to Proxy/Settings that shows where the colima
   disk goes (`docker system df` for the VM's own docker *and* for the docker inside the minikube
   node, where `minikube docker-env` builds and the cluster's images live) with one button per

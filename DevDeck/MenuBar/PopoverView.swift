@@ -13,15 +13,21 @@ struct PopoverView: View {
     @AppStorage("popover.section.commands.collapsed") private var commandsCollapsed = false
     @AppStorage("popover.section.daemons.collapsed") private var daemonsCollapsed = false
     @AppStorage("popover.section.chains.collapsed") private var chainsCollapsed = false
+    /// Metric whose explanation is unfolded under the grid (click a cell; click again to fold).
+    /// Tooltips exist too, but the header redraws every second and macOS never gets the still
+    /// second of hovering it wants before showing one.
+    @State private var explainedMetric: HeaderMetric?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             memoryHeader
                 .task {
-                    // Refresh colima/minikube health and the VM disk while the popover is open.
+                    // Refresh colima/minikube health, the VM disk and the minikube line while the
+                    // popover is open — the three ssh/CLI probes that are too slow for the 2 s loop.
                     while !Task.isCancelled {
                         await manager.refreshClusterHealth()
                         await manager.refreshVMDisk()
+                        await manager.refreshMinikubeSample()
                         try? await Task.sleep(for: .seconds(15))
                     }
                 }
@@ -115,6 +121,7 @@ struct PopoverView: View {
                         .foregroundStyle(.primary)
                 }
                 .font(.system(size: 11))
+                .help(HeaderMetric.memory.help)
 
                 GeometryReader { geo in
                     ZStack(alignment: .leading) {
@@ -127,7 +134,7 @@ struct PopoverView: View {
 
                 LazyVGrid(columns: Self.metricColumns, alignment: .leading, spacing: 5) {
                     let health = manager.cachedClusterHealth
-                    metricCell(L10n.cluster,
+                    metricCell(.cluster,
                                health.map { L10n.clusterHealthValue($0.level) } ?? "",
                                color: health.map { clusterColor($0.level) } ?? Self.placeholderColor)
 
@@ -138,33 +145,30 @@ struct PopoverView: View {
                     case .elevated: .orange
                     case .high: .red
                     }
-                    metricCell(L10n.swap,
+                    metricCell(.swap,
                                hasSwap ? SystemMemory.formatGiB(memory.swapUsedBytes) : "",
                                color: hasSwap ? swapColor : Self.placeholderColor)
 
                     let vm = manager.vmMemorySample()
-                    metricCell("VM colima",
+                    metricCell(.vmColima,
                                vm?.format() ?? "",
                                color: vm.map { pressureColor($0.fraction) } ?? Self.placeholderColor)
 
-                    // minikube memory from inside the VM — present only during a run (sampler cache).
+                    // minikube memory from inside the VM: 1 s sampler during a run, 15 s refresh otherwise.
                     let mk = manager.minikubeSample()
-                    metricCell("VM minikube",
+                    metricCell(.vmMinikube,
                                mk.map { $0.format() + ($0.rustcCount > 0 ? " · rustc \($0.rustcCount)" : "") } ?? "",
                                color: mk.map { pressureColor($0.fraction) } ?? Self.placeholderColor)
 
                     let host = manager.cachedHostSample
-                    metricCell(L10n.pressure,
+                    metricCell(.pressure,
                                host.map { L10n.pressureValue($0.pressure) } ?? "",
                                color: host.map { pressureLevelColor($0.pressure) } ?? Self.placeholderColor)
 
                     let disk = manager.cachedVMDisk
-                    metricCell(L10n.diskVM,
+                    metricCell(.diskVM,
                                disk.map { $0.format() } ?? "",
                                color: disk.map { pressureColor($0.fraction) } ?? Self.placeholderColor)
-                        .contentShape(Rectangle())
-                        .onTapGesture { openItem(.cleanup) }
-                        .help(L10n.cleanup)
 
                     // Live swap rate (↑ out to disk, ↓ in from disk): distinguishes "full but stable"
                     // from "actively thrashing". Gate at ~0.1 MB/s so sub-rounding noise doesn't show.
@@ -177,7 +181,7 @@ struct PopoverView: View {
                         outActive ? "↑" + HostMetricsSample.formatRate(pagesPerSec: outRate, pageSize: hostPageSize) : nil,
                         inActive ? "↓" + HostMetricsSample.formatRate(pagesPerSec: inRate, pageSize: hostPageSize) : nil,
                     ].compactMap { $0 }.joined(separator: " ")
-                    metricCell(L10n.swapRate,
+                    metricCell(.swapRate,
                                swapRateText.isEmpty ? "" : swapRateText,
                                color: swapRateText.isEmpty ? Self.placeholderColor : .orange)
 
@@ -185,9 +189,18 @@ struct PopoverView: View {
                     var loads = [Double](repeating: 0, count: 3)
                     let gotLoad = getloadavg(&loads, 3) >= 1
                     let cores = Double(max(1, ProcessInfo.processInfo.activeProcessorCount))
-                    metricCell(L10n.cpuLoad,
+                    metricCell(.cpuLoad,
                                gotLoad ? String(format: "%.2f", loads[0]) : "",
                                color: gotLoad ? pressureColor(loads[0] / cores) : Self.placeholderColor)
+                }
+
+                if let explainedMetric {
+                    (Text(explainedMetric.title + ": ").fontWeight(.semibold) + Text(explainedMetric.help))
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 4)
+                        .transition(.opacity)
                 }
 
                 // Past the cleanup threshold the disk cell alone is easy to miss — one orange line
@@ -207,14 +220,17 @@ struct PopoverView: View {
         }
     }
 
-    /// One label · value metric cell for the header grid.
-    private func metricCell(_ label: String, _ value: String, color: Color) -> some View {
+    /// One label · value metric cell for the header grid; the tooltip explains the figure.
+    private func metricCell(_ metric: HeaderMetric, _ value: String, color: Color) -> some View {
         HStack(spacing: 4) {
-            Text(label).foregroundStyle(.secondary)
+            Text(metric.title).foregroundStyle(.secondary)
             Spacer(minLength: 4)
             Text(value).monospacedDigit().foregroundStyle(color).lineLimit(1)
         }
         .font(.system(size: 10))
+        .contentShape(Rectangle())
+        .onTapGesture { explainedMetric = explainedMetric == metric ? nil : metric }
+        .help(metric.help)
     }
 
     private func pressureLevelColor(_ level: MemoryPressureLevel) -> Color {
