@@ -106,3 +106,63 @@ final class ProcessManagerMinikubeTests: XCTestCase {
         XCTAssertEqual(off.calls, 0, "disabled flag suppresses the OOM scan")
     }
 }
+
+/// The popover's own 15 s refresh of the minikube line — and the sampler must not stomp on it.
+@MainActor
+final class ProcessManagerMinikubeRefreshTests: XCTestCase {
+    private let gib: UInt64 = 1_073_741_824
+    private func sample(anonGiB: UInt64) -> MinikubeSample {
+        MinikubeSample(anonBytes: anonGiB * gib, limitBytes: 4 * gib, rustcCount: 0, rustcRSSBytes: 0)
+    }
+
+    func testRefreshPopulatesCache() async {
+        let probe = FakeMinikubeProbe([sample(anonGiB: 2)])
+        let m = ProcessManager(runner: FakeCommandRunner(), minikubeProbe: probe,
+                               minikubeMonitoringEnabled: { true })
+        await m.refreshMinikubeSample()
+        XCTAssertEqual(m.minikubeSample(), sample(anonGiB: 2))
+    }
+
+    func testRefreshClearsWhenDisabled() async {
+        let probe = FakeMinikubeProbe([sample(anonGiB: 2)])
+        let m = ProcessManager(runner: FakeCommandRunner(), minikubeProbe: probe,
+                               minikubeMonitoringEnabled: { false })
+        await m.refreshMinikubeSample()
+        XCTAssertNil(m.minikubeSample())
+        XCTAssertEqual(probe.calls, 0, "the ssh probe must never run with the toggle off")
+    }
+
+    func testRefreshYieldsToTheSamplerDuringABuild() async throws {
+        // While a command runs, the 1 s sampler owns the cache — the popover refresh stays out.
+        let fake = FakeCommandRunner()
+        let probe = FakeMinikubeProbe([sample(anonGiB: 2)])
+        let m = ProcessManager(runner: fake, minikubeProbe: probe, minikubeMonitoringEnabled: { true })
+        let c = Command(id: UUID(), name: "build", command: "just dev-build")
+        fake.eagerScripts[c.id] = [.started(pid: 1)]
+        m.run(c)
+        await yieldUntil { m.states[c.id] == .running }
+        let before = probe.calls
+        await m.refreshMinikubeSample()
+        XCTAssertEqual(probe.calls, before, "no second writer while the sampler probes the node")
+    }
+
+    func testSamplerLeavesTheLineAloneWhileOnlyDaemonsRun() async throws {
+        // Regression: a live daemon (port-forward) keeps the sampler loop running; it used to
+        // write nil into the cache every tick, so the popover line was empty almost always.
+        let fake = FakeCommandRunner()
+        let probe = FakeMinikubeProbe([sample(anonGiB: 3)])
+        let m = ProcessManager(runner: fake, minikubeProbe: probe,
+                               minikubeMonitoringEnabled: { true }, hostMonitoringEnabled: { false })
+        let d = Command(id: UUID(), name: "pf", command: "kubectl port-forward", isDaemon: true)
+        fake.eagerScripts[d.id] = [.started(pid: 1)]
+        m.run(d)
+        await yieldUntil { m.states[d.id] == .daemonRunning }
+
+        await m.refreshMinikubeSample()
+        XCTAssertEqual(m.minikubeSample(), sample(anonGiB: 3))
+
+        try await Task.sleep(for: .seconds(1.3))   // let the sampler tick at least once more
+        XCTAssertEqual(m.minikubeSample(), sample(anonGiB: 3), "the sampler must not clear it")
+        XCTAssertEqual(probe.calls, 1, "daemons are never probed — only the popover refresh was")
+    }
+}

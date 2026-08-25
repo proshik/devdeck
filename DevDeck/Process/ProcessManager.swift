@@ -138,7 +138,7 @@ final class ProcessManager {
     /// Defaults to false: without explicitly wiring the flag, the ssh probe into the VM is never called (including in tests).
     @ObservationIgnored var isMinikubeMonitoringEnabled: () -> Bool
     @ObservationIgnored private var minikubeStats: [UUID: MinikubeRunStats] = [:]
-    /// The last minikube snapshot; present only during a run (nil between runs).
+    /// The last minikube snapshot: the 1 s sampler during a run, the popover's 15 s refresh otherwise.
     private(set) var cachedMinikubeSample: MinikubeSample?
     /// Live colima cpus + memory limit for the `-j` advisory; nil until resolved (then defaults apply).
     private(set) var vmBuildConfig: VMBuildConfig?
@@ -959,6 +959,18 @@ final class ProcessManager {
         prevHostForRate = (cur, now)
     }
 
+    /// minikube snapshot for the popover while it is open (15 s cadence, one ssh hop). Gated by the
+    /// toggle. Skipped while the sampler is probing the node itself (a running command/chain) —
+    /// two writers would fight over one cache; the sampler's 1 s figure wins for the run's duration.
+    func refreshMinikubeSample() async {
+        guard isMinikubeMonitoringEnabled() else { cachedMinikubeSample = nil; return }
+        guard minikubeTargetIDs.isEmpty else { return }
+        let probe = minikubeProbe
+        let s = await Task.detached(priority: .utility) { probe.sample() }.value
+        guard minikubeTargetIDs.isEmpty else { return }   // a build may have started during the await
+        cachedMinikubeSample = s
+    }
+
     /// A single minikube sample for run id (called from tests). Synchronous.
     func recordMinikubeSample(for id: UUID) {
         guard isMinikubeMonitoringEnabled(), let s = minikubeProbe.sample() else { return }
@@ -1090,7 +1102,10 @@ final class ProcessManager {
                 }.value
                 self.cachedVMSample = s
                 if let s { for id in self.active.keys { self.accumulateVMPeak(s, for: id) } }
-                self.cachedMinikubeSample = mk
+                // Only a real probe overwrites the line. Daemons keep this loop alive for hours
+                // without probing the node; writing nil each tick would blank the popover's own
+                // 15 s refresh (see refreshMinikubeSample).
+                if mkProbe != nil { self.cachedMinikubeSample = mk }
                 if let mk { for id in mkTargets where self.active[id] != nil { self.absorbMinikube(mk, for: id) } }
                 self.checkMemoryThresholds(vm: s, minikube: mk)
                 // Disk changes slowly and the ssh probe isn't free: every ~15 ticks (≈15 s),
@@ -1115,7 +1130,7 @@ final class ProcessManager {
                 try? await Task.sleep(for: .seconds(1))
             }
             self?.vmSamplerTask = nil
-            self?.cachedMinikubeSample = nil   // outside a run the minikube line isn't shown in the popover
+            // cachedMinikubeSample is left as is: the popover refreshes it every 15 s while open.
             self?.cachedHostSample = nil
             self?.cachedSwapOutRatePages = nil
             self?.cachedSwapInRatePages = nil
