@@ -169,6 +169,33 @@ final class ClaudeTabsModelTests: XCTestCase {
                        "a forced restore re-captured and stamped the snapshot with this boot")
     }
 
+    /// Nine of ten tabs coming back is not "nothing opened": the boot must still be marked
+    /// resolved (a retry would duplicate the nine), the failure must still be visible, and —
+    /// what used to be the actual bug — automatic capture must unfreeze rather than stay held for
+    /// the rest of the boot.
+    func testPartiallyFailedRestoreStillMarksTheBootAndUnfreezesCapture() async throws {
+        let defaults = makeDefaults()
+        let index = FakeTranscriptIndex(byDirectory: [
+            "/tmp/1": [TranscriptTitle(aiTitle: "t1", sessionID: "s1", modifiedAt: currentBoot)]
+        ])
+        let (model, store, runner) = try makeModel(tabs: 3, index: index, defaults: defaults)
+        runner.failingCalls = [1]
+
+        model.restoreNow()
+        await sleepUntil({ defaults.object(forKey: restoredBootTimeKey) != nil },
+                         message: "a partially failed restore never marked the boot restored")
+        XCTAssertEqual(defaults.object(forKey: restoredBootTimeKey) as? Date, currentBoot,
+                       "one failed action out of three must not stop the boot from being resolved")
+        XCTAssertEqual(model.lastError, L10n.claudeTabsRestoreFailed,
+                       "a partial failure must still be reported")
+
+        // The write above is only half the fix — prove the invariant that actually gates the
+        // automatic path was lifted, not just that the bookkeeping key changed.
+        await model.captureIfEnabled()
+        XCTAssertEqual(store.load()?.bootTime, currentBoot,
+                       "a resolved boot must let the automatic capture through")
+    }
+
     // MARK: - Capture
 
     /// THE invariant: the snapshot is from an earlier boot and nothing has restored it yet, so it

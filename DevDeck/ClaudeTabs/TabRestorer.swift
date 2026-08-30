@@ -78,6 +78,17 @@ struct LiveAppleScriptRunner: AppleScriptRunning {
     }
 }
 
+/// How a restore went: how many actions opened, how many did not.
+///
+/// A `Bool` cannot say "nine of ten tabs came back" — and that distinction is the whole point:
+/// the caller marks a boot's restore resolved once ANYTHING opened (a retry would duplicate those
+/// tabs), while a boot where NOTHING opened — the dominant case being Automation denied — must
+/// stay unresolved so a retry after fixing permission is clean.
+struct RestoreOutcome: Equatable {
+    let succeeded: Int
+    let failed: Int
+}
+
 /// Replays a restore plan into Ghostty, pacing itself so nine claude processes do not all start
 /// in the same second.
 struct TabRestorer {
@@ -93,13 +104,15 @@ struct TabRestorer {
         self.stepDelay = stepDelay
     }
 
-    /// false if any step failed — the caller surfaces it once, rather than per tab.
+    /// Counts, rather than a Bool — see `RestoreOutcome`. One failed action must not stop the
+    /// rest from being attempted, so every action always runs.
     @discardableResult
-    func restore(_ actions: [RestoreAction]) async -> Bool {
+    func restore(_ actions: [RestoreAction]) async -> RestoreOutcome {
         // Asked once for the whole restore, not per tab: it costs a subprocess, and the answer
         // cannot change meaningfully while we are opening tabs.
         let background = sessions.backgroundSessionIDs()
-        var allSucceeded = true
+        var succeeded = 0
+        var failed = 0
         for (offset, action) in actions.enumerated() {
             if offset > 0, stepDelay > .zero {
                 try? await Task.sleep(for: stepDelay)
@@ -116,9 +129,9 @@ struct TabRestorer {
                     text: RestoreCommand.text(cwd: cwd, sessionID: sessionID,
                                               isBackground: isBackground(sessionID, in: background)))
             }
-            if !runner.run(args) { allSucceeded = false }
+            if runner.run(args) { succeeded += 1 } else { failed += 1 }
         }
-        return allSucceeded
+        return RestoreOutcome(succeeded: succeeded, failed: failed)
     }
 
     private func isBackground(_ sessionID: String?, in background: Set<String>) -> Bool {
