@@ -19,9 +19,10 @@ final class RestorePlannerTests: XCTestCase {
     }
 
     private func decide(_ snap: ClaudeTabsSnapshot?, enabled: Bool = true,
-                        restored: Date? = nil, openTabs: Int = 1) -> RestoreDecision {
+                        restored: Date? = nil, openTabs: Int = 1,
+                        force: Bool = false) -> RestoreDecision {
         RestorePlanner.decide(snapshot: snap, enabled: enabled, currentBootTime: thisBoot,
-                              restoredBootTime: restored, openTabCount: openTabs)
+                              restoredBootTime: restored, openTabCount: openTabs, force: force)
     }
 
     func testRestoresAfterReboot() {
@@ -61,6 +62,58 @@ final class RestorePlannerTests: XCTestCase {
     func testCapsTheNumberOfTabs() {
         guard case let .restore(actions) = decide(snapshot(50)) else { return XCTFail("expected restore") }
         XCTAssertEqual(actions.count, RestorePlanner.maxTabs)
+    }
+
+    // MARK: - Forced ("Restore now")
+
+    /// The button used to be a no-op in every situation anyone would press it: the capture timer
+    /// stamps a snapshot with the current boot within a minute of every launch, and the same-boot
+    /// guard then swallowed the forced restore too.
+    func testForcedRestoreIgnoresTheSameBootGuard() {
+        guard case let .restore(actions) = decide(snapshot(2, boot: thisBoot), force: true) else {
+            return XCTFail("expected restore")
+        }
+        XCTAssertEqual(actions.count, 2)
+    }
+
+    func testForcedRestoreIgnoresAlreadyRestoredInThisBoot() {
+        guard case .restore = decide(snapshot(2), restored: thisBoot, force: true) else {
+            return XCTFail("expected restore")
+        }
+    }
+
+    func testForcedRestoreIgnoresTheFeatureFlag() {
+        guard case .restore = decide(snapshot(2), enabled: false, force: true) else {
+            return XCTFail("expected restore")
+        }
+    }
+
+    /// Force cannot conjure tabs out of nothing: the two guards that describe reality stay.
+    func testForcedRestoreStillSkipsWithoutASnapshot() {
+        guard case .skip = decide(nil, force: true) else { return XCTFail("expected skip") }
+    }
+
+    func testForcedRestoreStillSkipsOnAnEmptySnapshot() {
+        guard case .skip = decide(snapshot(0), force: true) else { return XCTFail("expected skip") }
+    }
+
+    // MARK: - Boot-time granularity
+
+    /// `kern.boottime` is recomputed whenever the wall clock is set, and NTP corrects the clock a
+    /// minute or two into every boot. Compared exactly, that microsecond drift would restore the
+    /// tabs again on top of the ones already open, and again on every Ghostty launch after that.
+    func testATinyDriftInTheBootTimeIsStillTheSameBoot() {
+        let drifted = thisBoot.addingTimeInterval(0.004)
+        guard case .skip = decide(snapshot(2, boot: drifted)) else { return XCTFail("expected skip") }
+        guard case .skip = decide(snapshot(2), restored: drifted) else { return XCTFail("expected skip") }
+    }
+
+    /// And a real reboot is still a real reboot: boot times then sit minutes apart at the very
+    /// least, so the tolerance never swallows one.
+    func testAnActualRebootIsStillDetected() {
+        guard case .restore = decide(snapshot(2, boot: thisBoot.addingTimeInterval(-3_600))) else {
+            return XCTFail("expected restore")
+        }
     }
 
     /// `openTabCount == 1` is strict on purpose. Zero is a real value — it is what the caller
