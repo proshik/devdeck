@@ -11,6 +11,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let updateController = UpdateController()
     let proxyManager = ProxyManager()
     let cleanupModel: CleanupModel
+    let claudeTabs = ClaudeTabsModel()
 
     private var menuBar: MenuBarController?
 
@@ -58,6 +59,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Run directories are no longer deleted when a command finishes — a live tab keeps its
         // script around for diagnosing. Collect the ones whose terminal is gone now instead.
         sweepStaleTerminalDirectories()
+
+        // Snapshots of the Claude Code tabs, and the post-reboot restore.
+        // The flag is read live from the config so switching it takes effect without a relaunch.
+        claudeTabs.start(isEnabled: { [weak store] in store?.config.settings.claudeTabsRestore ?? false })
+    }
+
+    /// Last snapshot before quitting, so a crash-free quit never loses the most recent tab layout.
+    func applicationWillTerminate(_ notification: Notification) {
+        claudeTabs.captureNow()
     }
 
     /// The main window's red close button does NOT quit the app — it lives in the menu bar.
