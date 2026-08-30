@@ -399,21 +399,22 @@ final class ClaudeTabsModel {
             if force { lastError = L10n.claudeTabsNothingToRestore }
         case let .restore(actions):
             DiagnosticLog.shared.log("ClaudeTabs: restoring \(actions.count) tab(s)")
-            let ok = await restorer.restore(actions)
-            // Only a successful restore marks the boot done: the dominant failure is Automation
-            // not yet granted, which opens nothing, so a retry after the user fixes it is clean —
-            // whereas marking it done unconditionally would forfeit the feature on the one run
-            // (right after granting permission) where it matters most.
-            if ok {
+            let outcome = await restorer.restore(actions)
+            // The boot is marked resolved as soon as ANYTHING opened, not only when everything did:
+            // re-running the restore at that point would duplicate the tabs already on screen. Only
+            // when NOTHING opened — the dominant failure being Automation not yet granted — must the
+            // boot stay unmarked, so a retry after the user fixes it is clean.
+            if outcome.succeeded > 0 {
                 defaults.set(currentBoot, forKey: Self.restoredBootTimeKey)
             }
-            lastError = ok ? nil : L10n.claudeTabsRestoreFailed
+            // A partial failure is still a failure worth seeing, even though the boot is resolved.
+            lastError = outcome.failed > 0 ? L10n.claudeTabsRestoreFailed : nil
             // One authoritative capture of the finished state, since the timer was suppressed for
             // the whole restore and would otherwise leave a half-restored snapshot in place.
             // Never after a *forced* restore: the tabs on screen are then the snapshot's tabs on
             // top of whatever was already open, and baking that in would make the next reboot
             // restore everything twice.
-            if ok && !force {
+            if outcome.succeeded > 0 && !force {
                 await capture(explicit: false, previousSignature: lastSignature)
             }
         }
