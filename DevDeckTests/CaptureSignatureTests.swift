@@ -27,6 +27,21 @@ final class CaptureSignatureTests: XCTestCase {
         func titles(forWorkingDirectory workingDirectory: String) -> [TranscriptTitle] { [title] }
     }
 
+    /// Same idea as `ResolvingIndex`, but counting — the one fake both
+    /// `testAutomaticCaptureSkipsAnUnchangedTabSet` and
+    /// `testExplicitCaptureAlwaysRunsEvenOnAnUnchangedTabSet` share, so the "0 more calls" vs
+    /// "1 more call" contrast between them is the intended distinction, not an artifact of using
+    /// two different fakes.
+    private final class CountingResolvingIndex: TranscriptIndexing, @unchecked Sendable {
+        private(set) var calls = 0
+        var title: TranscriptTitle
+        init(title: TranscriptTitle) { self.title = title }
+        func titles(forWorkingDirectory workingDirectory: String) -> [TranscriptTitle] {
+            calls += 1
+            return [title]
+        }
+    }
+
     private struct FixedBootTime: BootTimeProviding {
         let date: Date
         func bootTime() -> Date { date }
@@ -106,5 +121,63 @@ final class CaptureSignatureTests: XCTestCase {
 
         XCTAssertEqual(firstContent, secondContent, "an unchanged tab set rewrote the snapshot file")
         XCTAssertEqual(firstModified, secondModified, "an unchanged tab set touched the snapshot file's mtime")
+    }
+
+    /// A model with one tab that always resolves, backed by a `CountingResolvingIndex` — set up
+    /// so the FIRST capture through it (whichever path the caller drives) establishes a baseline
+    /// signature by actually persisting, and a SECOND capture over the exact same tab set is the
+    /// one under test.
+    private func makeCapturingModel() -> (model: ClaudeTabsModel, index: CountingResolvingIndex) {
+        let tab = GhosttyTab(windowID: "w1", index: 1, title: "✳ a", workingDirectory: "/tmp/a")
+        let index = CountingResolvingIndex(title: TranscriptTitle(aiTitle: "a", sessionID: "s1",
+                                                                   modifiedAt: Date()))
+        let model = ClaudeTabsModel(reader: FakeReader(result: .tabs([tab])),
+                                    index: index,
+                                    store: ClaudeTabsStore(url: tempStoreURL()),
+                                    bootTime: FixedBootTime(date: Date(timeIntervalSince1970: 1_000)),
+                                    defaults: makeDefaults(),
+                                    isEnabled: { true })
+        return (model, index)
+    }
+
+    /// The automatic path is the one whose whole purpose is to cost nothing when nothing changed:
+    /// a second automatic capture over an unchanged tab set must add ZERO transcript-index calls.
+    func testAutomaticCaptureSkipsAnUnchangedTabSet() async throws {
+        let (model, index) = makeCapturingModel()
+
+        await model.captureIfEnabled()
+        let callsAfterFirstCapture = index.calls
+        XCTAssertEqual(callsAfterFirstCapture, 1, "the priming capture should have resolved once")
+
+        await model.captureIfEnabled()
+
+        XCTAssertEqual(index.calls, callsAfterFirstCapture,
+                       "the automatic path re-read the transcripts for an unchanged tab set")
+    }
+
+    /// The counterpart pinning the fix: "Capture now" must never go quiet. An unchanged tab set is
+    /// exactly the case a user is most likely to hit when they press the button — right after an
+    /// automatic capture already ran — so the explicit path must add exactly ONE more
+    /// transcript-index call and one more write, not silently agree with the automatic path that
+    /// there is nothing to do.
+    func testExplicitCaptureAlwaysRunsEvenOnAnUnchangedTabSet() async throws {
+        let (model, index) = makeCapturingModel()
+
+        await model.captureIfEnabled()
+        let callsAfterFirstCapture = index.calls
+        XCTAssertEqual(callsAfterFirstCapture, 1, "the priming capture should have resolved once")
+        let firstCapturedAt = try XCTUnwrap(model.snapshot?.capturedAt)
+
+        try await Task.sleep(for: .milliseconds(30))
+        model.captureNow()
+        await sleepUntil({ index.calls == callsAfterFirstCapture + 1 },
+                         message: "\"Capture now\" skipped the transcript pass on an unchanged tab set")
+
+        XCTAssertEqual(index.calls, callsAfterFirstCapture + 1,
+                       "\"Capture now\" must always run a real capture, even when nothing changed")
+        let secondCapturedAt = try XCTUnwrap(model.snapshot?.capturedAt)
+        XCTAssertGreaterThan(secondCapturedAt, firstCapturedAt,
+                            "\"Capture now\" must visibly refresh the snapshot, not silently no-op")
+        XCTAssertNil(model.lastError)
     }
 }

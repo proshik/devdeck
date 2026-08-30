@@ -162,6 +162,13 @@ final class ClaudeTabsModel {
     /// feature flag, mirroring how `restoreNow()` forces the restore, and unlike the automatic path
     /// it reports every outcome: a button that does nothing and says nothing is a bug report.
     ///
+    /// That is also why it passes `previousSignature: nil` rather than `lastSignature`: the
+    /// signature short-circuit exists to make an unattended tick free when nothing changed, but a
+    /// press is never unattended. Skipping the transcript pass here would make the button go quiet
+    /// on an unchanged tab set — indistinguishable, to the user, from a broken feature, and most
+    /// likely to look broken precisely when everything is fine. `nil` guarantees a real capture,
+    /// exactly as `force` bypasses the restore planner's guards on the restore side.
+    ///
     /// It does not bypass `isRestoring`. Pressing it during a restore — including the second and a
     /// half where Ghostty has opened its first tab and nothing has been restored into it yet —
     /// would snapshot a tab set that is not the user's, and the user has no way of seeing that a
@@ -171,15 +178,16 @@ final class ClaudeTabsModel {
             lastError = L10n.claudeTabsRestoreInProgress
             return
         }
-        Task { @MainActor in await capture(explicit: true) }
+        Task { @MainActor in await capture(explicit: true, previousSignature: nil) }
     }
 
     /// The automatic path — gated by the configured interval. Respects the feature flag, is
     /// suppressed while a restore is in flight, and never overwrites a snapshot that is still owed
-    /// a restore.
+    /// a restore. This is the path whose whole purpose is to cost nothing when nothing changed, so
+    /// it is the one that passes `lastSignature` through.
     func captureIfEnabled() async {
         guard isEnabled(), !isRestoring, mayOverwriteSnapshot() else { return }
-        await capture(explicit: false)
+        await capture(explicit: false, previousSignature: lastSignature)
     }
 
     /// Runs every 5 seconds; does real work only once `captureInterval()` has actually elapsed.
@@ -251,10 +259,13 @@ final class ClaudeTabsModel {
     /// on this machine 1.1 GB of them, with the active session's file changing mtime constantly —
     /// which is not something a menu-bar app may do to its own UI thread on every capture. Same
     /// treatment as `ProcessManager.refreshVMDisk` gives its blocking probes.
-    private func capture(explicit: Bool) async {
+    ///
+    /// `previousSignature` is threaded in by the caller rather than read from `lastSignature`
+    /// here, so each caller can decide for itself whether the signature short-circuit applies —
+    /// see `captureNow()` and `captureIfEnabled()`.
+    private func capture(explicit: Bool, previousSignature: [String]?) async {
         let reader = self.reader
         let index = self.index
-        let previousSignature = lastSignature
         let outcome = await Task.detached(priority: .utility) {
             Self.collect(reader: reader, index: index, previousSignature: previousSignature)
         }.value
@@ -403,7 +414,7 @@ final class ClaudeTabsModel {
             // top of whatever was already open, and baking that in would make the next reboot
             // restore everything twice.
             if ok && !force {
-                await capture(explicit: false)
+                await capture(explicit: false, previousSignature: lastSignature)
             }
         }
     }
