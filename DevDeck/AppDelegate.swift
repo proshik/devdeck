@@ -62,8 +62,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         sweepStaleTerminalDirectories()
 
         // Snapshots of the Claude Code tabs, and the post-reboot restore.
-        // The flag is read live from the config so switching it takes effect without a relaunch.
-        claudeTabs.start(isEnabled: { [weak store] in store?.config.settings.claudeTabsRestore ?? false })
+        // Both closures read live from the config, so a hand-edited config.json — the flag or the
+        // interval — takes effect without a relaunch.
+        claudeTabs.start(isEnabled: { [weak store] in store?.config.settings.claudeTabsRestore ?? false },
+                         captureInterval: { [weak store] in
+                             ClaudeTabsCaptureInterval.clamped(
+                                 store?.config.settings.claudeTabsCaptureSeconds
+                                     ?? ClaudeTabsCaptureInterval.fallback)
+                         })
     }
 
     /// Last snapshot before quitting, so a crash-free quit never loses the most recent tab layout.

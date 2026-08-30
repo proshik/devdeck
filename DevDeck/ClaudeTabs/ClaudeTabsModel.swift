@@ -18,7 +18,25 @@ enum SnapshotPolicy {
 enum CaptureOutcome: Equatable, Sendable {
     case notRunning
     case failed(String)
-    case entries([ClaudeTabEntry])
+    case entries([ClaudeTabEntry], signature: [String])
+    /// The open tab set matches the previous capture's signature exactly — nothing to resolve, and
+    /// nothing to apply.
+    case unchanged
+}
+
+/// The capture interval, kept inside sane bounds.
+///
+/// `config.json` is hand-edited and both ends are real hazards: 0 would spin the timer, and a
+/// day would leave the feature silently off. Clamping beats rejecting — a nonsense value should
+/// still leave a working app.
+enum ClaudeTabsCaptureInterval {
+    static let minimum = 5
+    static let maximum = 300
+    static let fallback = 15
+
+    static func clamped(_ seconds: Int) -> TimeInterval {
+        TimeInterval(min(max(seconds, minimum), maximum))
+    }
 }
 
 /// Ghostty, as an application on this Mac.
@@ -57,14 +75,24 @@ final class ClaudeTabsModel {
     private let defaults: UserDefaults
     private let isGhosttyRunning: () -> Bool
     private var isEnabled: () -> Bool
+    private var captureInterval: () -> TimeInterval = {
+        ClaudeTabsCaptureInterval.clamped(ClaudeTabsCaptureInterval.fallback)
+    }
     private var timer: Timer?
     /// Set for the duration of a restore — including the delay it waits out before touching
-    /// Ghostty — so the once-a-minute timer cannot capture a half-restored tab set and overwrite
+    /// Ghostty — so the automatic capture cannot capture a half-restored tab set and overwrite
     /// the snapshot with it. Also what keeps a second trigger (the launch observer firing twice, a
     /// "Restore now" press mid-restore) from racing the first (see `runRestore`).
     private var isRestoring = false
-    /// So the "refusing to capture" line is logged once per state change, not once a minute.
+    /// So the "refusing to capture" line is logged once per state change, not on every tick.
     private var loggedCaptureHold = false
+    /// The signature of the last APPLIED capture — `nil` means "treat the next tick as a fresh
+    /// capture", which is also why it is reset on `.failed` and `.notRunning`: a read that didn't
+    /// produce a tab set must not be mistaken for an unchanged one.
+    private var lastSignature: [String]?
+    /// Throttles the automatic timer path only; `captureNow()` is an explicit user action and
+    /// `captureBeforeShutdown()` has its own 30-second freshness rule — neither goes through `tick`.
+    private var lastCaptureAt: Date?
 
     init(reader: GhosttyTabReading = LiveGhosttyTabReader(),
          index: TranscriptIndexing = LiveTranscriptIndex(),
@@ -85,11 +113,16 @@ final class ClaudeTabsModel {
         self.snapshot = store.load()
     }
 
-    func start(isEnabled: @escaping () -> Bool) {
+    func start(isEnabled: @escaping () -> Bool,
+               captureInterval: @escaping () -> TimeInterval) {
         self.isEnabled = isEnabled
+        self.captureInterval = captureInterval
 
-        timer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
-            Task { @MainActor in await self?.captureIfEnabled() }
+        // A short fixed tick that mostly does nothing, rather than a timer scheduled at the
+        // configured interval: it lets a hand-edited config.json take effect immediately, and a
+        // date comparison every 5s costs nothing next to what it guards.
+        timer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
+            Task { @MainActor in await self?.tick() }
         }
 
         let center = NSWorkspace.shared.notificationCenter
@@ -141,11 +174,22 @@ final class ClaudeTabsModel {
         Task { @MainActor in await capture(explicit: true) }
     }
 
-    /// The automatic path — the once-a-minute timer. Respects the feature flag, is suppressed while
-    /// a restore is in flight, and never overwrites a snapshot that is still owed a restore.
+    /// The automatic path — gated by the configured interval. Respects the feature flag, is
+    /// suppressed while a restore is in flight, and never overwrites a snapshot that is still owed
+    /// a restore.
     func captureIfEnabled() async {
         guard isEnabled(), !isRestoring, mayOverwriteSnapshot() else { return }
         await capture(explicit: false)
+    }
+
+    /// Runs every 5 seconds; does real work only once `captureInterval()` has actually elapsed.
+    /// Reading the interval here rather than baking it into the timer's own schedule is what lets a
+    /// hand-edited `config.json` take effect immediately.
+    private func tick() async {
+        let elapsed = Date().timeIntervalSince(lastCaptureAt ?? .distantPast)
+        guard elapsed >= captureInterval() else { return }
+        lastCaptureAt = Date()
+        await captureIfEnabled()
     }
 
     /// The last capture before the machine — or the app — goes away: `willPowerOffNotification`
@@ -170,7 +214,7 @@ final class ClaudeTabsModel {
                 + "\(Int(Self.shutdownFreshness)) s old, keeping it as it is")
             return
         }
-        apply(Self.collect(reader: reader, index: index), explicit: false)
+        apply(Self.collect(reader: reader, index: index, previousSignature: lastSignature), explicit: false)
     }
 
     /// THE INVARIANT: a snapshot from a previous boot is the only copy of the user's tabs and must
@@ -205,32 +249,48 @@ final class ClaudeTabsModel {
     /// Reads Ghostty and resolves the sessions **off the main actor**, then applies the result on
     /// it. The work behind `collect` forks `pgrep` and `osascript` and reads whole transcripts —
     /// on this machine 1.1 GB of them, with the active session's file changing mtime constantly —
-    /// which is not something a menu-bar app may do to its own UI thread once a minute. Same
+    /// which is not something a menu-bar app may do to its own UI thread on every capture. Same
     /// treatment as `ProcessManager.refreshVMDisk` gives its blocking probes.
     private func capture(explicit: Bool) async {
         let reader = self.reader
         let index = self.index
+        let previousSignature = lastSignature
         let outcome = await Task.detached(priority: .utility) {
-            Self.collect(reader: reader, index: index)
+            Self.collect(reader: reader, index: index, previousSignature: previousSignature)
         }.value
         apply(outcome, explicit: explicit)
     }
 
+    /// Identity of the open tab set. Two reads with the same signature resolve to the same
+    /// entries, so the expensive transcript pass can be skipped outright.
+    nonisolated static func signature(of tabs: [GhosttyTab]) -> [String] {
+        tabs.map { "\($0.windowID)\t\($0.index)\t\($0.title)\t\($0.workingDirectory)" }
+    }
+
     /// Read + resolve, with nothing actor-bound in it, so the async path and the synchronous
     /// shutdown path run exactly the same code.
-    private nonisolated static func collect(reader: GhosttyTabReading,
-                                            index: TranscriptIndexing) -> CaptureOutcome {
+    ///
+    /// `previousSignature` is the signature of the last APPLIED capture; a `.tabs` read whose
+    /// signature matches it exactly skips the transcript pass entirely — that pass is the
+    /// expensive part (whole transcripts re-read on every mtime change), while enumerating the
+    /// tabs themselves is one cheap AppleScript round trip.
+    nonisolated static func collect(reader: GhosttyTabReading,
+                                    index: TranscriptIndexing,
+                                    previousSignature: [String]?) -> CaptureOutcome {
         switch reader.readTabs() {
         case .notRunning:
             return .notRunning
         case let .failed(message):
             return .failed(message)
         case let .tabs(tabs):
+            let signature = Self.signature(of: tabs)
+            guard signature != previousSignature else { return .unchanged }
             var titles: [String: [TranscriptTitle]] = [:]
             for directory in Set(tabs.map(\.workingDirectory)) {
                 titles[directory] = index.titles(forWorkingDirectory: directory)
             }
-            return .entries(SessionResolver.resolve(tabs: tabs, titlesByDirectory: titles))
+            return .entries(SessionResolver.resolve(tabs: tabs, titlesByDirectory: titles),
+                            signature: signature)
         }
     }
 
@@ -241,10 +301,19 @@ final class ClaudeTabsModel {
             // Silent on the automatic path — a Mac with no terminal open is not an error. Reported
             // when the user pressed the button, because then it is the answer to their question.
             if explicit { lastError = L10n.claudeTabsGhosttyNotRunning }
+            // A read that produced no tab set at all must not be mistaken for "unchanged" — the
+            // next tick has to do real work.
+            lastSignature = nil
         case let .failed(message):
             // Always surfaced: this is Automation being denied, and it is invisible everywhere else.
             lastError = L10n.claudeTabsCaptureFailed(message)
-        case let .entries(entries):
+            lastSignature = nil
+        case .unchanged:
+            // Nothing resolved, nothing to persist, nothing observable changes — this is the whole
+            // point: the transcript pass already didn't run, and `apply` doesn't touch the store or
+            // any @Observable property either.
+            break
+        case let .entries(entries, signature):
             guard SnapshotPolicy.shouldPersist(entries) else {
                 DiagnosticLog.shared.log("ClaudeTabs: not writing a snapshot — no open tab resolved "
                     + "to a session, the previous snapshot stands")
@@ -256,6 +325,7 @@ final class ClaudeTabsModel {
                 try store.save(fresh)
                 snapshot = fresh
                 lastError = nil
+                lastSignature = signature
             } catch {
                 lastError = error.localizedDescription
                 DiagnosticLog.shared.log("ClaudeTabs: snapshot write failed — \(error.localizedDescription)",

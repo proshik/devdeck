@@ -11,6 +11,9 @@ struct Settings: Codable, Equatable {
     var autoUpdateEnabled: Bool
     /// Restore the Claude Code tabs of a previous boot when Ghostty starts.
     var claudeTabsRestore: Bool
+    /// How often the automatic capture may run, in seconds. Clamped by `ClaudeTabsCaptureInterval`
+    /// before use — this field only carries whatever a hand-edited config.json says.
+    var claudeTabsCaptureSeconds: Int
     /// Host side: run and announce the `gost` proxy on this machine.
     var proxyShareEnabled: Bool
     /// Client side: browse the LAN for announced proxies.
@@ -43,7 +46,8 @@ struct Settings: Codable, Equatable {
          activeProxyName: String? = nil, activeProxyUsername: String? = nil,
          activeProxyHost: String? = nil, activeProxyPort: Int? = nil,
          activeProxyAuthRequired: Bool = false, activeProxyLANPrefix: String? = nil,
-         activeRemoteProxyID: UUID? = nil, claudeTabsRestore: Bool = false) {
+         activeRemoteProxyID: UUID? = nil, claudeTabsRestore: Bool = false,
+         claudeTabsCaptureSeconds: Int = 15) {
         self.vmMemoryMonitoring = vmMemoryMonitoring
         self.minikubeMemoryMonitoring = minikubeMemoryMonitoring
         self.hostMemoryMonitoring = hostMemoryMonitoring
@@ -60,13 +64,15 @@ struct Settings: Codable, Equatable {
         self.activeProxyLANPrefix = activeProxyLANPrefix
         self.activeRemoteProxyID = activeRemoteProxyID
         self.claudeTabsRestore = claudeTabsRestore
+        self.claudeTabsCaptureSeconds = claudeTabsCaptureSeconds
     }
 
     enum CodingKeys: String, CodingKey {
         case vmMemoryMonitoring, minikubeMemoryMonitoring, hostMemoryMonitoring, globalHotkeyEnabled,
              clusterHealthMonitoring, autoUpdateEnabled, proxyShareEnabled, proxyDiscoveryEnabled,
              activeProxyName, activeProxyUsername, activeProxyHost, activeProxyPort,
-             activeProxyAuthRequired, activeProxyLANPrefix, activeRemoteProxyID, claudeTabsRestore
+             activeProxyAuthRequired, activeProxyLANPrefix, activeRemoteProxyID, claudeTabsRestore,
+             claudeTabsCaptureSeconds
     }
 
     init(from decoder: Decoder) throws {
@@ -87,6 +93,7 @@ struct Settings: Codable, Equatable {
         activeProxyLANPrefix = try c.decodeIfPresent(String.self, forKey: .activeProxyLANPrefix)
         activeRemoteProxyID = try c.decodeIfPresent(UUID.self, forKey: .activeRemoteProxyID)
         claudeTabsRestore = try c.decodeIfPresent(Bool.self, forKey: .claudeTabsRestore) ?? false
+        claudeTabsCaptureSeconds = try c.decodeIfPresent(Int.self, forKey: .claudeTabsCaptureSeconds) ?? 15
     }
 }
 
