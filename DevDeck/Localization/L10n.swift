@@ -602,6 +602,19 @@ enum L10n {
           "Ghostty отклонил запрос — проверь разрешение Automation в «Системных настройках › Конфиденциальность».")
     }
 
+    // MARK: - Claude tabs
+
+    static var claudeTabsSection: String { t("Claude tabs", "Вкладки Claude") }
+    static var claudeTabsRestoreToggle: String {
+        t("Restore tabs after a restart", "Восстанавливать вкладки после перезагрузки")
+    }
+    static var claudeTabsCaptureNow: String { t("Capture now", "Снять снимок") }
+    static var claudeTabsRestoreNow: String { t("Restore now", "Восстановить сейчас") }
+    static var claudeTabsNoSnapshot: String { t("No snapshot yet", "Снимка пока нет") }
+    static func claudeTabsSnapshotState(_ count: Int, _ time: String) -> String {
+        t("\(count) tab(s) · \(time)", "вкладок: \(count) · \(time)")
+    }
+
     // MARK: - Duplicate
 
     static var duplicate: String { t("Duplicate", "Дублировать") }

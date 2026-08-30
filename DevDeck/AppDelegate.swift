@@ -50,7 +50,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Start Sparkle with the persisted auto-update preference; populates the indicator when off.
         updateController.configure(autoUpdateEnabled: store.config.settings.autoUpdateEnabled)
         menuBar = MenuBarController(store: store, manager: manager, appModel: appModel,
-                                    updateController: updateController, proxyManager: proxyManager)
+                                    updateController: updateController, proxyManager: proxyManager,
+                                    claudeTabs: claudeTabs)
 
         // Global hotkey (⌃⌥D) toggles the popover; enabled per the persisted setting.
         HotKeyManager.shared.onTrigger = { [weak menuBar] in menuBar?.toggle() }
