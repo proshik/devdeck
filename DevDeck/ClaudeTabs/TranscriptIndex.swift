@@ -34,16 +34,26 @@ enum TranscriptTitleScanner {
 
 /// Titles known for a working directory — behind a protocol so the resolver is tested with a fake.
 protocol TranscriptIndexing: Sendable {
-    /// Newest transcript first.
+    /// Newest transcript first — and that is a contract, not a convenience: `SessionResolver`
+    /// resolves a tie between two sessions with the same title by taking the first candidate, so
+    /// the ordering here is the whole of "the most recent session wins".
     func titles(forWorkingDirectory workingDirectory: String) -> [TranscriptTitle]
 }
 
-/// Scans `~/.claude/projects`. Results are cached per (file, mtime), so only the first pass over a
-/// large transcript is expensive and the once-a-minute snapshot stays cheap.
+/// Scans `~/.claude/projects`. Two caches keep the once-a-minute snapshot cheap: titles per
+/// (file, mtime), so only the first pass over a large transcript is expensive, and project
+/// directories per working directory, so the full-corpus fallback below runs at most once per
+/// directory per app run.
 final class LiveTranscriptIndex: TranscriptIndexing, @unchecked Sendable {
     private let projectsRoot: URL
     private let lock = NSLock()
     private var cache: [URL: (modifiedAt: Date, title: TranscriptTitle?)] = [:]
+    /// Working directory → its project directory, **including the misses**. A negative result is
+    /// the expensive one to recompute: a plain shell tab in `~/Downloads` has no project directory
+    /// and never will, and without this entry every capture would read the whole corpus again
+    /// looking for it. `URL?` values with a `[String: URL?]` subscript: "no entry" and "an entry
+    /// saying nothing matched" are different answers here.
+    private var directories: [String: URL?] = [:]
 
     init(projectsRoot: URL = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".claude/projects")) {
@@ -60,12 +70,44 @@ final class LiveTranscriptIndex: TranscriptIndexing, @unchecked Sendable {
             .sorted { $0.modifiedAt > $1.modifiedAt }
     }
 
-    /// The slug is the fast path. If Claude ever changes how it names project directories, fall back
-    /// to scanning every project and matching the `cwd` its transcripts record — slower, but the
-    /// feature degrades into a delay rather than into silence.
+    /// The slug is the fast path; the fallback below reads **every** transcript in
+    /// `~/.claude/projects` — on this machine 711 files and 1.1 GB. It has to be answered once per
+    /// working directory and then remembered, misses included: a tab sitting in a directory Claude
+    /// has never seen (a plain shell, or a session started from a subdirectory) is exactly the
+    /// input that reaches the fallback, and it would otherwise do that once a minute forever.
+    ///
+    /// The lock is never held across a file read, same discipline as the title cache: take it to
+    /// look, drop it to work, take it again to record.
     private func projectDirectory(for workingDirectory: String) -> URL? {
         let bySlug = projectsRoot.appendingPathComponent(ClaudeProjectSlug.slug(for: workingDirectory))
-        if FileManager.default.fileExists(atPath: bySlug.path) { return bySlug }
+        lock.lock()
+        let cached = directories[workingDirectory]
+        lock.unlock()
+
+        if let cached {
+            if let directory = cached { return directory }
+            // A remembered miss, re-checked against the slug only — one `stat`, no corpus scan.
+            // That is what lets a session started in a brand-new directory resolve later in the
+            // same app run, without ever paying for the fallback twice.
+            guard FileManager.default.fileExists(atPath: bySlug.path) else { return nil }
+            remember(bySlug, for: workingDirectory)
+            return bySlug
+        }
+
+        let resolved = FileManager.default.fileExists(atPath: bySlug.path) ? bySlug : scan(for: workingDirectory)
+        remember(resolved, for: workingDirectory)
+        return resolved
+    }
+
+    private func remember(_ directory: URL?, for workingDirectory: String) {
+        lock.lock()
+        directories[workingDirectory] = directory
+        lock.unlock()
+    }
+
+    /// The fallback: if Claude ever changes how it names project directories, match on the `cwd`
+    /// its transcripts record — slower, but the feature degrades into a delay rather than silence.
+    private func scan(for workingDirectory: String) -> URL? {
         guard let projects = try? FileManager.default.contentsOfDirectory(
                 at: projectsRoot, includingPropertiesForKeys: nil) else { return nil }
         let needle = "\"cwd\":\"\(workingDirectory)\""
