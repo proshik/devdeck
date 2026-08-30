@@ -43,6 +43,7 @@ struct MainWindowView: View {
                     VStack(spacing: 2) {
                         pinnedButton(L10n.proxy, icon: "network", selection: .proxy)
                         pinnedButton(L10n.cleanup, icon: "trash", selection: .cleanup)
+                        pinnedButton(L10n.claudeTabsSection, icon: "macwindow.on.rectangle", selection: .claudeTabs)
                         pinnedButton(L10n.settings, icon: "gearshape", selection: .settings)
                     }
                     .padding(8)
@@ -89,6 +90,8 @@ struct MainWindowView: View {
             ProxyShareEditorView(share: store.config.proxy)
         case .cleanup:
             CleanupView()
+        case .claudeTabs:
+            ClaudeTabsView()
         case nil:
             placeholder
         }

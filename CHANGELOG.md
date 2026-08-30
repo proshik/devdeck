@@ -19,6 +19,17 @@ versioning follows [SemVer](https://semver.org/).
   keeps its own divider above the pinned Proxy/Settings buttons).
 
 ### Added
+- **Claude Code tabs restored after a reboot.** With "Restore tabs after a restart" enabled in
+  Settings, DevDeck watches Ghostty's open tabs and, on a timer, captures each one's working
+  directory and — by matching the tab title against the project's transcript files — the Claude
+  Code session it belongs to, where one can be resolved. On the first Ghostty launch after a real
+  reboot (told apart from an ordinary Ghostty restart by comparing the machine's boot time), each
+  captured tab reopens in its directory over AppleScript and runs `claude --resume <id>` when a
+  session was found; a tab whose session could not be resolved still comes back, as a plain shell
+  in the right directory, rather than being dropped. The popover's new "Claude tabs" section shows
+  the last snapshot at a glance with "Capture now" / "Restore now" buttons, and a matching page in
+  the main window lists every tab with its directory and whether it will resume its session or
+  restore the directory only.
 - **What the metrics mean.** Every cell in the popover header (Memory, Swap, Cluster, VM colima,
   VM minikube, Pressure, VM disk, Swap rate, CPU load) now carries a tooltip explaining what the
   figure measures, where it comes from and what a bad value means; the same texts sit under
