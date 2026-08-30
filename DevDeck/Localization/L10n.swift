@@ -614,6 +614,13 @@ enum L10n {
     static func claudeTabsSnapshotState(_ count: Int, _ time: String) -> String {
         t("\(count) tab(s) · \(time)", "вкладок: \(count) · \(time)")
     }
+    static var claudeTabsIntro: String {
+        t("What DevDeck would reopen in Ghostty after a restart. A tab whose Claude session could not be identified still comes back — as a shell in its directory.",
+          "Что DevDeck вернёт в Ghostty после перезагрузки. Вкладка, чью сессию Claude опознать не удалось, всё равно вернётся — шеллом в своём каталоге.")
+    }
+    static func claudeTabsCapturedAt(_ when: String) -> String {
+        t("Snapshot taken \(when)", "Снимок снят \(when)")
+    }
     static var claudeTabsColumnTitle: String { t("Tab", "Вкладка") }
     static var claudeTabsColumnDirectory: String { t("Directory", "Каталог") }
     static var claudeTabsColumnSession: String { t("Session", "Сессия") }
