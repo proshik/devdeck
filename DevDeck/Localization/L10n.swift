@@ -597,6 +597,11 @@ enum L10n {
     static var copy: String { t("Copy", "Копировать") }
     static var copied: String { t("Copied", "Скопировано") }
 
+    static var claudeTabsRestoreFailed: String {
+        t("Ghostty refused the request — check Automation permission in System Settings › Privacy & Security.",
+          "Ghostty отклонил запрос — проверь разрешение Automation в «Системных настройках › Конфиденциальность».")
+    }
+
     // MARK: - Duplicate
 
     static var duplicate: String { t("Duplicate", "Дублировать") }
