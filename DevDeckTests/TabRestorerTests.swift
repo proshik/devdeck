@@ -67,9 +67,9 @@ final class TabRestorerTests: XCTestCase {
     func testRestorerRunsOneScriptPerAction() async {
         let runner = FakeAppleScriptRunner()
         let restorer = TabRestorer(runner: runner, sessions: FakeBackgroundSessions(ids: []), stepDelay: .zero)
-        let ok = await restorer.restore([.inputText(cwd: "/tmp/a", sessionID: "s1"),
-                                         .newTab(cwd: "/tmp/b", sessionID: nil)])
-        XCTAssertTrue(ok)
+        let outcome = await restorer.restore([.inputText(cwd: "/tmp/a", sessionID: "s1"),
+                                              .newTab(cwd: "/tmp/b", sessionID: nil)])
+        XCTAssertEqual(outcome, RestoreOutcome(succeeded: 2, failed: 0))
         XCTAssertEqual(runner.calls.count, 2)
         XCTAssertTrue(runner.calls[0].contains { $0.contains("input text") })
         XCTAssertTrue(runner.calls[1].contains("new tab with configuration cfg"))
@@ -78,9 +78,9 @@ final class TabRestorerTests: XCTestCase {
     func testRestorerReportsFailure() async {
         let runner = FakeAppleScriptRunner()
         runner.result = false
-        let ok = await TabRestorer(runner: runner, sessions: FakeBackgroundSessions(ids: []), stepDelay: .zero)
+        let outcome = await TabRestorer(runner: runner, sessions: FakeBackgroundSessions(ids: []), stepDelay: .zero)
             .restore([.newTab(cwd: "/tmp/a", sessionID: nil)])
-        XCTAssertFalse(ok)
+        XCTAssertEqual(outcome, RestoreOutcome(succeeded: 0, failed: 1))
     }
 
     /// One failure must not end the restore. Ghostty's spurious errors are real, and a
@@ -89,12 +89,13 @@ final class TabRestorerTests: XCTestCase {
     func testRestorerContinuesPastAFailedAction() async {
         let runner = FakeAppleScriptRunner()
         runner.failingCalls = [1]
-        let ok = await TabRestorer(runner: runner, sessions: FakeBackgroundSessions(ids: []), stepDelay: .zero)
+        let outcome = await TabRestorer(runner: runner, sessions: FakeBackgroundSessions(ids: []), stepDelay: .zero)
             .restore([.newTab(cwd: "/tmp/a", sessionID: "s1"),
                       .newTab(cwd: "/tmp/b", sessionID: "s2"),
                       .newTab(cwd: "/tmp/c", sessionID: "s3")])
 
-        XCTAssertFalse(ok, "a failed action must still be reported")
+        XCTAssertEqual(outcome, RestoreOutcome(succeeded: 2, failed: 1),
+                       "a failed action must still be counted, and must not stop the rest")
         XCTAssertEqual(runner.calls.count, 3, "the restore stopped at the first failure")
         XCTAssertTrue(runner.calls[2].contains { $0.contains("/tmp/c") },
                       "the last tab was never attempted")
