@@ -14,7 +14,7 @@ final class TabRestorerTests: XCTestCase {
 
     func testCommandResumesTheSession() {
         XCTAssertEqual(RestoreCommand.text(cwd: "/tmp/a", sessionID: "s1"),
-                       "cd '/tmp/a' && claude --resume s1")
+                       "cd '/tmp/a' && claude --resume 's1'")
     }
 
     func testCommandWithoutSessionOnlyChangesDirectory() {
@@ -24,6 +24,14 @@ final class TabRestorerTests: XCTestCase {
     func testCommandQuotesAwkwardPaths() {
         XCTAssertEqual(RestoreCommand.text(cwd: "/tmp/it's here", sessionID: nil),
                        #"cd '/tmp/it'\''s here'"#)
+    }
+
+    /// The session id is read from a transcript file with a deliberately lenient parser, so it is
+    /// untrusted input that ends up typed into a live shell and executed. It gets the same quoting
+    /// the working directory does.
+    func testCommandQuotesTheSessionID() {
+        XCTAssertEqual(RestoreCommand.text(cwd: "/tmp/a", sessionID: "s1; rm -rf ~"),
+                       #"cd '/tmp/a' && claude --resume 's1; rm -rf ~'"#)
     }
 
     /// AppleScript has no "\n" escape — the newline has to be concatenated as `linefeed`,
@@ -43,6 +51,12 @@ final class TabRestorerTests: XCTestCase {
     func testInputTextScriptTargetsTheFrontWindow() {
         let args = RestoreScript.inputTextArgs(text: "cd '/tmp/a'")
         XCTAssertTrue(args.contains { $0.contains("focused terminal of selected tab of front window") })
+    }
+
+    func testInputTextScriptAppendsLinefeedNotBackslashN() {
+        let args = RestoreScript.inputTextArgs(text: "cd '/tmp/a'")
+        XCTAssertTrue(args.contains { $0.contains("& linefeed") })
+        XCTAssertFalse(args.contains { $0.contains("\\n\"") })
     }
 
     func testRestorerRunsOneScriptPerAction() async {
