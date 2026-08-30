@@ -238,20 +238,32 @@ final class ClaudeTabsModel {
     /// denied — therefore blocks captures until a restore resolves it. That is the intended
     /// trade-off: an older snapshot restored late beats a fresh snapshot that erased the old one.
     private func mayOverwriteSnapshot() -> Bool {
-        guard let stored = store.load() else { return true }
-        let currentBoot = bootTime.bootTime()
-        let restored = defaults.object(forKey: Self.restoredBootTimeKey) as? Date
-        guard !BootInstant.same(stored.bootTime, currentBoot),
-              !BootInstant.same(currentBoot, restored) else {
+        let mayOverwrite = Self.mayOverwrite(stored: store.load(), currentBoot: bootTime.bootTime(),
+                                             restoredBootTime: defaults.object(forKey: Self.restoredBootTimeKey) as? Date)
+        if mayOverwrite {
             loggedCaptureHold = false
-            return true
-        }
-        if !loggedCaptureHold {
+        } else if !loggedCaptureHold {
             loggedCaptureHold = true
             DiagnosticLog.shared.log("ClaudeTabs: holding the snapshot — it is from an earlier boot "
                 + "and has not been restored yet")
         }
-        return false
+        return mayOverwrite
+    }
+
+    /// Read-only mirror of the invariant above, for the UI: true while a stored snapshot is from
+    /// an earlier, not-yet-restored boot and so is the last copy of the user's tabs — the case
+    /// "Capture now" must confirm before overwriting. Built on the SAME condition
+    /// `mayOverwriteSnapshot()` uses, so the gate and the warning can never drift apart.
+    var isHoldingEarlierBootSnapshot: Bool {
+        !Self.mayOverwrite(stored: store.load(), currentBoot: bootTime.bootTime(),
+                           restoredBootTime: defaults.object(forKey: Self.restoredBootTimeKey) as? Date)
+    }
+
+    private static func mayOverwrite(stored: ClaudeTabsSnapshot?, currentBoot: Date,
+                                     restoredBootTime: Date?) -> Bool {
+        guard let stored else { return true }
+        return BootInstant.same(stored.bootTime, currentBoot)
+            || BootInstant.same(currentBoot, restoredBootTime)
     }
 
     /// Reads Ghostty and resolves the sessions **off the main actor**, then applies the result on

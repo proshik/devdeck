@@ -249,6 +249,36 @@ final class ClaudeTabsModelTests: XCTestCase {
         XCTAssertNil(store.load())
     }
 
+    // MARK: - Holding an earlier boot's snapshot (UI confirmation gate)
+
+    /// The exact condition `mayOverwriteSnapshot()` uses to hold the snapshot, mirrored read-only
+    /// for the UI: `ClaudeTabsSectionView`/`ClaudeTabsView` confirm before "Capture now" when this
+    /// is true, since that press would otherwise silently destroy the only copy of the pre-reboot
+    /// tabs.
+    func testIsHoldingEarlierBootSnapshotWhileUnrestored() async throws {
+        let defaults = makeDefaults()
+        let (model, _, _) = try makeModel(defaults: defaults)
+
+        XCTAssertTrue(model.isHoldingEarlierBootSnapshot,
+                      "an earlier boot's un-restored snapshot is the only copy of the user's tabs")
+    }
+
+    func testIsHoldingEarlierBootSnapshotIsFalseOnceRestored() async throws {
+        let defaults = makeDefaults()
+        defaults.set(currentBoot, forKey: restoredBootTimeKey)
+        let (model, _, _) = try makeModel(defaults: defaults)
+
+        XCTAssertFalse(model.isHoldingEarlierBootSnapshot,
+                       "once this boot's restore is resolved there is nothing left to protect")
+    }
+
+    func testIsHoldingEarlierBootSnapshotIsFalseWithNoSnapshotAtAll() async throws {
+        let defaults = makeDefaults()
+        let (model, _, _) = try makeModel(emptyStore: true, defaults: defaults)
+
+        XCTAssertFalse(model.isHoldingEarlierBootSnapshot, "nothing to lose means nothing to confirm")
+    }
+
     // MARK: - Reporting
 
     /// "Ghostty is not running" is the normal state of a Mac with no terminal open: silent on the
