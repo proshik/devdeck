@@ -212,6 +212,13 @@ final class CommandStore {
         persist(updated)
     }
 
+    func setClaudeTabsRestore(_ on: Bool) {
+        guard config.settings.claudeTabsRestore != on else { return }
+        var updated = config
+        updated.settings.claudeTabsRestore = on
+        persist(updated)
+    }
+
     func setMinikubeMonitoring(_ on: Bool) {
         guard config.settings.minikubeMemoryMonitoring != on else { return }
         var updated = config

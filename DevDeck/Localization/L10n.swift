@@ -597,6 +597,73 @@ enum L10n {
     static var copy: String { t("Copy", "Копировать") }
     static var copied: String { t("Copied", "Скопировано") }
 
+    static var claudeTabsRestoreFailed: String {
+        t("Ghostty refused the request — check Automation permission in System Settings › Privacy & Security.",
+          "Ghostty отклонил запрос — проверь разрешение Automation в «Системных настройках › Конфиденциальность».")
+    }
+
+    // MARK: - Claude tabs
+
+    static var claudeTabsSection: String { t("Claude tabs", "Вкладки Claude") }
+    static var claudeTabsRestoreToggle: String {
+        t("Restore tabs after a restart", "Восстанавливать вкладки после перезагрузки")
+    }
+    static var claudeTabsCaptureNow: String { t("Capture now", "Снять снимок") }
+    static var claudeTabsRestoreNow: String { t("Restore now", "Восстановить сейчас") }
+    static var claudeTabsNoSnapshot: String { t("No snapshot yet", "Снимка пока нет") }
+    static func claudeTabsSnapshotState(_ count: Int, _ time: String) -> String {
+        t("\(count) tab(s) · \(time)", "вкладок: \(count) · \(time)")
+    }
+    static var claudeTabsIntro: String {
+        t("What DevDeck would reopen in Ghostty after a restart. A tab whose Claude session could not be identified still comes back — as a shell in its directory.",
+          "Что DevDeck вернёт в Ghostty после перезагрузки. Вкладка, чью сессию Claude опознать не удалось, всё равно вернётся — шеллом в своём каталоге.")
+    }
+    static func claudeTabsCapturedAt(_ when: String) -> String {
+        t("Snapshot taken \(when)", "Снимок снят \(when)")
+    }
+    static var claudeTabsColumnTitle: String { t("Tab", "Вкладка") }
+    static var claudeTabsColumnDirectory: String { t("Directory", "Каталог") }
+    static var claudeTabsColumnSession: String { t("Session", "Сессия") }
+    static var claudeTabsSessionFound: String { t("resumable", "восстановится") }
+    static var claudeTabsDirectoryOnly: String { t("directory only", "только каталог") }
+
+    /// Shown only for the explicit "Capture now": on the automatic path a Mac with no terminal
+    /// open is the normal state of the world, not something to complain about once a minute.
+    static var claudeTabsGhosttyNotRunning: String {
+        t("Ghostty is not running — there are no tabs to capture.",
+          "Ghostty не запущен — снимать нечего.")
+    }
+    /// Automation permission not granted is by far the likeliest cause, so the string names where
+    /// to fix it; osascript's own words follow, because "-1743" on its own helps nobody.
+    static func claudeTabsCaptureFailed(_ detail: String) -> String {
+        t("Could not read Ghostty's tabs — check Automation permission in System Settings › Privacy & Security. \(detail)",
+          "Не удалось прочитать вкладки Ghostty — проверь разрешение Automation в «Системных настройках › Конфиденциальность». \(detail)")
+    }
+    static var claudeTabsNothingResolved: String {
+        t("None of the open tabs could be tied to a Claude session — the previous snapshot was kept.",
+          "Ни одну открытую вкладку не удалось связать с сессией Claude — прежний снимок сохранён.")
+    }
+    static var claudeTabsRestoreInProgress: String {
+        t("A restore is running — try again once the tabs are back.",
+          "Идёт восстановление — попробуй ещё раз, когда вкладки вернутся.")
+    }
+    static var claudeTabsNothingToRestore: String {
+        t("Nothing to restore — no snapshot has been captured yet.",
+          "Восстанавливать нечего — снимок ещё не снят.")
+    }
+    /// Shown before "Capture now" overwrites a snapshot from a boot that has not been restored
+    /// yet — that snapshot is the user's only copy of the pre-reboot tabs.
+    static var claudeTabsOverwriteConfirmTitle: String {
+        t("Replace the saved tabs?", "Заменить сохранённые вкладки?")
+    }
+    static var claudeTabsOverwriteConfirmMessage: String {
+        t("This snapshot is from before the last restart and has not been restored yet. Capturing now replaces it — the previous tabs will be gone for good.",
+          "Этот снимок сделан до последней перезагрузки и ещё не был восстановлен. Снимок сейчас заменит его — прежние вкладки будут потеряны безвозвратно.")
+    }
+    static var claudeTabsOverwriteConfirmButton: String {
+        t("Replace", "Заменить")
+    }
+
     // MARK: - Duplicate
 
     static var duplicate: String { t("Duplicate", "Дублировать") }
