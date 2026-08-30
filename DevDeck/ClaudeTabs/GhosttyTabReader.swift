@@ -29,26 +29,36 @@ enum GhosttyTabParser {
     }
 }
 
+/// What one attempt to read Ghostty's tabs produced.
+///
+/// The three cases exist because two of them used to be one `nil`, and the spec asks for opposite
+/// treatment: "not running" is the ordinary state of a Mac with no terminal open and stays silent
+/// on the automatic path, while a failure — in practice Automation permission not granted — has to
+/// reach the user, or "Capture now" is a button that does nothing and explains nothing.
+enum GhosttyTabsResult: Equatable, Sendable {
+    case notRunning
+    /// The reason, as osascript told it. Already logged; carried here so the UI can show it too.
+    case failed(String)
+    case tabs([GhosttyTab])
+}
+
 /// Reads the open tabs — behind a protocol so the snapshot logic is tested without Ghostty.
 protocol GhosttyTabReading: Sendable {
-    /// nil when Ghostty is not running, or when AppleScript failed (Automation not granted yet).
-    func readTabs() -> [GhosttyTab]?
+    func readTabs() -> GhosttyTabsResult
 }
 
 /// Real implementation over `osascript`. `ghostty +new-window` is unsupported on macOS, so the
 /// AppleScript dictionary is the only way in — and it is the same door `AppleScriptTabLauncher`
 /// already uses (`Process/TerminalCommandRunner.swift:100`).
 struct LiveGhosttyTabReader: GhosttyTabReading {
-    func readTabs() -> [GhosttyTab]? {
+    func readTabs() -> GhosttyTabsResult {
         let running = !(ProcessTree.run("/usr/bin/pgrep", ["-x", "ghostty"]) ?? "")
             .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        guard running else { return nil }
-
-        guard let output = runScript() else { return nil }
-        return GhosttyTabParser.parse(output)
+        guard running else { return .notRunning }
+        return runScript()
     }
 
-    private func runScript() -> String? {
+    private func runScript() -> GhosttyTabsResult {
         let output = Pipe(), errors = Pipe()
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
@@ -61,7 +71,7 @@ struct LiveGhosttyTabReader: GhosttyTabReading {
         } catch {
             DiagnosticLog.shared.log("ClaudeTabs: osascript failed to start — \(error.localizedDescription)",
                                      level: .error)
-            return nil
+            return .failed(error.localizedDescription)
         }
 
         // Drain both pipes BEFORE waiting: osascript blocks writing into a full pipe buffer, and a
@@ -72,9 +82,13 @@ struct LiveGhosttyTabReader: GhosttyTabReading {
         process.waitUntilExit()
         guard process.terminationStatus == 0 else {
             DiagnosticLog.shared.log("ClaudeTabs: reading tabs failed — \(errorText)", level: .error)
-            return nil
+            let detail = errorText.isEmpty ? "osascript exited with \(process.terminationStatus)" : errorText
+            return .failed(detail)
         }
-        return String(data: data, encoding: .utf8)
+        guard let text = String(data: data, encoding: .utf8) else {
+            return .failed("the tab list was not valid UTF-8")
+        }
+        return .tabs(GhosttyTabParser.parse(text))
     }
 
     /// Prints one line per tab. `tab` and `linefeed` are AppleScript's own constants — the script

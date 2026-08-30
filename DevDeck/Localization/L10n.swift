@@ -620,6 +620,31 @@ enum L10n {
     static var claudeTabsSessionFound: String { t("resumable", "восстановится") }
     static var claudeTabsDirectoryOnly: String { t("directory only", "только каталог") }
 
+    /// Shown only for the explicit "Capture now": on the automatic path a Mac with no terminal
+    /// open is the normal state of the world, not something to complain about once a minute.
+    static var claudeTabsGhosttyNotRunning: String {
+        t("Ghostty is not running — there are no tabs to capture.",
+          "Ghostty не запущен — снимать нечего.")
+    }
+    /// Automation permission not granted is by far the likeliest cause, so the string names where
+    /// to fix it; osascript's own words follow, because "-1743" on its own helps nobody.
+    static func claudeTabsCaptureFailed(_ detail: String) -> String {
+        t("Could not read Ghostty's tabs — check Automation permission in System Settings › Privacy & Security. \(detail)",
+          "Не удалось прочитать вкладки Ghostty — проверь разрешение Automation в «Системных настройках › Конфиденциальность». \(detail)")
+    }
+    static var claudeTabsNothingResolved: String {
+        t("None of the open tabs could be tied to a Claude session — the previous snapshot was kept.",
+          "Ни одну открытую вкладку не удалось связать с сессией Claude — прежний снимок сохранён.")
+    }
+    static var claudeTabsRestoreInProgress: String {
+        t("A restore is running — try again once the tabs are back.",
+          "Идёт восстановление — попробуй ещё раз, когда вкладки вернутся.")
+    }
+    static var claudeTabsNothingToRestore: String {
+        t("Nothing to restore — no snapshot has been captured yet.",
+          "Восстанавливать нечего — снимок ещё не снят.")
+    }
+
     // MARK: - Duplicate
 
     static var duplicate: String { t("Duplicate", "Дублировать") }

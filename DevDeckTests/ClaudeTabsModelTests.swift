@@ -1,20 +1,25 @@
 import XCTest
 @testable import DevDeck
 
-/// The two restore-flow safety properties that only show up once `runRestore` actually executes:
-/// a failed restore must stay retryable (Finding 1 of the task-8 review), and a second trigger
-/// must never overlap the first (Finding 6). `UserDefaults.standard` is never touched — each test
-/// gets its own private suite standing in for it, torn down afterwards.
+/// The restore-and-capture flow properties that only show up once the model actually executes:
+/// a failed restore must stay retryable, a second trigger must never overlap the first, a Ghostty
+/// that was already running must still get a restore, and — the one that cannot be undone — a
+/// snapshot from a previous boot must survive until this boot's restore has been resolved.
+/// `UserDefaults.standard` is never touched: each test gets its own private suite standing in for
+/// it, torn down afterwards.
 @MainActor
 final class ClaudeTabsModelTests: XCTestCase {
 
     private struct FakeGhosttyTabReader: GhosttyTabReading {
-        var tabs: [GhosttyTab]?
-        func readTabs() -> [GhosttyTab]? { tabs }
+        var result: GhosttyTabsResult
+        func readTabs() -> GhosttyTabsResult { result }
     }
 
     private struct FakeTranscriptIndex: TranscriptIndexing {
-        func titles(forWorkingDirectory workingDirectory: String) -> [TranscriptTitle] { [] }
+        var byDirectory: [String: [TranscriptTitle]] = [:]
+        func titles(forWorkingDirectory workingDirectory: String) -> [TranscriptTitle] {
+            byDirectory[workingDirectory] ?? []
+        }
     }
 
     private struct FakeBootTime: BootTimeProviding {
@@ -32,26 +37,6 @@ final class ClaudeTabsModelTests: XCTestCase {
             .appendingPathComponent("claude-tabs.json")
     }
 
-    /// A model whose planner will decide `.restore`: a one-tab snapshot from an earlier boot, one
-    /// open Ghostty tab, and the flag forced on via `restoreNow()`.
-    private func makeModel(runnerResult: Bool, defaults: UserDefaults) throws -> ClaudeTabsModel {
-        let store = ClaudeTabsStore(url: tempURL())
-        try store.save(ClaudeTabsSnapshot(
-            bootTime: lastBoot, capturedAt: lastBoot,
-            tabs: [ClaudeTabEntry(order: 0, title: "t", workingDirectory: "/tmp/a", sessionID: "s1")]))
-
-        let runner = TabRestorerTests.FakeAppleScriptRunner()
-        runner.result = runnerResult
-        let reader = FakeGhosttyTabReader(tabs: [
-            GhosttyTab(windowID: "w1", index: 0, title: "t", workingDirectory: "/tmp/a")
-        ])
-
-        return ClaudeTabsModel(reader: reader, index: FakeTranscriptIndex(), store: store,
-                               bootTime: FakeBootTime(now: currentBoot),
-                               restorer: TabRestorer(runner: runner, stepDelay: .zero),
-                               defaults: defaults)
-    }
-
     private func makeDefaults() -> UserDefaults {
         let suiteName = "ClaudeTabsModelTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
@@ -59,9 +44,51 @@ final class ClaudeTabsModelTests: XCTestCase {
         return defaults
     }
 
+    private func entry(_ n: Int) -> ClaudeTabEntry {
+        ClaudeTabEntry(order: n, title: "t\(n)", workingDirectory: "/tmp/\(n)", sessionID: "s\(n)")
+    }
+
+    private func tab(_ n: Int) -> GhosttyTab {
+        GhosttyTab(windowID: "w1", index: n, title: "t\(n)", workingDirectory: "/tmp/\(n)")
+    }
+
+    /// A model whose planner will decide `.restore`: a snapshot from an earlier boot, tabs open in
+    /// Ghostty, and the current boot fixed. The transcript index resolves nothing, so a capture
+    /// after the restore writes nothing — which is exactly what `SnapshotPolicy` promises.
+    private func makeModel(tabs: Int = 1,
+                           runnerResult: Bool = true,
+                           stepDelay: Duration = .zero,
+                           enabled: Bool = true,
+                           ghosttyRunning: Bool = true,
+                           snapshotBoot: Date? = nil,
+                           emptyStore: Bool = false,
+                           reader: GhosttyTabReading? = nil,
+                           index: TranscriptIndexing = FakeTranscriptIndex(),
+                           defaults: UserDefaults)
+        throws -> (model: ClaudeTabsModel, store: ClaudeTabsStore, runner: TabRestorerTests.FakeAppleScriptRunner) {
+        let store = ClaudeTabsStore(url: tempURL())
+        if !emptyStore {
+            try store.save(ClaudeTabsSnapshot(bootTime: snapshotBoot ?? lastBoot, capturedAt: lastBoot,
+                                              tabs: (0..<tabs).map(entry)))
+        }
+        let runner = TabRestorerTests.FakeAppleScriptRunner()
+        runner.result = runnerResult
+        let model = ClaudeTabsModel(
+            reader: reader ?? FakeGhosttyTabReader(result: .tabs((0..<tabs).map(tab))),
+            index: index, store: store,
+            bootTime: FakeBootTime(now: currentBoot),
+            restorer: TabRestorer(runner: runner, stepDelay: stepDelay),
+            defaults: defaults,
+            isEnabled: { enabled },
+            isGhosttyRunning: { ghosttyRunning })
+        return (model, store, runner)
+    }
+
+    // MARK: - Restore
+
     func testFailedRestoreDoesNotMarkTheBootRestored() async throws {
         let defaults = makeDefaults()
-        let model = try makeModel(runnerResult: false, defaults: defaults)
+        let model = try makeModel(runnerResult: false, defaults: defaults).model
 
         model.restoreNow()
         await sleepUntil({ model.lastError != nil }, message: "the failed restore never finished")
@@ -72,12 +99,164 @@ final class ClaudeTabsModelTests: XCTestCase {
 
     func testSuccessfulRestoreMarksTheCurrentBoot() async throws {
         let defaults = makeDefaults()
-        let model = try makeModel(runnerResult: true, defaults: defaults)
+        let model = try makeModel(defaults: defaults).model
 
         model.restoreNow()
         await sleepUntil({ defaults.object(forKey: restoredBootTimeKey) != nil },
                          message: "a successful restore never wrote restoredBootTime")
 
         XCTAssertEqual(defaults.object(forKey: restoredBootTimeKey) as? Date, currentBoot)
+    }
+
+    /// The second trigger has to be dropped, not queued: two restores running over each other
+    /// would double every tab on screen.
+    func testASecondTriggerNeverOverlapsTheFirst() async throws {
+        let defaults = makeDefaults()
+        let (model, _, runner) = try makeModel(tabs: 3, stepDelay: .milliseconds(100), defaults: defaults)
+
+        model.restoreNow()
+        await sleepUntil({ runner.calls.count >= 1 }, message: "the first restore never started")
+        model.restoreNow()   // must be ignored — the first one is still running
+        await sleepUntil({ defaults.object(forKey: restoredBootTimeKey) != nil },
+                         message: "the first restore never finished")
+        try await Task.sleep(for: .milliseconds(300))   // a second run would land in this window
+
+        XCTAssertEqual(runner.calls.count, 3, "the second trigger restored the tabs a second time")
+    }
+
+    /// The user reboots and opens Ghostty before DevDeck's login item gets there: no launch
+    /// notification ever arrives, so without this check nothing is ever restored — and the next
+    /// capture stamps the snapshot with the current boot, losing the tabs for good.
+    func testRestoresWhenGhosttyWasAlreadyRunning() async throws {
+        let defaults = makeDefaults()
+        let model = try makeModel(defaults: defaults).model
+
+        model.restoreIfGhosttyAlreadyRunning()
+
+        await sleepUntil({ defaults.object(forKey: restoredBootTimeKey) != nil },
+                         message: "an already-running Ghostty never triggered a restore")
+    }
+
+    func testDoesNotRestoreWhenGhosttyIsNotRunning() async throws {
+        let defaults = makeDefaults()
+        let (model, _, runner) = try makeModel(ghosttyRunning: false, defaults: defaults)
+
+        model.restoreIfGhosttyAlreadyRunning()
+        try await Task.sleep(for: .milliseconds(150))
+
+        XCTAssertTrue(runner.calls.isEmpty)
+        XCTAssertNil(defaults.object(forKey: restoredBootTimeKey))
+    }
+
+    /// A restore the user asked for must not be baked into the snapshot: the tabs on screen are
+    /// then the snapshot's tabs on top of whatever was already open, and capturing that would make
+    /// the next reboot restore everything twice.
+    func testForcedRestoreDoesNotRecapture() async throws {
+        let defaults = makeDefaults()
+        let index = FakeTranscriptIndex(byDirectory: [
+            "/tmp/0": [TranscriptTitle(aiTitle: "t0", sessionID: "s0", modifiedAt: currentBoot)]
+        ])
+        let (model, store, _) = try makeModel(index: index, defaults: defaults)
+
+        model.restoreNow()
+        await sleepUntil({ defaults.object(forKey: restoredBootTimeKey) != nil },
+                         message: "the forced restore never finished")
+        try await Task.sleep(for: .milliseconds(150))
+
+        XCTAssertEqual(store.load()?.bootTime, lastBoot,
+                       "a forced restore re-captured and stamped the snapshot with this boot")
+    }
+
+    // MARK: - Capture
+
+    /// THE invariant: the snapshot is from an earlier boot and nothing has restored it yet, so it
+    /// is the only copy of the user's tabs. Capturing over it is unrecoverable.
+    func testCaptureRefusesToOverwriteAnUnrestoredSnapshot() async throws {
+        let defaults = makeDefaults()
+        let index = FakeTranscriptIndex(byDirectory: [
+            "/tmp/0": [TranscriptTitle(aiTitle: "t0", sessionID: "s0", modifiedAt: currentBoot)]
+        ])
+        let (model, store, _) = try makeModel(index: index, defaults: defaults)
+
+        await model.captureIfEnabled()
+
+        XCTAssertEqual(store.load()?.bootTime, lastBoot)
+    }
+
+    func testCaptureWritesOnceTheBootHasBeenRestored() async throws {
+        let defaults = makeDefaults()
+        defaults.set(currentBoot, forKey: restoredBootTimeKey)
+        let index = FakeTranscriptIndex(byDirectory: [
+            "/tmp/0": [TranscriptTitle(aiTitle: "t0", sessionID: "s0", modifiedAt: currentBoot)]
+        ])
+        let (model, store, _) = try makeModel(index: index, defaults: defaults)
+
+        await model.captureIfEnabled()
+
+        XCTAssertEqual(store.load()?.bootTime, currentBoot)
+    }
+
+    /// The very first snapshot of all: there is nothing to protect, so the invariant must not
+    /// block it — otherwise the feature could never take its first snapshot.
+    func testCaptureWritesTheFirstSnapshotOfAll() async throws {
+        let defaults = makeDefaults()
+        let index = FakeTranscriptIndex(byDirectory: [
+            "/tmp/0": [TranscriptTitle(aiTitle: "t0", sessionID: "s0", modifiedAt: currentBoot)]
+        ])
+        let (model, store, _) = try makeModel(emptyStore: true, index: index, defaults: defaults)
+
+        await model.captureIfEnabled()
+
+        XCTAssertEqual(store.load()?.tabs.map(\.sessionID), ["s0"])
+    }
+
+    func testCaptureDoesNothingWhenTheFeatureIsOff() async throws {
+        let defaults = makeDefaults()
+        defaults.set(currentBoot, forKey: restoredBootTimeKey)
+        let (model, store, _) = try makeModel(enabled: false, emptyStore: true, defaults: defaults)
+
+        await model.captureIfEnabled()
+
+        XCTAssertNil(store.load())
+    }
+
+    // MARK: - Reporting
+
+    /// "Ghostty is not running" is the normal state of a Mac with no terminal open: silent on the
+    /// automatic path, answered on the explicit one, because there a user is waiting for a reply.
+    func testAutomaticCaptureStaysSilentWhenGhosttyIsNotRunning() async throws {
+        let defaults = makeDefaults()
+        defaults.set(currentBoot, forKey: restoredBootTimeKey)
+        let (model, _, _) = try makeModel(reader: FakeGhosttyTabReader(result: .notRunning),
+                                          defaults: defaults)
+
+        await model.captureIfEnabled()
+
+        XCTAssertNil(model.lastError)
+    }
+
+    func testExplicitCaptureReportsThatGhosttyIsNotRunning() async throws {
+        let defaults = makeDefaults()
+        let (model, _, _) = try makeModel(reader: FakeGhosttyTabReader(result: .notRunning),
+                                          defaults: defaults)
+
+        model.captureNow()
+
+        await sleepUntil({ model.lastError != nil }, message: "\"Capture now\" said nothing at all")
+        XCTAssertEqual(model.lastError, L10n.claudeTabsGhosttyNotRunning)
+    }
+
+    /// A denied Automation permission used to look exactly like "no terminal open" — both were nil.
+    func testAFailedReadIsAlwaysReported() async throws {
+        let defaults = makeDefaults()
+        defaults.set(currentBoot, forKey: restoredBootTimeKey)
+        let (model, _, _) = try makeModel(
+            reader: FakeGhosttyTabReader(result: .failed("Not authorized to send Apple events")),
+            defaults: defaults)
+
+        await model.captureIfEnabled()
+
+        XCTAssertEqual(model.lastError,
+                       L10n.claudeTabsCaptureFailed("Not authorized to send Apple events"))
     }
 }
