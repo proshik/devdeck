@@ -30,7 +30,7 @@ struct ClaudeTabsSectionView: View {
 
             if enabled {
                 note(stateText, icon: "clock.arrow.circlepath", color: .secondary)
-                action(L10n.claudeTabsCaptureNow, icon: "camera") { claudeTabs.captureNow() }
+                action(L10n.claudeTabsCaptureNow, icon: "camera") { captureNow() }
                 if tabCount > 0 {
                     action(L10n.claudeTabsRestoreNow, icon: "arrow.uturn.backward") {
                         claudeTabs.restoreNow()
@@ -109,5 +109,24 @@ struct ClaudeTabsSectionView: View {
         appModel.selection = .claudeTabs
         openWindow(id: "main")
         NSApp.activate()
+    }
+
+    /// "Capture now" bypasses the invariant gate so first use works — but pressed after a reboot
+    /// where the restore never happened (Automation denied, or the feature was off), it would
+    /// silently overwrite the only copy of the pre-reboot tabs. Ask first, exactly when there is
+    /// something at stake to ask about.
+    private func captureNow() {
+        guard claudeTabs.isHoldingEarlierBootSnapshot else {
+            claudeTabs.captureNow()
+            return
+        }
+        NSApp.activate()
+        let alert = NSAlert()
+        alert.messageText = L10n.claudeTabsOverwriteConfirmTitle
+        alert.informativeText = L10n.claudeTabsOverwriteConfirmMessage
+        alert.addButton(withTitle: L10n.cancel)
+        alert.addButton(withTitle: L10n.claudeTabsOverwriteConfirmButton)
+        guard alert.runModal() == .alertSecondButtonReturn else { return }
+        claudeTabs.captureNow()
     }
 }

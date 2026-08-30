@@ -45,7 +45,7 @@ struct ClaudeTabsView: View {
             HStack {
                 Text(L10n.claudeTabsSection).font(.title2).bold()
                 Spacer()
-                Button(L10n.claudeTabsCaptureNow) { claudeTabs.captureNow() }
+                Button(L10n.claudeTabsCaptureNow) { captureNow() }
                 Button(L10n.claudeTabsRestoreNow) { claudeTabs.restoreNow() }
                     .disabled(entries.isEmpty)
             }
@@ -64,5 +64,24 @@ struct ClaudeTabsView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
+    }
+
+    /// "Capture now" bypasses the invariant gate so first use works — but pressed after a reboot
+    /// where the restore never happened (Automation denied, or the feature was off), it would
+    /// silently overwrite the only copy of the pre-reboot tabs. Ask first, exactly when there is
+    /// something at stake to ask about.
+    private func captureNow() {
+        guard claudeTabs.isHoldingEarlierBootSnapshot else {
+            claudeTabs.captureNow()
+            return
+        }
+        NSApp.activate()
+        let alert = NSAlert()
+        alert.messageText = L10n.claudeTabsOverwriteConfirmTitle
+        alert.informativeText = L10n.claudeTabsOverwriteConfirmMessage
+        alert.addButton(withTitle: L10n.cancel)
+        alert.addButton(withTitle: L10n.claudeTabsOverwriteConfirmButton)
+        guard alert.runModal() == .alertSecondButtonReturn else { return }
+        claudeTabs.captureNow()
     }
 }
