@@ -69,11 +69,10 @@ final class CaptureSignatureTests: XCTestCase {
     func testUnchangedTabSetSkipsTheTranscriptPass() {
         let tabs = [GhosttyTab(windowID: "w1", index: 1, title: "✳ a", workingDirectory: "/tmp/a")]
         let index = CountingIndex()
-        let signature = ClaudeTabsModel.signature(of: tabs)
 
         let outcome = ClaudeTabsModel.collect(reader: FakeReader(result: .tabs(tabs)),
                                               index: index,
-                                              previousSignature: signature)
+                                              previousSignature: tabs)
 
         XCTAssertEqual(outcome, .unchanged)
         XCTAssertEqual(index.calls, 0, "an unchanged tab set must not touch the transcripts")
@@ -86,9 +85,29 @@ final class CaptureSignatureTests: XCTestCase {
 
         let outcome = ClaudeTabsModel.collect(reader: FakeReader(result: .tabs(after)),
                                               index: index,
-                                              previousSignature: ClaudeTabsModel.signature(of: before))
+                                              previousSignature: before)
 
         guard case .entries = outcome else { return XCTFail("expected a fresh resolve") }
+        XCTAssertEqual(index.calls, 1)
+    }
+
+    /// Fix for a real bug: the old `signature(of:)` joined `"\(windowID)\t\(index)\t\(title)\t\(cwd)"`,
+    /// so a tab character inside the title could shift the field boundaries and make two DIFFERENT
+    /// tab sets produce the identical string — here, `title: "a\tb", cwd: "/tmp/x"` and
+    /// `title: "a", cwd: "b\t/tmp/x"` both joined to `"w1\t1\ta\tb\t/tmp/x"`. Comparing `[GhosttyTab]`
+    /// directly, as `collect` does now, cannot fall into that trap.
+    func testATabCharacterInATitleDoesNotMaskADifferentTabSet() {
+        let before = [GhosttyTab(windowID: "w1", index: 1, title: "a\tb", workingDirectory: "/tmp/x")]
+        let after = [GhosttyTab(windowID: "w1", index: 1, title: "a", workingDirectory: "b\t/tmp/x")]
+        let index = CountingIndex()
+
+        let outcome = ClaudeTabsModel.collect(reader: FakeReader(result: .tabs(after)),
+                                              index: index,
+                                              previousSignature: before)
+
+        guard case .entries = outcome else {
+            return XCTFail("a tab character in the title made two different tab sets compare equal")
+        }
         XCTAssertEqual(index.calls, 1)
     }
 

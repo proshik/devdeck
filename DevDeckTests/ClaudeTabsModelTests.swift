@@ -318,4 +318,47 @@ final class ClaudeTabsModelTests: XCTestCase {
         XCTAssertEqual(model.lastError,
                        L10n.claudeTabsCaptureFailed("Not authorized to send Apple events"))
     }
+
+    // MARK: - Enabling mid-boot
+
+    /// The toggle switched on later in the same boot, with Ghostty already up, has no launch
+    /// notification to react to — `restoreIfGhosttyAlreadyRunning()` only ever runs once, from
+    /// `start()`. Without the timer noticing the false→true transition itself, nothing would ever
+    /// restore until Ghostty is relaunched. Built directly against `tick()` rather than a real
+    /// 5-second `Timer`, and `runner.result = false` keeps the boot unresolved throughout, so a
+    /// stray repeat attempt (which the fix must avoid, even though existing guards make it
+    /// harmless) would be directly observable as extra calls.
+    func testEnablingMidBootTriggersARestoreOnTheNextTick() async throws {
+        let defaults = makeDefaults()
+        let store = ClaudeTabsStore(url: tempURL())
+        try store.save(ClaudeTabsSnapshot(bootTime: lastBoot, capturedAt: lastBoot, tabs: [entry(0)]))
+        let runner = TabRestorerTests.FakeAppleScriptRunner()
+        runner.result = false
+        var enabled = false
+        let model = ClaudeTabsModel(
+            reader: FakeGhosttyTabReader(result: .tabs([tab(0)])),
+            index: FakeTranscriptIndex(),
+            store: store,
+            bootTime: FakeBootTime(now: currentBoot),
+            restorer: TabRestorer(runner: runner, sessions: FakeBackgroundSessions(ids: []), stepDelay: .zero),
+            defaults: defaults,
+            isEnabled: { enabled },
+            isGhosttyRunning: { true })
+
+        await model.tick()
+        XCTAssertTrue(runner.calls.isEmpty, "a tick while the feature is still off must not restore")
+
+        enabled = true
+        await model.tick()
+        await sleepUntil({ !runner.calls.isEmpty },
+                         message: "enabling the toggle mid-boot never triggered a restore")
+
+        let callsAfterTheTransition = runner.calls.count
+        try await Task.sleep(for: .milliseconds(100))   // let the transition's own restore settle
+        await model.tick()   // still enabled — not a transition, must not restore again
+        try await Task.sleep(for: .milliseconds(100))
+
+        XCTAssertEqual(runner.calls.count, callsAfterTheTransition,
+                       "a tick that is not a transition must not run another restore")
+    }
 }
