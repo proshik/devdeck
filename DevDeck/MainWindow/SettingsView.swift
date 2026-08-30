@@ -72,6 +72,13 @@ struct SettingsView: View {
                 }
             }
 
+            Section(L10n.claudeTabsSection) {
+                Toggle(L10n.claudeTabsRestoreToggle, isOn: Binding(
+                    get: { store.config.settings.claudeTabsRestore },
+                    set: { store.setClaudeTabsRestore($0) }
+                ))
+            }
+
             Section(L10n.proxySection) {
                 Toggle(L10n.proxyShareToggle, isOn: Binding(
                     get: { store.config.settings.proxyShareEnabled },

@@ -11,6 +11,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let updateController = UpdateController()
     let proxyManager = ProxyManager()
     let cleanupModel: CleanupModel
+    let claudeTabs = ClaudeTabsModel()
 
     private var menuBar: MenuBarController?
 
@@ -49,7 +50,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Start Sparkle with the persisted auto-update preference; populates the indicator when off.
         updateController.configure(autoUpdateEnabled: store.config.settings.autoUpdateEnabled)
         menuBar = MenuBarController(store: store, manager: manager, appModel: appModel,
-                                    updateController: updateController, proxyManager: proxyManager)
+                                    updateController: updateController, proxyManager: proxyManager,
+                                    claudeTabs: claudeTabs)
 
         // Global hotkey (⌃⌥D) toggles the popover; enabled per the persisted setting.
         HotKeyManager.shared.onTrigger = { [weak menuBar] in menuBar?.toggle() }
@@ -58,6 +60,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Run directories are no longer deleted when a command finishes — a live tab keeps its
         // script around for diagnosing. Collect the ones whose terminal is gone now instead.
         sweepStaleTerminalDirectories()
+
+        // Snapshots of the Claude Code tabs, and the post-reboot restore.
+        // Both closures read live from the config, so a hand-edited config.json — the flag or the
+        // interval — takes effect without a relaunch.
+        claudeTabs.start(isEnabled: { [weak store] in store?.config.settings.claudeTabsRestore ?? false },
+                         captureInterval: { [weak store] in
+                             ClaudeTabsCaptureInterval.clamped(
+                                 store?.config.settings.claudeTabsCaptureSeconds
+                                     ?? ClaudeTabsCaptureInterval.fallback)
+                         })
+    }
+
+    /// Last snapshot before quitting, so a crash-free quit never loses the most recent tab layout.
+    ///
+    /// `captureBeforeShutdown`, not `captureNow`: quitting is an automatic path and must respect
+    /// the feature flag, unlike the explicit "Capture now" action which deliberately bypasses it.
+    /// And not `captureIfEnabled` either — this method cannot await, so it needs the synchronous,
+    /// deliberately bounded path rather than the asynchronous one, which macOS may never run.
+    func applicationWillTerminate(_ notification: Notification) {
+        claudeTabs.captureBeforeShutdown()
     }
 
     /// The main window's red close button does NOT quit the app — it lives in the menu bar.
