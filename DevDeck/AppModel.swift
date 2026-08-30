@@ -8,6 +8,7 @@ enum MainSelection: Hashable {
     case settings
     case proxy
     case cleanup
+    case claudeTabs
 }
 
 /// UI state of the application (separate from data and processes).
