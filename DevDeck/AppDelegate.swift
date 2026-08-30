@@ -66,8 +66,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// Last snapshot before quitting, so a crash-free quit never loses the most recent tab layout.
+    /// `captureIfEnabled`, not `captureNow`: quitting is an automatic path and must respect the
+    /// feature flag, unlike the explicit "Capture now" action which deliberately bypasses it.
     func applicationWillTerminate(_ notification: Notification) {
-        claudeTabs.captureNow()
+        claudeTabs.captureIfEnabled()
     }
 
     /// The main window's red close button does NOT quit the app — it lives in the menu bar.
