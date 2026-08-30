@@ -91,14 +91,22 @@ struct LiveGhosttyTabReader: GhosttyTabReading {
         return .tabs(GhosttyTabParser.parse(text))
     }
 
-    /// Prints one line per tab. `tab` and `linefeed` are AppleScript's own constants — the script
-    /// never has to quote them, so a title full of punctuation cannot break the format.
+    /// Prints one line per tab.
+    ///
+    /// The field separator is `(ASCII character 9)`, NOT AppleScript's `tab` constant. Inside
+    /// `tell application "Ghostty"` the term `tab` resolves to Ghostty's own `tab` CLASS — the one
+    /// this very script iterates over — so `& tab &` concatenates the word "tab" instead of a tab
+    /// character, and every line arrives with no separators at all. Verified: inside the tell block
+    /// `"X" & tab & "Y"` yields `XtabY`, while `"X" & (ASCII character 9) & "Y"` yields `X\tY`.
+    /// `linefeed` is not shadowed and stays as it is.
+    ///
     static let scriptArgs: [String] = [
         "-e", "tell application \"Ghostty\"",
+        "-e", "set sep to (ASCII character 9)",
         "-e", "set out to \"\"",
         "-e", "repeat with w in windows",
         "-e", "repeat with t in tabs of w",
-        "-e", "set out to out & (id of w) & tab & (index of t) & tab & (name of t) & tab & (working directory of focused terminal of t) & linefeed",
+        "-e", "set out to out & (id of w) & sep & (index of t) & sep & (name of t) & sep & (working directory of focused terminal of t) & linefeed",
         "-e", "end repeat",
         "-e", "end repeat",
         "-e", "return out",
