@@ -5,9 +5,15 @@ import Foundation
 /// A tab whose session did not resolve still lands in the right directory: a shell in the right
 /// place is a far better failure than a lost tab.
 enum RestoreCommand {
-    static func text(cwd: String, sessionID: String?) -> String {
+    /// `attach` rather than `--resume` for a session that is running in the background: `--resume`
+    /// refuses those outright, so the restored tab would open onto an error message instead of the
+    /// conversation. After a reboot nothing is in the background and every tab takes `--resume`.
+    static func text(cwd: String, sessionID: String?, isBackground: Bool = false) -> String {
         guard let sessionID else { return "cd \(shellQuote(cwd))" }
-        return "cd \(shellQuote(cwd)) && claude --resume \(shellQuote(sessionID))"
+        let open = isBackground
+            ? "claude attach \(shellQuote(sessionID))"
+            : "claude --resume \(shellQuote(sessionID))"
+        return "cd \(shellQuote(cwd)) && \(open)"
     }
 }
 
@@ -76,16 +82,23 @@ struct LiveAppleScriptRunner: AppleScriptRunning {
 /// in the same second.
 struct TabRestorer {
     let runner: AppleScriptRunning
+    let sessions: BackgroundSessionListing
     let stepDelay: Duration
 
-    init(runner: AppleScriptRunning = LiveAppleScriptRunner(), stepDelay: Duration = .milliseconds(700)) {
+    init(runner: AppleScriptRunning = LiveAppleScriptRunner(),
+         sessions: BackgroundSessionListing = LiveBackgroundSessions(),
+         stepDelay: Duration = .milliseconds(700)) {
         self.runner = runner
+        self.sessions = sessions
         self.stepDelay = stepDelay
     }
 
     /// false if any step failed — the caller surfaces it once, rather than per tab.
     @discardableResult
     func restore(_ actions: [RestoreAction]) async -> Bool {
+        // Asked once for the whole restore, not per tab: it costs a subprocess, and the answer
+        // cannot change meaningfully while we are opening tabs.
+        let background = sessions.backgroundSessionIDs()
         var allSucceeded = true
         for (offset, action) in actions.enumerated() {
             if offset > 0, stepDelay > .zero {
@@ -94,13 +107,22 @@ struct TabRestorer {
             let args: [String]
             switch action {
             case let .inputText(cwd, sessionID):
-                args = RestoreScript.inputTextArgs(text: RestoreCommand.text(cwd: cwd, sessionID: sessionID))
+                args = RestoreScript.inputTextArgs(
+                    text: RestoreCommand.text(cwd: cwd, sessionID: sessionID,
+                                              isBackground: isBackground(sessionID, in: background)))
             case let .newTab(cwd, sessionID):
-                args = RestoreScript.newTabArgs(cwd: cwd,
-                                                text: RestoreCommand.text(cwd: cwd, sessionID: sessionID))
+                args = RestoreScript.newTabArgs(
+                    cwd: cwd,
+                    text: RestoreCommand.text(cwd: cwd, sessionID: sessionID,
+                                              isBackground: isBackground(sessionID, in: background)))
             }
             if !runner.run(args) { allSucceeded = false }
         }
         return allSucceeded
+    }
+
+    private func isBackground(_ sessionID: String?, in background: Set<String>) -> Bool {
+        guard let sessionID else { return false }
+        return background.contains(sessionID)
     }
 }
