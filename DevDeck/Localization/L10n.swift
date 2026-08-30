@@ -614,6 +614,11 @@ enum L10n {
     static func claudeTabsSnapshotState(_ count: Int, _ time: String) -> String {
         t("\(count) tab(s) · \(time)", "вкладок: \(count) · \(time)")
     }
+    static var claudeTabsColumnTitle: String { t("Tab", "Вкладка") }
+    static var claudeTabsColumnDirectory: String { t("Directory", "Каталог") }
+    static var claudeTabsColumnSession: String { t("Session", "Сессия") }
+    static var claudeTabsSessionFound: String { t("resumable", "восстановится") }
+    static var claudeTabsDirectoryOnly: String { t("directory only", "только каталог") }
 
     // MARK: - Duplicate
 
