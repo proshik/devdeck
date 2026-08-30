@@ -27,6 +27,9 @@ final class ClaudeTabsModel {
     private let restorer: TabRestorer
     private var isEnabled: () -> Bool = { false }
     private var timer: Timer?
+    /// Set for the duration of a restore so the once-a-minute timer cannot capture a half-restored
+    /// tab set and overwrite the snapshot with it — the restore can take tens of seconds.
+    private var isRestoring = false
 
     init(reader: GhosttyTabReading = LiveGhosttyTabReader(),
          index: TranscriptIndexing = LiveTranscriptIndex(),
@@ -61,10 +64,14 @@ final class ClaudeTabsModel {
         }
     }
 
+    /// Explicit user-initiated capture (the "Capture now" button a later task adds) — deliberately
+    /// bypasses the feature flag, mirroring how `restoreNow()` forces the restore.
     func captureNow() { capture() }
 
-    private func captureIfEnabled() {
-        guard isEnabled() else { return }
+    /// The automatic path — the timer, the power-off observer, and quitting the app. Respects the
+    /// feature flag, and is suppressed while a restore is in flight (see `isRestoring`).
+    func captureIfEnabled() {
+        guard isEnabled(), !isRestoring else { return }
         capture()
     }
 
@@ -100,6 +107,8 @@ final class ClaudeTabsModel {
     private func runRestore(force: Bool = false) async {
         let currentBoot = bootTime.bootTime()
         let restored = UserDefaults.standard.object(forKey: Self.restoredBootTimeKey) as? Date
+        // nil (could not ask) and 0 (asked, none) deliberately produce the same decision: reusing
+        // the first tab requires positive knowledge that exactly one exists, and nil is not knowledge.
         let decision = RestorePlanner.decide(snapshot: store.load(),
                                              enabled: force || isEnabled(),
                                              currentBootTime: currentBoot,
@@ -110,9 +119,22 @@ final class ClaudeTabsModel {
             DiagnosticLog.shared.log("ClaudeTabs: not restoring — \(reason)")
         case let .restore(actions):
             DiagnosticLog.shared.log("ClaudeTabs: restoring \(actions.count) tab(s)")
+            isRestoring = true
+            defer { isRestoring = false }
             let ok = await restorer.restore(actions)
-            UserDefaults.standard.set(currentBoot, forKey: Self.restoredBootTimeKey)
+            // Only a successful restore marks the boot done: the dominant failure is Automation
+            // not yet granted, which opens nothing, so a retry after the user fixes it is clean —
+            // whereas marking it done unconditionally would forfeit the feature on the one run
+            // (right after granting permission) where it matters most.
+            if ok {
+                UserDefaults.standard.set(currentBoot, forKey: Self.restoredBootTimeKey)
+            }
             lastError = ok ? nil : L10n.claudeTabsRestoreFailed
+            // One authoritative capture of the finished state, since the timer was suppressed for
+            // the whole restore and would otherwise leave a half-restored snapshot in place.
+            if ok {
+                capture()
+            }
         }
     }
 }
