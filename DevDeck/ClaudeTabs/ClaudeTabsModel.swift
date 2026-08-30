@@ -25,22 +25,26 @@ final class ClaudeTabsModel {
     private let store: ClaudeTabsStore
     private let bootTime: BootTimeProviding
     private let restorer: TabRestorer
+    private let defaults: UserDefaults
     private var isEnabled: () -> Bool = { false }
     private var timer: Timer?
     /// Set for the duration of a restore so the once-a-minute timer cannot capture a half-restored
-    /// tab set and overwrite the snapshot with it — the restore can take tens of seconds.
+    /// tab set and overwrite the snapshot with it — the restore can take tens of seconds. Also
+    /// guards against a second restore trigger overlapping the first (see `runRestore`).
     private var isRestoring = false
 
     init(reader: GhosttyTabReading = LiveGhosttyTabReader(),
          index: TranscriptIndexing = LiveTranscriptIndex(),
          store: ClaudeTabsStore = ClaudeTabsStore(),
          bootTime: BootTimeProviding = LiveBootTime(),
-         restorer: TabRestorer = TabRestorer()) {
+         restorer: TabRestorer = TabRestorer(),
+         defaults: UserDefaults = .standard) {
         self.reader = reader
         self.index = index
         self.store = store
         self.bootTime = bootTime
         self.restorer = restorer
+        self.defaults = defaults
         self.snapshot = store.load()
     }
 
@@ -105,8 +109,15 @@ final class ClaudeTabsModel {
     func restoreNow() { Task { await runRestore(force: true) } }
 
     private func runRestore(force: Bool = false) async {
+        // A restore already in flight owns `isRestoring`; a second trigger (the launch observer
+        // firing again, or a "Restore now" button press) must not race its actions or its
+        // `defer`-guarded cleanup. Bail before doing any work, including the boot-time read.
+        guard !isRestoring else {
+            DiagnosticLog.shared.log("ClaudeTabs: restore already in progress — ignoring this trigger")
+            return
+        }
         let currentBoot = bootTime.bootTime()
-        let restored = UserDefaults.standard.object(forKey: Self.restoredBootTimeKey) as? Date
+        let restored = defaults.object(forKey: Self.restoredBootTimeKey) as? Date
         // nil (could not ask) and 0 (asked, none) deliberately produce the same decision: reusing
         // the first tab requires positive knowledge that exactly one exists, and nil is not knowledge.
         let decision = RestorePlanner.decide(snapshot: store.load(),
@@ -127,7 +138,7 @@ final class ClaudeTabsModel {
             // whereas marking it done unconditionally would forfeit the feature on the one run
             // (right after granting permission) where it matters most.
             if ok {
-                UserDefaults.standard.set(currentBoot, forKey: Self.restoredBootTimeKey)
+                defaults.set(currentBoot, forKey: Self.restoredBootTimeKey)
             }
             lastError = ok ? nil : L10n.claudeTabsRestoreFailed
             // One authoritative capture of the finished state, since the timer was suppressed for
