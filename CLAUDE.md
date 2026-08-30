@@ -58,6 +58,11 @@ generic and not tied to any specific project.
   both by hand and from the UI. External edits are picked up by the FileWatcher. Malformed JSON → error
   in the UI; the last valid version is kept in memory.
 - **Popover in the menu bar — minimalist** (control deck only). All editing and logs live in the main window.
+- **Claude Code tab restore.** The snapshot on disk is the user's only copy of their open tabs, so
+  a snapshot from an earlier boot is never overwritten until that boot's restore is resolved, and a
+  snapshot is written only when at least one tab resolved to a session. `kern.boottime` (compared to
+  the second) tells a reboot from an app restart. Reading tabs and resolving titles happens off the
+  main actor. See `docs/claude-tabs-restore-plan.md`.
 
 ## Project structure
 
@@ -78,6 +83,10 @@ devdeck/
 │   ├── Diagnostics/     # DiagnosticLog, memory/disk/cluster metrics, notifications
 │   ├── Cleanup/         # DockerUsage (docker system df probe), CleanupCommands (synthetic prune
 │   │                    # commands per daemon), CleanupModel — behind the main window's Cleanup page
+│   ├── ClaudeTabs/      # Snapshots the Claude Code tabs open in Ghostty and reopens them after a
+│   │                    # reboot: GhosttyTabReader (AppleScript), TranscriptIndex (~/.claude
+│   │                    # session titles), SessionResolver, RestorePlanner, BootTime, TabRestorer,
+│   │                    # BackgroundSessions, ClaudeTabsStore, ClaudeTabsModel
 │   ├── Update/          # UpdateController (Sparkle)
 │   ├── Support/         # PrivateFile (0600 files), ShellQuoting
 │   └── Resources/       # Assets.xcassets, default-config.json
