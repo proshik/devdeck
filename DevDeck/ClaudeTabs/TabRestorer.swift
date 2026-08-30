@@ -7,7 +7,7 @@ import Foundation
 enum RestoreCommand {
     static func text(cwd: String, sessionID: String?) -> String {
         guard let sessionID else { return "cd \(shellQuote(cwd))" }
-        return "cd \(shellQuote(cwd)) && claude --resume \(sessionID)"
+        return "cd \(shellQuote(cwd)) && claude --resume \(shellQuote(sessionID))"
     }
 }
 
@@ -33,9 +33,7 @@ enum RestoreScript {
     static func inputTextArgs(text: String) -> [String] {
         [
             "-e", "tell application \"Ghostty\"",
-            "-e", "try",
             "-e", "input text (\"\(AppleScriptEscaper.escape(text))\" & linefeed) to focused terminal of selected tab of front window",
-            "-e", "end try",
             "-e", "end tell",
         ]
     }
