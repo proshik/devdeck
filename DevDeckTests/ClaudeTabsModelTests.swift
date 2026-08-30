@@ -77,7 +77,9 @@ final class ClaudeTabsModelTests: XCTestCase {
             reader: reader ?? FakeGhosttyTabReader(result: .tabs((0..<tabs).map(tab))),
             index: index, store: store,
             bootTime: FakeBootTime(now: currentBoot),
-            restorer: TabRestorer(runner: runner, stepDelay: stepDelay),
+            restorer: TabRestorer(runner: runner,
+                                  sessions: FakeBackgroundSessions(ids: []),
+                                  stepDelay: stepDelay),
             defaults: defaults,
             isEnabled: { enabled },
             isGhosttyRunning: { ghosttyRunning })

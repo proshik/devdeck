@@ -66,7 +66,7 @@ final class TabRestorerTests: XCTestCase {
 
     func testRestorerRunsOneScriptPerAction() async {
         let runner = FakeAppleScriptRunner()
-        let restorer = TabRestorer(runner: runner, stepDelay: .zero)
+        let restorer = TabRestorer(runner: runner, sessions: FakeBackgroundSessions(ids: []), stepDelay: .zero)
         let ok = await restorer.restore([.inputText(cwd: "/tmp/a", sessionID: "s1"),
                                          .newTab(cwd: "/tmp/b", sessionID: nil)])
         XCTAssertTrue(ok)
@@ -78,7 +78,7 @@ final class TabRestorerTests: XCTestCase {
     func testRestorerReportsFailure() async {
         let runner = FakeAppleScriptRunner()
         runner.result = false
-        let ok = await TabRestorer(runner: runner, stepDelay: .zero)
+        let ok = await TabRestorer(runner: runner, sessions: FakeBackgroundSessions(ids: []), stepDelay: .zero)
             .restore([.newTab(cwd: "/tmp/a", sessionID: nil)])
         XCTAssertFalse(ok)
     }
@@ -89,7 +89,7 @@ final class TabRestorerTests: XCTestCase {
     func testRestorerContinuesPastAFailedAction() async {
         let runner = FakeAppleScriptRunner()
         runner.failingCalls = [1]
-        let ok = await TabRestorer(runner: runner, stepDelay: .zero)
+        let ok = await TabRestorer(runner: runner, sessions: FakeBackgroundSessions(ids: []), stepDelay: .zero)
             .restore([.newTab(cwd: "/tmp/a", sessionID: "s1"),
                       .newTab(cwd: "/tmp/b", sessionID: "s2"),
                       .newTab(cwd: "/tmp/c", sessionID: "s3")])
