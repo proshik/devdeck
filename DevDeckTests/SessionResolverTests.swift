@@ -55,4 +55,19 @@ final class SessionResolverTests: XCTestCase {
         XCTAssertEqual(entries.map(\.order), [0, 1, 2])
         XCTAssertEqual(entries.map(\.workingDirectory), ["/tmp/a", "/tmp/b", "/tmp/c"])
     }
+
+    /// The prefix stage must not fire on an empty needle: `anything.hasPrefix("")` is true, so an
+    /// unguarded prefix match would bind a glyph-only tab title to the first session in its directory.
+    func testGlyphOnlyTitleMatchesNothingEvenWithCandidatesPresent() {
+        let entries = SessionResolver.resolve(
+            tabs: [tab(1, "✳", "/tmp/a")],
+            titlesByDirectory: ["/tmp/a": [title("alpha", "s1", 10)]])
+        XCTAssertEqual(entries.count, 1)
+        XCTAssertNil(entries[0].sessionID)
+    }
+
+    func testNormalizeReturnsEmptyForAGlyphOnlyTitle() {
+        XCTAssertEqual(SessionResolver.normalize("✳"), "")
+        XCTAssertEqual(SessionResolver.normalize("  ◐  "), "")
+    }
 }
