@@ -20,12 +20,22 @@ struct ClaudeTabsStore {
         return try? decoder.decode(ClaudeTabsSnapshot.self, from: data)
     }
 
+    /// Through `PrivateFile`, like every other file DevDeck persists: 0600 in a 0700 directory.
+    ///
+    /// The snapshot is not incidental data — it lists every project directory this user works in,
+    /// together with AI-generated titles describing what they were doing in each. `ps` shows every
+    /// account on the Mac the full argv of every process, so this machine is not one trust domain,
+    /// and the rule `PrivateFile` states is uniform for exactly that reason.
+    ///
+    /// `.atomic` lands a fresh inode at the default 0644, so the mode is reapplied after the write
+    /// — the same order `CommandStore.save` uses for config.json, and the reason the 0700 on the
+    /// directory matters: it is what keeps the brief sibling out of reach.
     func save(_ snapshot: ClaudeTabsSnapshot) throws {
-        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(),
-                                                withIntermediateDirectories: true)
+        try PrivateFile.makeDirectory(at: url.deletingLastPathComponent())
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         try encoder.encode(snapshot).write(to: url, options: .atomic)
+        PrivateFile.restrict(url)
     }
 }
