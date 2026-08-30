@@ -44,30 +44,37 @@ struct LiveGhosttyTabReader: GhosttyTabReading {
             .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         guard running else { return nil }
 
-        let osa = Process()
-        osa.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
-        osa.arguments = Self.scriptArgs
-        let err = Pipe()
-        osa.standardError = err
-        let out = Pipe()
-        osa.standardOutput = out
+        guard let output = runScript() else { return nil }
+        return GhosttyTabParser.parse(output)
+    }
+
+    private func runScript() -> String? {
+        let output = Pipe(), errors = Pipe()
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+        process.arguments = Self.scriptArgs
+        process.standardOutput = output
+        process.standardError = errors
 
         do {
-            try osa.run()
-            osa.waitUntilExit()
-            guard osa.terminationStatus == 0 else {
-                let msg = String(data: err.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
-                    .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-                DiagnosticLog.shared.log("GhosttyTabs: AppleScript error — \(msg)", level: .error)
-                return nil
-            }
+            try process.run()
         } catch {
-            DiagnosticLog.shared.log("GhosttyTabs: failed to run osascript — \(error)", level: .error)
+            DiagnosticLog.shared.log("ClaudeTabs: osascript failed to start — \(error.localizedDescription)",
+                                     level: .error)
             return nil
         }
 
-        let output = String(data: out.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-        return GhosttyTabParser.parse(output)
+        // Drain both pipes BEFORE waiting: osascript blocks writing into a full pipe buffer, and a
+        // child that cannot write is a child that never exits. The tab dump grows with every tab.
+        let data = output.fileHandleForReading.readDataToEndOfFile()
+        let errorText = String(data: errors.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else {
+            DiagnosticLog.shared.log("ClaudeTabs: reading tabs failed — \(errorText)", level: .error)
+            return nil
+        }
+        return String(data: data, encoding: .utf8)
     }
 
     /// Prints one line per tab. `tab` and `linefeed` are AppleScript's own constants — the script
