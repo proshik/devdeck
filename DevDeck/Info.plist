@@ -28,6 +28,8 @@
 	     and refuses to publish, with no prompt and no error. -->
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>DevDeck finds proxies shared by your other Macs on this network, and announces its own, so commands can be routed through them without copying IP addresses by hand.</string>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>DevDeck asks Ghostty to reopen the Claude Code tabs you had before the last restart.</string>
 	<key>NSBonjourServices</key>
 	<array>
 		<string>_devdeck-proxy._tcp</string>
