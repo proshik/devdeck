@@ -77,6 +77,8 @@ struct PopoverView: View {
 
                     // Renders itself only when sharing or discovery is switched on.
                     ProxySectionView()
+
+                    ClaudeTabsSectionView()
                 }
                 .padding(.vertical, 4)
             }
