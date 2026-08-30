@@ -16,6 +16,10 @@ enum SessionResolver {
     ///
     /// A session already claimed by an earlier tab is removed from the candidates: that is what
     /// keeps two tabs with the same title in the same directory from collapsing onto one session.
+    ///
+    /// When several candidates share a normalized title, the winner is simply the first in the
+    /// caller-supplied array — `resolve` never reads `modifiedAt`. "Most recently modified wins
+    /// a tie" depends entirely on the caller handing over newest-first entries.
     static func resolve(tabs: [GhosttyTab],
                         titlesByDirectory: [String: [TranscriptTitle]]) -> [ClaudeTabEntry] {
         let ordered = tabs.sorted { ($0.windowID, $0.index) < ($1.windowID, $1.index) }
