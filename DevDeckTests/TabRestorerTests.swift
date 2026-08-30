@@ -9,7 +9,12 @@ final class TabRestorerTests: XCTestCase {
     final class FakeAppleScriptRunner: AppleScriptRunning, @unchecked Sendable {
         var calls: [[String]] = []
         var result = true
-        func run(_ args: [String]) -> Bool { calls.append(args); return result }
+        /// Call indices that should fail, for the "keeps going after one failure" case.
+        var failingCalls: Set<Int> = []
+        func run(_ args: [String]) -> Bool {
+            calls.append(args)
+            return failingCalls.contains(calls.count - 1) ? false : result
+        }
     }
 
     func testCommandResumesTheSession() {
@@ -76,5 +81,22 @@ final class TabRestorerTests: XCTestCase {
         let ok = await TabRestorer(runner: runner, stepDelay: .zero)
             .restore([.newTab(cwd: "/tmp/a", sessionID: nil)])
         XCTAssertFalse(ok)
+    }
+
+    /// One failure must not end the restore. Ghostty's spurious errors are real, and a
+    /// `guard runner.run(args) else { return false }` would silently drop tabs 2..n — invisible to
+    /// a single-action test, and to the user, who would just find half their tabs missing.
+    func testRestorerContinuesPastAFailedAction() async {
+        let runner = FakeAppleScriptRunner()
+        runner.failingCalls = [1]
+        let ok = await TabRestorer(runner: runner, stepDelay: .zero)
+            .restore([.newTab(cwd: "/tmp/a", sessionID: "s1"),
+                      .newTab(cwd: "/tmp/b", sessionID: "s2"),
+                      .newTab(cwd: "/tmp/c", sessionID: "s3")])
+
+        XCTAssertFalse(ok, "a failed action must still be reported")
+        XCTAssertEqual(runner.calls.count, 3, "the restore stopped at the first failure")
+        XCTAssertTrue(runner.calls[2].contains { $0.contains("/tmp/c") },
+                      "the last tab was never attempted")
     }
 }

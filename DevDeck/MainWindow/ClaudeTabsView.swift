@@ -7,7 +7,10 @@ struct ClaudeTabsView: View {
     @Environment(ClaudeTabsModel.self) private var claudeTabs
 
     var body: some View {
+        // No ScrollView around this: `Table` scrolls itself, and nesting the two breaks its sizing.
         VStack(alignment: .leading, spacing: 12) {
+            Text(L10n.claudeTabsSection).font(.title2).bold()
+
             HStack(spacing: 10) {
                 Button(L10n.claudeTabsCaptureNow) { claudeTabs.captureNow() }
                 Button(L10n.claudeTabsRestoreNow) { claudeTabs.restoreNow() }
@@ -28,6 +31,10 @@ struct ClaudeTabsView: View {
                 }
             } else {
                 Text(L10n.claudeTabsNoSnapshot).foregroundStyle(.secondary)
+            }
+
+            if let error = claudeTabs.lastError {
+                Text(error).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
             }
         }
         .padding()
