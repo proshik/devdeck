@@ -62,4 +62,15 @@ final class RestorePlannerTests: XCTestCase {
         guard case let .restore(actions) = decide(snapshot(50)) else { return XCTFail("expected restore") }
         XCTAssertEqual(actions.count, RestorePlanner.maxTabs)
     }
+
+    /// `openTabCount == 1` is strict on purpose. Zero is a real value — it is what the caller
+    /// passes when Ghostty cannot be queried yet — and reusing "the first tab" when there is no
+    /// tab means typing into something that may not exist.
+    func testAllNewTabsWhenGhosttyReportsNoTabs() {
+        guard case let .restore(actions) = decide(snapshot(2), openTabs: 0) else {
+            return XCTFail("expected restore")
+        }
+        XCTAssertEqual(actions, [.newTab(cwd: "/tmp/0", sessionID: "s0"),
+                                 .newTab(cwd: "/tmp/1", sessionID: "s1")])
+    }
 }
