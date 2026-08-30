@@ -18,7 +18,7 @@ enum SnapshotPolicy {
 enum CaptureOutcome: Equatable, Sendable {
     case notRunning
     case failed(String)
-    case entries([ClaudeTabEntry], signature: [String])
+    case entries([ClaudeTabEntry], signature: [GhosttyTab])
     /// The open tab set matches the previous capture's signature exactly — nothing to resolve, and
     /// nothing to apply.
     case unchanged
@@ -89,10 +89,18 @@ final class ClaudeTabsModel {
     /// The signature of the last APPLIED capture — `nil` means "treat the next tick as a fresh
     /// capture", which is also why it is reset on `.failed` and `.notRunning`: a read that didn't
     /// produce a tab set must not be mistaken for an unchanged one.
-    private var lastSignature: [String]?
+    ///
+    /// The signature IS the tab set: comparing `[GhosttyTab]` directly (rather than joining fields
+    /// into a string) is what keeps a tab character embedded in a title from shifting field
+    /// boundaries and making two different tab sets compare equal.
+    private var lastSignature: [GhosttyTab]?
     /// Throttles the automatic timer path only; `captureNow()` is an explicit user action and
     /// `captureBeforeShutdown()` has its own 30-second freshness rule — neither goes through `tick`.
     private var lastCaptureAt: Date?
+    /// `isEnabled()` as of the last tick — lets `tick()` notice a false→true transition (the
+    /// toggle switched on mid-boot) and run a restore for it exactly once, rather than on every
+    /// tick thereafter. Seeded from the real value in `start()`.
+    private var wasEnabled = false
 
     init(reader: GhosttyTabReading = LiveGhosttyTabReader(),
          index: TranscriptIndexing = LiveTranscriptIndex(),
@@ -117,6 +125,9 @@ final class ClaudeTabsModel {
                captureInterval: @escaping () -> TimeInterval) {
         self.isEnabled = isEnabled
         self.captureInterval = captureInterval
+        // Seeded now, not left at its `false` default: a feature already on at launch must not
+        // read as a false→true transition on the very first tick.
+        wasEnabled = isEnabled()
 
         // A short fixed tick that mostly does nothing, rather than a timer scheduled at the
         // configured interval: it lets a hand-edited config.json take effect immediately, and a
@@ -193,7 +204,23 @@ final class ClaudeTabsModel {
     /// Runs every 5 seconds; does real work only once `captureInterval()` has actually elapsed.
     /// Reading the interval here rather than baking it into the timer's own schedule is what lets a
     /// hand-edited `config.json` take effect immediately.
-    private func tick() async {
+    ///
+    /// Not `private`: tests drive it directly rather than waiting on a real 5-second `Timer`.
+    ///
+    /// Also where a false→true transition of `isEnabled()` is noticed. `restoreIfGhosttyAlreadyRunning`
+    /// only ever runs once from `start()` and once per Ghostty launch notification — neither fires
+    /// when the toggle is switched on later in the same boot with Ghostty already up, so nothing
+    /// would ever restore until Ghostty relaunches. Checking on the transition, not on every tick,
+    /// keeps this a single log line rather than noise; `isRestoring` and `restoredBootTime` already
+    /// make a stray extra call harmless.
+    func tick() async {
+        let enabledNow = isEnabled()
+        if enabledNow, !wasEnabled {
+            DiagnosticLog.shared.log("ClaudeTabs: restore turned on mid-boot — checking for a restore")
+            restoreIfGhosttyAlreadyRunning()
+        }
+        wasEnabled = enabledNow
+
         let elapsed = Date().timeIntervalSince(lastCaptureAt ?? .distantPast)
         guard elapsed >= captureInterval() else { return }
         lastCaptureAt = Date()
@@ -275,7 +302,7 @@ final class ClaudeTabsModel {
     /// `previousSignature` is threaded in by the caller rather than read from `lastSignature`
     /// here, so each caller can decide for itself whether the signature short-circuit applies —
     /// see `captureNow()` and `captureIfEnabled()`.
-    private func capture(explicit: Bool, previousSignature: [String]?) async {
+    private func capture(explicit: Bool, previousSignature: [GhosttyTab]?) async {
         let reader = self.reader
         let index = self.index
         let outcome = await Task.detached(priority: .utility) {
@@ -284,36 +311,31 @@ final class ClaudeTabsModel {
         apply(outcome, explicit: explicit)
     }
 
-    /// Identity of the open tab set. Two reads with the same signature resolve to the same
-    /// entries, so the expensive transcript pass can be skipped outright.
-    nonisolated static func signature(of tabs: [GhosttyTab]) -> [String] {
-        tabs.map { "\($0.windowID)\t\($0.index)\t\($0.title)\t\($0.workingDirectory)" }
-    }
-
     /// Read + resolve, with nothing actor-bound in it, so the async path and the synchronous
     /// shutdown path run exactly the same code.
     ///
-    /// `previousSignature` is the signature of the last APPLIED capture; a `.tabs` read whose
-    /// signature matches it exactly skips the transcript pass entirely — that pass is the
-    /// expensive part (whole transcripts re-read on every mtime change), while enumerating the
-    /// tabs themselves is one cheap AppleScript round trip.
+    /// `previousSignature` is the tab set of the last APPLIED capture; a `.tabs` read that matches
+    /// it exactly (`GhosttyTab` is `Equatable`) skips the transcript pass entirely — that pass is
+    /// the expensive part (whole transcripts re-read on every mtime change), while enumerating the
+    /// tabs themselves is one cheap AppleScript round trip. Comparing the tabs directly, rather
+    /// than a string joined from their fields, is deliberate: a title containing a tab character
+    /// could otherwise shift field boundaries and make two different tab sets compare equal.
     nonisolated static func collect(reader: GhosttyTabReading,
                                     index: TranscriptIndexing,
-                                    previousSignature: [String]?) -> CaptureOutcome {
+                                    previousSignature: [GhosttyTab]?) -> CaptureOutcome {
         switch reader.readTabs() {
         case .notRunning:
             return .notRunning
         case let .failed(message):
             return .failed(message)
         case let .tabs(tabs):
-            let signature = Self.signature(of: tabs)
-            guard signature != previousSignature else { return .unchanged }
+            guard tabs != previousSignature else { return .unchanged }
             var titles: [String: [TranscriptTitle]] = [:]
             for directory in Set(tabs.map(\.workingDirectory)) {
                 titles[directory] = index.titles(forWorkingDirectory: directory)
             }
             return .entries(SessionResolver.resolve(tabs: tabs, titlesByDirectory: titles),
-                            signature: signature)
+                            signature: tabs)
         }
     }
 
