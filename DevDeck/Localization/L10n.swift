@@ -651,6 +651,18 @@ enum L10n {
         t("Nothing to restore — no snapshot has been captured yet.",
           "Восстанавливать нечего — снимок ещё не снят.")
     }
+    /// Shown before "Capture now" overwrites a snapshot from a boot that has not been restored
+    /// yet — that snapshot is the user's only copy of the pre-reboot tabs.
+    static var claudeTabsOverwriteConfirmTitle: String {
+        t("Replace the saved tabs?", "Заменить сохранённые вкладки?")
+    }
+    static var claudeTabsOverwriteConfirmMessage: String {
+        t("This snapshot is from before the last restart and has not been restored yet. Capturing now replaces it — the previous tabs will be gone for good.",
+          "Этот снимок сделан до последней перезагрузки и ещё не был восстановлен. Снимок сейчас заменит его — прежние вкладки будут потеряны безвозвратно.")
+    }
+    static var claudeTabsOverwriteConfirmButton: String {
+        t("Replace", "Заменить")
+    }
 
     // MARK: - Duplicate
 
