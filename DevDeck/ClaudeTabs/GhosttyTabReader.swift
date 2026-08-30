@@ -43,8 +43,31 @@ struct LiveGhosttyTabReader: GhosttyTabReading {
         let running = !(ProcessTree.run("/usr/bin/pgrep", ["-x", "ghostty"]) ?? "")
             .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         guard running else { return nil }
-        guard let out = ProcessTree.run("/usr/bin/osascript", Self.scriptArgs) else { return nil }
-        return GhosttyTabParser.parse(out)
+
+        let osa = Process()
+        osa.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+        osa.arguments = Self.scriptArgs
+        let err = Pipe()
+        osa.standardError = err
+        let out = Pipe()
+        osa.standardOutput = out
+
+        do {
+            try osa.run()
+            osa.waitUntilExit()
+            guard osa.terminationStatus == 0 else {
+                let msg = String(data: err.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
+                    .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                DiagnosticLog.shared.log("GhosttyTabs: AppleScript error — \(msg)", level: .error)
+                return nil
+            }
+        } catch {
+            DiagnosticLog.shared.log("GhosttyTabs: failed to run osascript — \(error)", level: .error)
+            return nil
+        }
+
+        let output = String(data: out.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        return GhosttyTabParser.parse(output)
     }
 
     /// Prints one line per tab. `tab` and `linefeed` are AppleScript's own constants — the script
