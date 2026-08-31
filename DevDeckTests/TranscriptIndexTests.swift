@@ -258,6 +258,36 @@ final class TranscriptIndexTests: XCTestCase {
                        "a file whose mtime no longer matches its known hint must be re-read")
     }
 
+    // MARK: - ClaudeProjectSlug.defaultProjectsRoot agreement
+
+    /// FIX 1's whole point: `SessionCatalog.claudeCatalogEntry(for:projectsRoot:)` RECONSTRUCTS a
+    /// transcript's path, and `LiveTranscriptIndex` independently REPORTS one for the same file —
+    /// the on-disk catalog's match-by-(path, mtime) contract depends entirely on those two coming
+    /// out equal. Both now default to the one shared `ClaudeProjectSlug.defaultProjectsRoot`
+    /// instead of three separately-typed literals, but that refactor alone is not a test — this
+    /// pins the actual behavior, over an injected temp root, so a future change to the slug
+    /// function or either path-building call site that breaks the agreement fails here rather than
+    /// only ever showing up as "the catalog got mysteriously slow again".
+    func testClaudeCatalogEntrySourcePathAgreesWithWhatTheScannerReports() throws {
+        let root = try makeTempRoot()
+        let project = root.appendingPathComponent(ClaudeProjectSlug.slug(for: "/tmp/agreement"))
+        try FileManager.default.createDirectory(at: project, withIntermediateDirectories: true)
+        let file = project.appendingPathComponent("s1.jsonl")
+        try writeTranscript(at: file, sessionID: "s1", title: "alpha", cwd: "/tmp/agreement",
+                            mtime: Date(timeIntervalSince1970: 5000))
+
+        let index = LiveTranscriptIndex(projectsRoot: root)
+        let reported = index.recentTranscripts(since: Date(timeIntervalSince1970: 0))
+        XCTAssertEqual(reported.map(\.sourcePath), [file.path])
+
+        let session = AgentSession(id: "s1", title: "alpha", lastActivity: Date(timeIntervalSince1970: 5000),
+                                   directory: "/tmp/agreement")
+        let entry = SessionCatalog.claudeCatalogEntry(for: session, projectsRoot: root)
+
+        XCTAssertEqual(entry.sourcePath, reported.first?.sourcePath,
+                       "the path SessionCatalog reconstructs must equal the path the scanner actually reported")
+    }
+
     /// A transcript with no `cwd` line at all cannot be placed anywhere, so it is dropped rather
     /// than reported with a made-up directory.
     func testRecentTranscriptsDropsATranscriptWithNoCwd() throws {
