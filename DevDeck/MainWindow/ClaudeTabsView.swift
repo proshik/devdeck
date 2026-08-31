@@ -1,5 +1,19 @@
 import SwiftUI
 
+/// Whether the per-row "Open" action belongs on a snapshot row: never on one whose session is
+/// already open, since pressing it there would only add a SECOND tab for the same session — never
+/// what the user wants (FIX 2). A row with no resolved session (`sessionID == nil`) has never had
+/// an action here either way — there is nothing to duplicate, and nothing to reopen.
+///
+/// A pure function of exactly the two things that decide it, kept out of the view so the rule is
+/// testable on its own — see `ClaudeTabsViewTests`.
+enum SnapshotRowAction {
+    static func isVisible(sessionID: String?, openSessionIDs: Set<String>) -> Bool {
+        guard let sessionID else { return false }
+        return !openSessionIDs.contains(sessionID)
+    }
+}
+
 /// Two lists: the tabs open right now (as before), and — new — the session history: everything
 /// the catalogue remembers within the window, minus whatever is already in the first list. Every
 /// row in either list can be opened on its own; there is no "restore everything" button here, only
@@ -20,14 +34,13 @@ struct ClaudeTabsView: View {
 
     private var entries: [ClaudeTabEntry] { claudeTabs.snapshot?.tabs ?? [] }
 
-    /// What the history section must never repeat — matched on `sessionID`, per the plan.
-    private var openSessionIDs: Set<String> { Set(entries.compactMap(\.sessionID)) }
-
     /// The pure decisions — exclusion, then search — live in `SessionCatalog`, not here: this is
-    /// just wiring the model's raw `historyEntries` and the search field's text through them.
+    /// just wiring the model's `liveOpenSessionIDs` (FIX 1 — the truthful "open right now" set,
+    /// NOT the snapshot) and the search field's text through them.
     private var filteredHistory: [CatalogEntry] {
         SessionCatalog.matching(
-            SessionCatalog.historyEntries(from: claudeTabs.historyEntries, excludingOpenSessionIDs: openSessionIDs),
+            SessionCatalog.historyEntries(from: claudeTabs.historyEntries,
+                                          excludingOpenSessionIDs: claudeTabs.liveOpenSessionIDs),
             query: historyQuery)
     }
 
@@ -96,18 +109,24 @@ struct ClaudeTabsView: View {
     }
 
     /// Nothing to show for a directory-only row: `AgentSession.id` is not optional, so there is no
-    /// session to open again — the live tab already IS the "open" state for that row.
+    /// session to open again — the live tab already IS the "open" state for that row. Nothing to
+    /// show either for a row whose session is already open right now (FIX 2, via
+    /// `SnapshotRowAction`): pressing the action there would only open a SECOND tab for the same
+    /// session.
     ///
     /// Calls the directory/session-id/provider overload of `open`, not the `AgentSession` one: a
     /// `ClaudeTabEntry` has no activity timestamp of its own, and `RestoreAction.newTab` never
     /// reads one either, so there is nothing here to fabricate one for.
     @ViewBuilder
     private func openTabButton(_ entry: ClaudeTabEntry) -> some View {
-        if let sessionID = entry.sessionID {
+        if let sessionID = entry.sessionID,
+           SnapshotRowAction.isVisible(sessionID: sessionID, openSessionIDs: claudeTabs.liveOpenSessionIDs) {
             Button(L10n.claudeTabsOpen) {
                 claudeTabs.open(directory: entry.workingDirectory, sessionID: sessionID,
                                 providerID: entry.provider)
             }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
         }
     }
 
@@ -148,6 +167,8 @@ struct ClaudeTabsView: View {
                                                          directory: entry.directory),
                                             providerID: entry.provider)
                         }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
                     }.width(70)
                 }
             }

@@ -263,4 +263,74 @@ final class SessionCatalogTests: XCTestCase {
         let entries = [entry(sessionID: "a", title: "alpha", directory: "/tmp/x")]
         XCTAssertTrue(SessionCatalog.matching(entries, query: "nothing-like-this").isEmpty)
     }
+
+    // MARK: - liveOpenSessionIDs (FIX 1 — the truthful "open right now" set)
+
+    /// The two real providers' own `mayOwn`/`normalize` never touch disk or a subprocess — only
+    /// `sessions(inDirectory:)`, `recentSessions(since:)` and `command(resuming:in:)` do, and
+    /// `liveOpenSessionIDs` calls none of those — so using the real providers here (rather than
+    /// `FakeAgentProvider`, whose `normalize` is a no-op) is what actually exercises Claude's
+    /// status-glyph stripping and opencode's `"OC | "` stripping.
+    private let realProviders: [AgentSessionProvider] = [OpencodeSessionProvider(), ClaudeSessionProvider()]
+
+    private func tab(title: String, directory: String) -> GhosttyTab {
+        GhosttyTab(windowID: "w1", index: 0, title: title, workingDirectory: directory)
+    }
+
+    func testLiveOpenSessionIDsMatchesAClaudeTabThroughItsStatusGlyph() {
+        let catalog = [entry(provider: AgentProviderID.claude, sessionID: "s1", title: "foo", directory: "/tmp/a")]
+        let result = SessionCatalog.liveOpenSessionIDs(
+            tabs: [tab(title: "✳ foo", directory: "/tmp/a")], catalog: catalog, providers: realProviders)
+        XCTAssertEqual(result, ["s1"], "the live tab's status glyph must be stripped before matching")
+    }
+
+    func testLiveOpenSessionIDsMatchesAnOpencodeTabThroughItsPrefix() {
+        let catalog = [entry(provider: AgentProviderID.opencode, sessionID: "s2", title: "bar",
+                             directory: "/tmp/b", sourcePath: nil, sourceModifiedAt: nil)]
+        let result = SessionCatalog.liveOpenSessionIDs(
+            tabs: [tab(title: "OC | bar", directory: "/tmp/b")], catalog: catalog, providers: realProviders)
+        XCTAssertEqual(result, ["s2"], "the live tab's \"OC | \" prefix must be stripped before matching")
+    }
+
+    /// The directory check exists precisely to prevent this: two unrelated sessions sharing a
+    /// title (a very plausible AI-generated collision) must not let a tab in one project claim a
+    /// catalogue entry that actually belongs to a different one.
+    func testLiveOpenSessionIDsIgnoresACatalogueEntryInADifferentDirectory() {
+        let catalog = [entry(provider: AgentProviderID.claude, sessionID: "elsewhere", title: "foo",
+                             directory: "/tmp/other-project")]
+        let result = SessionCatalog.liveOpenSessionIDs(
+            tabs: [tab(title: "foo", directory: "/tmp/a")], catalog: catalog, providers: realProviders)
+        XCTAssertTrue(result.isEmpty, "a shared title in a different directory must not cross-match")
+    }
+
+    func testLiveOpenSessionIDsIgnoresACatalogueEntryFromTheWrongProvider() {
+        // An opencode-titled tab must not match a Claude catalogue entry that merely normalizes
+        // to the same bare text.
+        let catalog = [entry(provider: AgentProviderID.claude, sessionID: "wrong-provider", title: "bar",
+                             directory: "/tmp/b")]
+        let result = SessionCatalog.liveOpenSessionIDs(
+            tabs: [tab(title: "OC | bar", directory: "/tmp/b")], catalog: catalog, providers: realProviders)
+        XCTAssertTrue(result.isEmpty)
+    }
+
+    func testLiveOpenSessionIDsReturnsEmptyWithNoTabsOrNoMatch() {
+        XCTAssertTrue(SessionCatalog.liveOpenSessionIDs(tabs: [], catalog: [entry()], providers: realProviders)
+            .isEmpty)
+        let result = SessionCatalog.liveOpenSessionIDs(
+            tabs: [tab(title: "nothing like it", directory: "/tmp/a")], catalog: [entry()], providers: realProviders)
+        XCTAssertTrue(result.isEmpty)
+    }
+
+    /// When more than one catalogue entry still matches after the provider/directory/title checks
+    /// — a session resumed more than once inside the same directory under the same title — the
+    /// most recently active one wins, mirroring `SessionResolver`'s own tie-break rule.
+    func testLiveOpenSessionIDsPicksTheMostRecentlyActiveCandidateOnATie() {
+        let older = entry(sessionID: "older", title: "foo", directory: "/tmp/a",
+                          lastActivity: Date(timeIntervalSince1970: 100))
+        let newer = entry(sessionID: "newer", title: "foo", directory: "/tmp/a",
+                          lastActivity: Date(timeIntervalSince1970: 200))
+        let result = SessionCatalog.liveOpenSessionIDs(
+            tabs: [tab(title: "foo", directory: "/tmp/a")], catalog: [older, newer], providers: realProviders)
+        XCTAssertEqual(result, ["newer"])
+    }
 }
