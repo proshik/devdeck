@@ -12,6 +12,18 @@ enum ClaudeProjectSlug {
     static func slug(for path: String) -> String {
         path.replacingOccurrences(of: "/", with: "-")
     }
+
+    /// The one place `~/.claude/projects` is spelled out. Three independent call sites need this
+    /// same default — `LiveTranscriptIndex.init`, `ClaudeTabsModel.init`'s `claudeProjectsRoot`,
+    /// and `SessionCatalog.claudeCatalogEntry(for:projectsRoot:)` — and the whole catalog contract
+    /// depends on them agreeing: a path `SessionCatalog` RECONSTRUCTS for a transcript must equal
+    /// the path `LiveTranscriptIndex` actually reported it at, or a cached entry never matches and
+    /// the catalog silently reopens every transcript on every rebuild. Three copies of the same
+    /// literal happen to agree today; only one constant is guaranteed to keep agreeing tomorrow.
+    /// Each call site still takes its own parameter (with this as its default) so a test can inject
+    /// a temp root — only the default collapses to this shared value.
+    static let defaultProjectsRoot: URL = FileManager.default.homeDirectoryForCurrentUser
+        .appendingPathComponent(".claude/projects")
 }
 
 /// Pulls the session title out of transcript lines.
@@ -118,8 +130,7 @@ final class LiveTranscriptIndex: TranscriptIndexing, @unchecked Sendable {
     /// saying nothing matched" are different answers here.
     private var directories: [String: URL?] = [:]
 
-    init(projectsRoot: URL = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".claude/projects"),
+    init(projectsRoot: URL = ClaudeProjectSlug.defaultProjectsRoot,
          readFile: @escaping (URL) -> String? = { try? String(contentsOf: $0, encoding: .utf8) }) {
         self.projectsRoot = projectsRoot
         self.readFile = readFile

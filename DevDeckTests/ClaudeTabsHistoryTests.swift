@@ -70,6 +70,26 @@ final class ClaudeTabsHistoryTests: XCTestCase {
         XCTAssertTrue(script.contains("claude --resume 's9'"))
     }
 
+    /// The overload FIX 2 adds: a caller with only a directory, a session id and a provider — no
+    /// `AgentSession`, and so no `lastActivity` to fabricate — reaches the restorer exactly the way
+    /// the `AgentSession` overload above does. This is what lets `ClaudeTabsView`'s open-tabs row
+    /// stop inventing a `Date()` it does not have just to satisfy the old signature.
+    func testOpenWithDirectorySessionIDAndProviderInvokesTheRestorer() async throws {
+        let runner = TabRestorerTests.FakeAppleScriptRunner()
+        let restorer = TabRestorer(runner: runner, providers: [FakeAgentProvider(id: "claude")], stepDelay: .zero)
+        let model = ClaudeTabsModel(store: ClaudeTabsStore(url: tempSnapshotURL()),
+                                    sessionCatalog: SessionCatalog(url: tempCatalogURL()),
+                                    restorer: restorer,
+                                    defaults: makeDefaults())
+
+        model.open(directory: "/tmp/project", sessionID: "s9", providerID: "claude")
+
+        await sleepUntil({ !runner.calls.isEmpty }, message: "open() never reached the restorer")
+        let script = runner.calls[0].joined(separator: " ")
+        XCTAssertTrue(script.contains("/tmp/project"))
+        XCTAssertTrue(script.contains("claude --resume 's9'"))
+    }
+
     // MARK: - rebuildHistory()
 
     /// The rebuild's whole reason to exist: a second build, over a catalogue whose entries have not

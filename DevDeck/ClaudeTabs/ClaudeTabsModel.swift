@@ -115,10 +115,10 @@ final class ClaudeTabsModel {
     /// Where `SessionCatalog.claudeCatalogEntry(for:projectsRoot:)` reconstructs a Claude session's
     /// transcript path from — see that function's doc comment for why `AgentSession` does not carry
     /// `sourcePath` itself. Must agree with whatever `LiveTranscriptIndex` the `makeClaudeProvider`
-    /// closure builds its provider on, the same way the two independent defaults already agree in
-    /// production; a test overriding one without the other would see every build "succeed" while
-    /// never actually reusing a cached entry, since the reconstructed path would never match the
-    /// one the index itself reports.
+    /// closure builds its provider on. In production both default to the one shared
+    /// `ClaudeProjectSlug.defaultProjectsRoot`, so that agreement is automatic; a test overriding
+    /// one without the other would see every build "succeed" while never actually reusing a cached
+    /// entry, since the reconstructed path would never match the one the index itself reports.
     private let claudeProjectsRoot: URL
     private let bootTime: BootTimeProviding
     private let restorer: TabRestorer
@@ -165,8 +165,7 @@ final class ClaudeTabsModel {
          makeOpencodeProvider: @escaping @Sendable ([String]) -> AgentSessionProvider = {
              OpencodeSessionProvider(recentDirectories: $0)
          },
-         claudeProjectsRoot: URL = FileManager.default.homeDirectoryForCurrentUser
-             .appendingPathComponent(".claude/projects"),
+         claudeProjectsRoot: URL = ClaudeProjectSlug.defaultProjectsRoot,
          bootTime: BootTimeProviding = LiveBootTime(),
          restorer: TabRestorer = TabRestorer(),
          defaults: UserDefaults = .standard,
@@ -553,12 +552,26 @@ final class ClaudeTabsModel {
     /// `RestoreAction.newTab`'s `provider` id against its own provider list to build the actual
     /// command, exactly as it does for a full restore; this method's only job is to hand it the
     /// right id for the row the user clicked.
-    func open(_ session: AgentSession, providerID: String) {
+    ///
+    /// `RestoreAction.newTab` carries only a directory, a session id and a provider — no title, no
+    /// activity timestamp — so this is the shape a caller with just those three actually has. The
+    /// `AgentSession` overload below exists for callers (the history table) that already hold a
+    /// real session with real values; a caller with no `lastActivity` of its own (the open-tabs
+    /// row, which only ever fabricated `Date()` to satisfy the old `AgentSession`-only signature)
+    /// should call this one instead of inventing one.
+    func open(directory: String, sessionID: String, providerID: String) {
         Task { @MainActor in
             let outcome = await restorer.restore(
-                [.newTab(cwd: session.directory, sessionID: session.id, provider: providerID)])
+                [.newTab(cwd: directory, sessionID: sessionID, provider: providerID)])
             lastError = outcome.failed > 0 ? L10n.claudeTabsRestoreFailed : nil
         }
+    }
+
+    /// Convenience for a caller that already holds a full `AgentSession` (the history table) —
+    /// delegates to the directory/session-id/provider overload above, which is all `open` ever
+    /// actually needs.
+    func open(_ session: AgentSession, providerID: String) {
+        open(directory: session.directory, sessionID: session.id, providerID: providerID)
     }
 
     /// Rebuilds the on-disk session catalogue — `ClaudeTabsView`'s history section, entirely
