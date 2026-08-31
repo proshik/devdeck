@@ -541,10 +541,10 @@ enum L10n {
     static var proxyRemoteDestination: String { t("SSH destination", "SSH-назначение") }
     static var proxyRemoteDestinationHint: String {
         t("A host from ~/.ssh/config, or user@host — nothing but sshd is needed on the VDS. This "
-          + "field carries everything after “-D <port>” in the tunnel command, flags included — "
+          + "field carries everything after “-D 127.0.0.1:<port>” in the tunnel command, flags included — "
           + "retyping it drops anything appended past the destination.",
           "Хост из ~/.ssh/config или user@host — на VDS не нужно ничего, кроме sshd. Это поле "
-          + "содержит всё, что идёт после «-D <порт>» в команде туннеля, включая флаги — при "
+          + "содержит всё, что идёт после «-D 127.0.0.1:<порт>» в команде туннеля, включая флаги — при "
           + "перепечатывании то, что дописано после назначения, потеряется.")
     }
     static var proxyRemoteLocalPort: String { t("Local HTTP port", "Локальный HTTP-порт") }
