@@ -217,12 +217,14 @@ extension SessionCatalog {
     /// same `normalize`, comes out identical (idempotent by the protocol's contract, so an
     /// already-bare catalogue title passes through unchanged).
     ///
-    /// The match also requires the SAME directory. Without it, two unrelated sessions in two
-    /// different projects that merely share an AI-generated title (not a rare accident — "fix the
-    /// login bug" is a plausible title twice over) could make a live tab claim the wrong catalogue
-    /// entry, hiding a session from history that was never actually reopened. When more than one
-    /// catalogue entry still matches after that, the most recently active one wins — the same
-    /// "newest wins a tie" rule `SessionResolver` follows by construction.
+    /// The match also requires the live tab's directory to name the catalogue entry's own
+    /// directory — via `DirectoryMatch`, not plain string equality; see that type's doc for why.
+    /// The check exists to break ties between two unrelated sessions that merely share an
+    /// AI-generated title (not a rare accident — "fix the login bug" is a plausible title twice
+    /// over): without it a live tab could claim the wrong catalogue entry and hide a session from
+    /// history that was never actually reopened. When more than one catalogue entry still matches
+    /// after that, the most recently active one wins — the same "newest wins a tie" rule
+    /// `SessionResolver` follows by construction.
     static func liveOpenSessionIDs(tabs: [GhosttyTab], catalog: [CatalogEntry],
                                    providers: [AgentSessionProvider]) -> Set<String> {
         let ordered = providers.filter { !$0.isFallback } + providers.filter(\.isFallback)
@@ -232,11 +234,59 @@ extension SessionCatalog {
             let wanted = provider.normalize(tabTitle: tab.title)
             guard !wanted.isEmpty else { continue }
             let match = catalog
-                .filter { $0.provider == provider.id && $0.directory == tab.workingDirectory
+                .filter { $0.provider == provider.id
+                    && DirectoryMatch.matches(liveDirectory: tab.workingDirectory, catalogDirectory: $0.directory)
                     && provider.normalize(tabTitle: $0.title) == wanted }
                 .max { $0.lastActivity < $1.lastActivity }
             if let match { result.insert(match.sessionID) }
         }
         return result
+    }
+}
+
+/// Compares a live Ghostty tab's working directory against a catalogue entry's recorded
+/// directory — resiliently, because the two are read from different places and are not
+/// guaranteed byte-identical for the SAME session: the catalogue's directory is the `cwd`
+/// recorded inside a transcript (`TranscriptCwdScanner`), while the live one is Ghostty's own
+/// `working directory of focused terminal` (`GhosttyTabReader`). A symlinked path (`/tmp` vs
+/// `/private/tmp`, which this very machine exhibits) or a session started from a subdirectory of
+/// the project — the same case `LiveTranscriptIndex.projectDirectory(for:)` already has a
+/// slug-then-corpus-scan fallback for, see its doc comment — would otherwise make plain string
+/// equality miss for the SAME session, defeating both features `SessionCatalog.liveOpenSessionIDs`
+/// feeds: a miss reopens a duplicate tab, and lists the same session in both the snapshot and
+/// history at once.
+enum DirectoryMatch {
+    /// True when `liveDirectory` names `catalogDirectory` itself, or a directory nested inside it.
+    /// Only that one direction: a live directory that is merely an ANCESTOR of the catalogue
+    /// directory is not accepted, since that would let an unrelated parent-directory tab (a plain
+    /// shell in `~`, say) claim a session that was actually started further down. The title
+    /// condition this exists alongside is the real tie-breaker; this check only widens what counts
+    /// as "the same place on disk", it never substitutes for the title matching.
+    static func matches(liveDirectory: String, catalogDirectory: String) -> Bool {
+        let live = standardized(liveDirectory)
+        let catalog = standardized(catalogDirectory)
+        return live == catalog || live.hasPrefix(catalog + "/")
+    }
+
+    /// Canonicalizes via the C `realpath()`, not `URL.resolvingSymlinksInPath()`: the latter
+    /// deliberately leaves `/tmp`, `/var` and `/etc` UNRESOLVED on Apple platforms (a long-standing
+    /// Foundation special case for those three well-known symlinks), so it would silently fail to
+    /// fix the exact miss this type exists for — verified directly: `resolvingSymlinksInPath()`
+    /// left `/tmp/x` as `/tmp/x`, while `realpath()` returned `/private/tmp/x`, matching what a
+    /// shell's own `cd -P` or `/bin/pwd -P` would report. Same technique
+    /// `ClaudeTabsHistoryTests.makeTranscriptRoot()` already uses for the same reason.
+    ///
+    /// `realpath()` only succeeds when the path exists on disk end to end — both sides here always
+    /// do in the case this matters for: a live tab's directory is a real shell's real cwd, and a
+    /// catalogue directory that no longer exists on disk can have no live tab in it to match
+    /// against anyway. A path `realpath()` cannot resolve falls back to a plain standardized form
+    /// (trailing slash / "." / ".." collapsed) rather than the raw string, so the two still compare
+    /// equal when they are literally the same spelling.
+    private static func standardized(_ path: String) -> String {
+        var buffer = [Int8](repeating: 0, count: Int(PATH_MAX))
+        if realpath(path, &buffer) != nil {
+            return String(cString: buffer)
+        }
+        return URL(fileURLWithPath: path).standardizedFileURL.path
     }
 }

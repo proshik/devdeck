@@ -333,4 +333,101 @@ final class SessionCatalogTests: XCTestCase {
             tabs: [tab(title: "foo", directory: "/tmp/a")], catalog: [older, newer], providers: realProviders)
         XCTAssertEqual(result, ["newer"])
     }
+
+    // MARK: - DirectoryMatch (Important review finding — resilient directory comparison)
+
+    /// A real temp directory plus a real symlink pointing at it — `DirectoryMatch` canonicalizes
+    /// via `realpath()`, which only resolves anything for a path that actually exists on disk, so
+    /// a pair of string literals would not exercise it. Both are removed after the test.
+    private func makeSymlinkedDirectories() throws -> (real: String, symlink: String) {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let real = root.appendingPathComponent("real")
+        let symlink = root.appendingPathComponent("link")
+        try FileManager.default.createDirectory(at: real, withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(at: symlink, withDestinationURL: real)
+        addTeardownBlock { try? FileManager.default.removeItem(at: root) }
+        return (real.path, symlink.path)
+    }
+
+    /// The MISS the review named: the same session, but the live path is the symlinked form of
+    /// the one the transcript recorded (`/tmp` vs `/private/tmp` on this very machine is exactly
+    /// this shape). Against the old plain `==` this would miss on both sides of the pair.
+    func testDirectoryMatchResolvesASymlinkedFormOfTheSamePath() throws {
+        let (real, symlink) = try makeSymlinkedDirectories()
+        XCTAssertTrue(DirectoryMatch.matches(liveDirectory: symlink, catalogDirectory: real),
+                     "a symlinked live directory must match the real directory it points at")
+        XCTAssertTrue(DirectoryMatch.matches(liveDirectory: real, catalogDirectory: symlink),
+                     "and the same must hold with the symlink on the catalogue side instead")
+    }
+
+    /// The other MISS the review named: the same session, but the live tab sits in a subdirectory
+    /// of the directory the transcript recorded as `cwd` — the same shape
+    /// `LiveTranscriptIndex.projectDirectory(for:)` already has a fallback for.
+    func testDirectoryMatchAcceptsALiveSubdirectoryOfTheCatalogueDirectory() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let sub = root.appendingPathComponent("sub")
+        try FileManager.default.createDirectory(at: sub, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: root) }
+
+        XCTAssertTrue(DirectoryMatch.matches(liveDirectory: sub.path, catalogDirectory: root.path),
+                     "a live directory nested inside the catalogue directory must still match")
+    }
+
+    /// Only the one direction is accepted: a live directory that is an ANCESTOR of the catalogue
+    /// directory must not match — otherwise a plain shell tab sitting in `~` could claim a session
+    /// that was actually started somewhere further down.
+    func testDirectoryMatchRejectsACatalogueSubdirectoryOfTheLiveDirectory() {
+        XCTAssertFalse(DirectoryMatch.matches(liveDirectory: "/tmp/project", catalogDirectory: "/tmp/project/sub"))
+    }
+
+    /// Guards the naive-prefix trap a careless `hasPrefix` fix would fall into: "/tmp/project" is a
+    /// STRING prefix of "/tmp/project-other" without being its parent directory. This is exactly
+    /// the existing protection the brief calls out — two different sessions must not cross-match
+    /// merely for sharing a directory-name prefix.
+    func testDirectoryMatchRejectsASiblingDirectoryWithASharedPrefix() {
+        XCTAssertFalse(DirectoryMatch.matches(liveDirectory: "/tmp/project-other", catalogDirectory: "/tmp/project"))
+    }
+
+    /// Two DIFFERENT sessions sharing a title in genuinely different (non-overlapping) directories
+    /// must still not cross-match — the collision protection the resilient comparison must not
+    /// weaken. `testLiveOpenSessionIDsIgnoresACatalogueEntryInADifferentDirectory` above already
+    /// pins this at the `liveOpenSessionIDs` level; this pins the same property directly on
+    /// `DirectoryMatch` itself.
+    func testDirectoryMatchRejectsGenuinelyDifferentDirectories() {
+        XCTAssertFalse(DirectoryMatch.matches(liveDirectory: "/tmp/a", catalogDirectory: "/tmp/other-project"))
+    }
+
+    func testDirectoryMatchIgnoresATrailingSlashOnEitherSide() {
+        XCTAssertTrue(DirectoryMatch.matches(liveDirectory: "/tmp/project/", catalogDirectory: "/tmp/project"))
+        XCTAssertTrue(DirectoryMatch.matches(liveDirectory: "/tmp/project", catalogDirectory: "/tmp/project/"))
+    }
+
+    // MARK: - liveOpenSessionIDs — the same two MISS cases, through the whole function
+
+    /// The MISS reproduced at the level `ClaudeTabsModel` actually calls: a live tab whose
+    /// directory is the symlinked form of the one the catalogue recorded for the SAME session.
+    /// Against the old `$0.directory == tab.workingDirectory`, this would miss and defeat both
+    /// features that depend on `liveOpenSessionIDs` — the row action would reappear for a tab that
+    /// IS open, and the session would show in the snapshot table and in history simultaneously.
+    func testLiveOpenSessionIDsMatchesThroughASymlinkedWorkingDirectory() throws {
+        let (real, symlink) = try makeSymlinkedDirectories()
+        let catalog = [entry(provider: AgentProviderID.claude, sessionID: "s1", title: "foo", directory: real)]
+        let result = SessionCatalog.liveOpenSessionIDs(
+            tabs: [tab(title: "✳ foo", directory: symlink)], catalog: catalog, providers: realProviders)
+        XCTAssertEqual(result, ["s1"], "a symlinked form of the recorded directory must still match")
+    }
+
+    /// The same MISS for a session started from a subdirectory of the project: the live tab's
+    /// directory is a descendant of what the catalogue recorded, not an exact match.
+    func testLiveOpenSessionIDsMatchesThroughALiveSubdirectory() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let sub = root.appendingPathComponent("sub")
+        try FileManager.default.createDirectory(at: sub, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: root) }
+
+        let catalog = [entry(provider: AgentProviderID.claude, sessionID: "s1", title: "foo", directory: root.path)]
+        let result = SessionCatalog.liveOpenSessionIDs(
+            tabs: [tab(title: "✳ foo", directory: sub.path)], catalog: catalog, providers: realProviders)
+        XCTAssertEqual(result, ["s1"], "a live tab in a subdirectory of the recorded directory must still match")
+    }
 }
