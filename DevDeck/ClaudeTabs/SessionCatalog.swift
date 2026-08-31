@@ -194,3 +194,49 @@ extension SessionCatalog {
         }
     }
 }
+
+extension SessionCatalog {
+    /// The session ids open in Ghostty **right now**, found the cheap way: by normalizing a live
+    /// tab's title through its own provider and matching it against what the catalogue (built by
+    /// `ClaudeTabsModel.rebuildHistory()`) already remembers — never by resolving through a
+    /// transcript or a session listing, which is `SessionResolver`'s expensive path and belongs to
+    /// the open-tabs snapshot alone.
+    ///
+    /// This is what `ClaudeTabsModel.liveOpenSessionIDs` is built from, and what the history
+    /// section must exclude by instead of `snapshot?.tabs`'s session ids: the snapshot mirrors this
+    /// almost always, EXCEPT in the one state the whole history feature exists for — right after a
+    /// reboot and before a restore, when the snapshot lists tabs from the previous boot that the
+    /// new Ghostty window has not reopened at all.
+    ///
+    /// A tab is handed to the first non-fallback provider whose `mayOwn` claims it, Claude tried
+    /// last — the exact order `SessionResolver.resolve` uses, and for the same reason: Claude's
+    /// `mayOwn` is an unconditional `true` and would otherwise swallow an opencode-prefixed title
+    /// before opencode ever saw it. The tab's title is normalized through THAT provider's own
+    /// `normalize(tabTitle:)` — stripping Claude's animated status glyph or opencode's `"OC | "` —
+    /// and matched against a catalogue entry for the SAME provider whose own title, run through the
+    /// same `normalize`, comes out identical (idempotent by the protocol's contract, so an
+    /// already-bare catalogue title passes through unchanged).
+    ///
+    /// The match also requires the SAME directory. Without it, two unrelated sessions in two
+    /// different projects that merely share an AI-generated title (not a rare accident — "fix the
+    /// login bug" is a plausible title twice over) could make a live tab claim the wrong catalogue
+    /// entry, hiding a session from history that was never actually reopened. When more than one
+    /// catalogue entry still matches after that, the most recently active one wins — the same
+    /// "newest wins a tie" rule `SessionResolver` follows by construction.
+    static func liveOpenSessionIDs(tabs: [GhosttyTab], catalog: [CatalogEntry],
+                                   providers: [AgentSessionProvider]) -> Set<String> {
+        let ordered = providers.filter { !$0.isFallback } + providers.filter(\.isFallback)
+        var result: Set<String> = []
+        for tab in tabs {
+            guard let provider = ordered.first(where: { $0.mayOwn(tabTitle: tab.title) }) else { continue }
+            let wanted = provider.normalize(tabTitle: tab.title)
+            guard !wanted.isEmpty else { continue }
+            let match = catalog
+                .filter { $0.provider == provider.id && $0.directory == tab.workingDirectory
+                    && provider.normalize(tabTitle: $0.title) == wanted }
+                .max { $0.lastActivity < $1.lastActivity }
+            if let match { result.insert(match.sessionID) }
+        }
+        return result
+    }
+}
