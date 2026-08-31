@@ -76,8 +76,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     ///
     /// `captureBeforeShutdown`, not `captureNow`: quitting is an automatic path and must respect
     /// the feature flag, unlike the explicit "Capture now" action which deliberately bypasses it.
-    /// And not `captureIfEnabled` either — this method cannot await, so it needs the synchronous,
-    /// deliberately bounded path rather than the asynchronous one, which macOS may never run.
+    /// And not `captureIfEnabled` either — this method cannot await, so it needs the synchronous
+    /// path rather than the asynchronous one, which macOS may never run. What that path costs is
+    /// documented on `captureBeforeShutdown` itself; it is not unconditionally bounded.
     func applicationWillTerminate(_ notification: Notification) {
         claudeTabs.captureBeforeShutdown()
     }

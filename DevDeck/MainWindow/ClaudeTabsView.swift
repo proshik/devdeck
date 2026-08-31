@@ -28,6 +28,9 @@ struct ClaudeTabsView: View {
                     TableColumn(L10n.claudeTabsColumnDirectory) {
                         Text($0.workingDirectory).foregroundStyle(.secondary)
                     }
+                    TableColumn(L10n.claudeTabsColumnAgent) { entry in
+                        Text(L10n.claudeTabsAgentName(entry.provider)).foregroundStyle(.secondary)
+                    }
                     TableColumn(L10n.claudeTabsColumnSession) { entry in
                         Text(entry.sessionID == nil
                              ? L10n.claudeTabsDirectoryOnly

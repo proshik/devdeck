@@ -27,8 +27,8 @@ final class RestorePlannerTests: XCTestCase {
 
     func testRestoresAfterReboot() {
         XCTAssertEqual(decide(snapshot(2)),
-                       .restore([.inputText(cwd: "/tmp/0", sessionID: "s0"),
-                                 .newTab(cwd: "/tmp/1", sessionID: "s1")]))
+                       .restore([.inputText(cwd: "/tmp/0", sessionID: "s0", provider: "claude"),
+                                 .newTab(cwd: "/tmp/1", sessionID: "s1", provider: "claude")]))
     }
 
     func testSkipsWhenDisabled() {
@@ -55,8 +55,8 @@ final class RestorePlannerTests: XCTestCase {
         guard case let .restore(actions) = decide(snapshot(2), openTabs: 3) else {
             return XCTFail("expected restore")
         }
-        XCTAssertEqual(actions, [.newTab(cwd: "/tmp/0", sessionID: "s0"),
-                                 .newTab(cwd: "/tmp/1", sessionID: "s1")])
+        XCTAssertEqual(actions, [.newTab(cwd: "/tmp/0", sessionID: "s0", provider: "claude"),
+                                 .newTab(cwd: "/tmp/1", sessionID: "s1", provider: "claude")])
     }
 
     func testCapsTheNumberOfTabs() {
@@ -123,7 +123,29 @@ final class RestorePlannerTests: XCTestCase {
         guard case let .restore(actions) = decide(snapshot(2), openTabs: 0) else {
             return XCTFail("expected restore")
         }
-        XCTAssertEqual(actions, [.newTab(cwd: "/tmp/0", sessionID: "s0"),
-                                 .newTab(cwd: "/tmp/1", sessionID: "s1")])
+        XCTAssertEqual(actions, [.newTab(cwd: "/tmp/0", sessionID: "s0", provider: "claude"),
+                                 .newTab(cwd: "/tmp/1", sessionID: "s1", provider: "claude")])
+    }
+
+    // MARK: - Provider identity
+
+    /// Every other test in this file builds a snapshot whose entries all share one provider, so a
+    /// planner that hard-codes `"claude"` on every action instead of reading `entry.provider` would
+    /// pass every one of them. A snapshot mixing providers is the only way to pin that each action
+    /// carries the id of the entry it came from, not a constant.
+    func testEachActionCarriesItsOwnEntrysProvider() {
+        let mixed = ClaudeTabsSnapshot(
+            bootTime: lastBoot, capturedAt: Date(timeIntervalSince1970: 1_500),
+            tabs: [
+                ClaudeTabEntry(order: 0, title: "oc", workingDirectory: "/tmp/oc",
+                              sessionID: "ses_a", provider: "opencode"),
+                ClaudeTabEntry(order: 1, title: "cc", workingDirectory: "/tmp/cc",
+                              sessionID: "s1", provider: "claude"),
+            ])
+        guard case let .restore(actions) = decide(mixed, openTabs: 3) else {
+            return XCTFail("expected restore")
+        }
+        XCTAssertEqual(actions, [.newTab(cwd: "/tmp/oc", sessionID: "ses_a", provider: "opencode"),
+                                 .newTab(cwd: "/tmp/cc", sessionID: "s1", provider: "claude")])
     }
 }

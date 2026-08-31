@@ -604,7 +604,10 @@ enum L10n {
 
     // MARK: - Claude tabs
 
-    static var claudeTabsSection: String { t("Claude tabs", "Вкладки Claude") }
+    /// The `claudeTabs…` prefix on these members is historical: the feature began as Claude-only
+    /// and now restores any agent behind `AgentSessionProvider`. The visible name is neutral;
+    /// renaming the whole family would be churn for no reader's benefit.
+    static var claudeTabsSection: String { t("Agent tabs", "Вкладки агентов") }
     static var claudeTabsRestoreToggle: String {
         t("Restore tabs after a restart", "Восстанавливать вкладки после перезагрузки")
     }
@@ -615,15 +618,26 @@ enum L10n {
         t("\(count) tab(s) · \(time)", "вкладок: \(count) · \(time)")
     }
     static var claudeTabsIntro: String {
-        t("What DevDeck would reopen in Ghostty after a restart. A tab whose Claude session could not be identified still comes back — as a shell in its directory.",
-          "Что DevDeck вернёт в Ghostty после перезагрузки. Вкладка, чью сессию Claude опознать не удалось, всё равно вернётся — шеллом в своём каталоге.")
+        t("What DevDeck would reopen in Ghostty after a restart. A tab whose agent session could not be identified still comes back — as a shell in its directory.",
+          "Что DevDeck вернёт в Ghostty после перезагрузки. Вкладка, чью сессию агента опознать не удалось, всё равно вернётся — шеллом в своём каталоге.")
     }
     static func claudeTabsCapturedAt(_ when: String) -> String {
         t("Snapshot taken \(when)", "Снимок снят \(when)")
     }
     static var claudeTabsColumnTitle: String { t("Tab", "Вкладка") }
     static var claudeTabsColumnDirectory: String { t("Directory", "Каталог") }
+    static var claudeTabsColumnAgent: String { t("Agent", "Агент") }
     static var claudeTabsColumnSession: String { t("Session", "Сессия") }
+    /// Display name for a `ClaudeTabEntry.provider` id. Falls back to the raw id for one this
+    /// build does not know — a future provider id in an old snapshot must still show something,
+    /// not crash the table.
+    static func claudeTabsAgentName(_ providerID: String) -> String {
+        switch providerID {
+        case AgentProviderID.claude: return t("Claude", "Claude")
+        case AgentProviderID.opencode: return t("opencode", "opencode")
+        default: return providerID
+        }
+    }
     static var claudeTabsSessionFound: String { t("resumable", "восстановится") }
     static var claudeTabsDirectoryOnly: String { t("directory only", "только каталог") }
 
@@ -640,8 +654,8 @@ enum L10n {
           "Не удалось прочитать вкладки Ghostty — проверь разрешение Automation в «Системных настройках › Конфиденциальность». \(detail)")
     }
     static var claudeTabsNothingResolved: String {
-        t("None of the open tabs could be tied to a Claude session — the previous snapshot was kept.",
-          "Ни одну открытую вкладку не удалось связать с сессией Claude — прежний снимок сохранён.")
+        t("None of the open tabs could be tied to an agent session — the previous snapshot was kept.",
+          "Ни одну открытую вкладку не удалось связать с сессией агента — прежний снимок сохранён.")
     }
     static var claudeTabsRestoreInProgress: String {
         t("A restore is running — try again once the tabs are back.",
