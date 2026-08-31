@@ -604,7 +604,10 @@ enum L10n {
 
     // MARK: - Claude tabs
 
-    static var claudeTabsSection: String { t("Claude tabs", "Вкладки Claude") }
+    /// The `claudeTabs…` prefix on these members is historical: the feature began as Claude-only
+    /// and now restores any agent behind `AgentSessionProvider`. The visible name is neutral;
+    /// renaming the whole family would be churn for no reader's benefit.
+    static var claudeTabsSection: String { t("Agent tabs", "Вкладки агентов") }
     static var claudeTabsRestoreToggle: String {
         t("Restore tabs after a restart", "Восстанавливать вкладки после перезагрузки")
     }
