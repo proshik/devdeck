@@ -23,6 +23,10 @@ enum SessionResolver {
     /// a tie" depends entirely on each provider handing over newest-first entries.
     static func resolve(tabs: [GhosttyTab], providers: [AgentSessionProvider]) -> [ClaudeTabEntry] {
         let ordered = tabs.sorted { ($0.windowID, $0.index) < ($1.windowID, $1.index) }
+        // Fallbacks last, regardless of the order the caller passed in. Swift's `sorted` is a
+        // stable sort, so two non-fallback (or two fallback) providers keep their given order —
+        // this only ever moves a fallback provider down, never reshuffles among equals.
+        let providers = providers.sorted { !$0.isFallback && $1.isFallback }
         var claimed: Set<ClaimKey> = []
 
         // One `sessions(inDirectory:)` call per (provider, directory) for the whole resolve, not

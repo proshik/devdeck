@@ -81,6 +81,7 @@ final class SessionResolverTests: XCTestCase {
     /// — provider order, `mayOwn` filtering, per-provider claiming — is tested in isolation.
     private struct FakeProvider: AgentSessionProvider {
         var id: String
+        var isFallback = false
         var owns: (String) -> Bool = { _ in true }
         var byDirectory: [String: [AgentSession]] = [:]
 
@@ -125,5 +126,42 @@ final class SessionResolverTests: XCTestCase {
         XCTAssertEqual(entries.map(\.sessionID), ["s1", "s1"],
                        "the same raw id from two different providers must not be treated as one claim")
         XCTAssertEqual(entries.map(\.provider), ["first", "second"])
+    }
+
+    // MARK: - isFallback ordering
+
+    /// The rule "Claude is the fallback and must come last" used to live only in a comment,
+    /// enforced nowhere: a caller who builds `[claude, opencode]` used to get claude's
+    /// unconditional `mayOwn` swallowing the tab before opencode ever saw it. `isFallback` fixes
+    /// that in the resolver itself, so the caller's array order stops mattering.
+    ///
+    /// `claude` here would win the match too if tried first — its own candidate title is set to
+    /// look exactly like the tab wants — so this only passes if `resolve` truly tries the
+    /// non-fallback provider first, not because claude had nothing to offer.
+    func testFallbackProviderIsTriedLastEvenWhenListedFirstInTheArray() {
+        let claude = FakeProvider(id: "claude", isFallback: true, byDirectory: [
+            "/tmp/a": [AgentSession(id: "wrong-provider-would-win", title: "OC | alpha", lastActivity: Date())]])
+        let opencode = FakeProvider(id: "opencode", owns: { $0.hasPrefix("OC | ") }, byDirectory: [
+            "/tmp/a": [AgentSession(id: "s1", title: "OC | alpha", lastActivity: Date())]])
+
+        let entries = SessionResolver.resolve(tabs: [tab(1, "OC | alpha", "/tmp/a")],
+                                              providers: [claude, opencode])
+
+        XCTAssertEqual(entries.map(\.provider), ["opencode"],
+                       "a caller-supplied [claude, opencode] order must not let claude win the tab")
+        XCTAssertEqual(entries.map(\.sessionID), ["s1"])
+    }
+
+    /// Two non-fallback providers must keep the order the caller gave them — `isFallback` only
+    /// ever demotes the fallback, it must not otherwise reshuffle the array.
+    func testTwoNonFallbackProvidersKeepTheirGivenOrder() {
+        let first = FakeProvider(id: "first", byDirectory: ["/tmp/a": [AgentSession(
+            id: "s1", title: "alpha", lastActivity: Date())]])
+        let second = FakeProvider(id: "second", byDirectory: ["/tmp/a": [AgentSession(
+            id: "s1", title: "alpha", lastActivity: Date())]])
+
+        let entries = SessionResolver.resolve(tabs: [tab(1, "alpha", "/tmp/a")], providers: [first, second])
+
+        XCTAssertEqual(entries.map(\.provider), ["first"], "the caller's order must still decide between two eligible non-fallback providers")
     }
 }
