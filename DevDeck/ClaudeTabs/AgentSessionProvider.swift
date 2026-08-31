@@ -44,6 +44,13 @@ protocol AgentSessionProvider: Sendable {
     func sessions(inDirectory directory: String) -> [AgentSession]
 
     /// The agent's own title normalization: Claude prefixes a status glyph, opencode "OC | ".
+    ///
+    /// `SessionResolver` calls this on BOTH sides of a match: the open tab's title, and every
+    /// candidate `AgentSession.title` from `sessions(inDirectory:)` — despite the `tabTitle:`
+    /// argument label, which names the more common of the two callers, not the only one. An
+    /// implementation must therefore be idempotent (`normalize(normalize(x)) == normalize(x)`): a
+    /// session title is never itself wrapped in this provider's tab-title decoration, so running it
+    /// through `normalize` has to be a safe no-op, not a second strip.
     func normalize(tabTitle: String) -> String
 
     /// Called once by `TabRestorer.restore`, before any `command` is built for any entry — for a

@@ -128,6 +128,18 @@ final class SessionResolverTests: XCTestCase {
         XCTAssertEqual(entries.map(\.provider), ["first", "second"])
     }
 
+    /// An unresolved tab must still name the agent it actually belongs to — the last non-fallback
+    /// provider whose `mayOwn` claimed it — rather than defaulting to Claude just because Claude's
+    /// unconditional `mayOwn` also happens to be tried and also finds nothing.
+    func testUnresolvedTabRecordsTheLastProviderThatClaimedItNotTheFallback() {
+        let owner = FakeProvider(id: "owner")
+        let claude = FakeProvider(id: "claude", isFallback: true)
+        let entries = SessionResolver.resolve(tabs: [tab(1, "alpha", "/tmp/a")], providers: [owner, claude])
+        XCTAssertNil(entries[0].sessionID)
+        XCTAssertEqual(entries[0].provider, "owner",
+                       "the non-fallback provider that claimed the tab must be recorded, not the fallback")
+    }
+
     // MARK: - isFallback ordering
 
     /// The rule "Claude is the fallback and must come last" used to live only in a comment,
