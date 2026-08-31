@@ -43,7 +43,7 @@ struct MainWindowView: View {
                     VStack(spacing: 2) {
                         pinnedButton(L10n.proxy, icon: "network", selection: .proxy)
                         pinnedButton(L10n.cleanup, icon: "trash", selection: .cleanup)
-                        pinnedButton(L10n.claudeTabsSection, icon: "macwindow.on.rectangle", selection: .claudeTabs)
+                        pinnedButton(L10n.claudeTabsSection, icon: "macwindow", selection: .claudeTabs)
                         pinnedButton(L10n.settings, icon: "gearshape", selection: .settings)
                     }
                     .padding(8)
@@ -120,7 +120,16 @@ struct MainWindowView: View {
         return Button {
             appModel.selection = selection
         } label: {
-            Label(title, systemImage: icon)
+            HStack(spacing: 6) {
+                // A fixed icon column instead of `Label`'s intrinsic one: SF Symbols differ in
+                // width (`macwindow.on.rectangle` is half again as wide as `trash`), and with a
+                // plain Label that difference pushes one row's title out of line with its
+                // neighbours. Sizing the column makes the alignment a property of the layout
+                // rather than of whichever symbol someone picks next.
+                Image(systemName: icon)
+                    .frame(width: 18, alignment: .center)
+                Text(title)
+            }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.vertical, 5)
                 .padding(.horizontal, 8)

@@ -142,3 +142,95 @@ final class LiveTranscriptIndex: TranscriptIndexing, @unchecked Sendable {
         return result
     }
 }
+
+/// Holds the background-session set for one restore, shared across every copy of the
+/// `ClaudeSessionProvider` value that carries it.
+///
+/// `ClaudeSessionProvider` is a struct — `TabRestorer` stores it in a `[AgentSessionProvider]`
+/// array and both `prepareForRestore()` and the later `command(resuming:in:)` calls read from
+/// whatever copy sits in that array, not from each other directly. A plain stored `Set` would make
+/// `prepareForRestore()`'s fetch invisible to those later calls the moment either side is copied;
+/// a reference type behind a `let` is what keeps them looking at the same fetch. `@unchecked
+/// Sendable` plus `NSLock`, same discipline `LiveTranscriptIndex` already uses for its caches —
+/// never held across the subprocess call itself.
+private final class BackgroundSessionCache: @unchecked Sendable {
+    private let lock = NSLock()
+    private var ids: Set<String>?
+
+    /// Fetches once and remembers the result for `ids(fallback:)` to read back later. The
+    /// subprocess call happens outside the lock — a slow login shell must not block anything else
+    /// touching this cache, and nothing else does concurrently in practice, but the discipline is
+    /// cheap and matches the rest of this codebase.
+    func prepare(using listing: BackgroundSessionListing) {
+        let fetched = listing.backgroundSessionIDs()
+        lock.lock()
+        ids = fetched
+        lock.unlock()
+    }
+
+    /// The prepared set, or a direct fetch if `prepare(using:)` was never called first — there is
+    /// no such call site today (`TabRestorer.restore` always prepares every provider before
+    /// building any command), but `command(resuming:in:)` must still answer correctly if one ever
+    /// appears, rather than silently treating everything as non-background.
+    func ids(fallback: BackgroundSessionListing) -> Set<String> {
+        lock.lock()
+        let cached = ids
+        lock.unlock()
+        return cached ?? fallback.backgroundSessionIDs()
+    }
+}
+
+/// Claude Code, from the restore mechanism's point of view.
+///
+/// It has no title prefix of its own — only a status glyph that changes constantly while the
+/// model is working — so it always claims a tab: it is the default provider, and belongs last in
+/// the list, tried only once every prefix-bearing provider has passed.
+struct ClaudeSessionProvider: AgentSessionProvider {
+    let id = AgentProviderID.claude
+    /// Claude is the fallback: no prefix, so it is tried last — `SessionResolver.resolve` reorders
+    /// providers by this, regardless of the order the caller built the array in.
+    let isFallback = true
+
+    private let index: TranscriptIndexing
+    private let backgroundSessions: BackgroundSessionListing
+    /// Fresh per `ClaudeSessionProvider` instance — each restore's own provider gets its own
+    /// cache, refetched by `prepareForRestore()` at the start of that restore.
+    private let backgroundCache = BackgroundSessionCache()
+
+    init(index: TranscriptIndexing = LiveTranscriptIndex(),
+         backgroundSessions: BackgroundSessionListing = LiveBackgroundSessions()) {
+        self.index = index
+        self.backgroundSessions = backgroundSessions
+    }
+
+    /// No prefix to check — every tab is a candidate.
+    func mayOwn(tabTitle: String) -> Bool { true }
+
+    func sessions(inDirectory directory: String) -> [AgentSession] {
+        index.titles(forWorkingDirectory: directory).map {
+            AgentSession(id: $0.sessionID, title: $0.aiTitle, lastActivity: $0.modifiedAt)
+        }
+    }
+
+    /// Strips the leading status glyph ("✳ ", "◐ ") so the title matches the `aiTitle` recorded
+    /// in the transcript.
+    func normalize(tabTitle: String) -> String {
+        let trimmed = tabTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let start = trimmed.firstIndex(where: { $0.isLetter || $0.isNumber }) else { return "" }
+        return String(trimmed[start...]).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Fetches the background-session set once for the restore about to happen — see
+    /// `AgentSessionProvider.prepareForRestore()`. This is what turns "one `claude agents --json`
+    /// per Claude entry in the restore" back into "one per restore, no matter how many entries".
+    func prepareForRestore() {
+        backgroundCache.prepare(using: backgroundSessions)
+    }
+
+    /// `attach` for a session currently running in the background, `--resume` otherwise — see
+    /// `RestoreCommand`.
+    func command(resuming sessionID: String, in cwd: String) -> String {
+        RestoreCommand.text(cwd: cwd, sessionID: sessionID,
+                            isBackground: backgroundCache.ids(fallback: backgroundSessions).contains(sessionID))
+    }
+}

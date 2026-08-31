@@ -93,14 +93,17 @@ struct RestoreOutcome: Equatable {
 /// in the same second.
 struct TabRestorer {
     let runner: AppleScriptRunning
-    let sessions: BackgroundSessionListing
+    /// Looked up by `RestoreAction.provider` (== `ClaudeTabEntry.provider`) to build the resume
+    /// command — each provider owns its own agent's command line, `claude --resume`/`attach` for
+    /// Claude, `opencode --session` for opencode.
+    let providers: [AgentSessionProvider]
     let stepDelay: Duration
 
     init(runner: AppleScriptRunning = LiveAppleScriptRunner(),
-         sessions: BackgroundSessionListing = LiveBackgroundSessions(),
+         providers: [AgentSessionProvider] = AgentProviders.makeDefault(),
          stepDelay: Duration = .milliseconds(700)) {
         self.runner = runner
-        self.sessions = sessions
+        self.providers = providers
         self.stepDelay = stepDelay
     }
 
@@ -108,9 +111,10 @@ struct TabRestorer {
     /// rest from being attempted, so every action always runs.
     @discardableResult
     func restore(_ actions: [RestoreAction]) async -> RestoreOutcome {
-        // Asked once for the whole restore, not per tab: it costs a subprocess, and the answer
-        // cannot change meaningfully while we are opening tabs.
-        let background = sessions.backgroundSessionIDs()
+        // Once for the whole restore, before any command is built — see
+        // `AgentSessionProvider.prepareForRestore()`. Claude uses this to fetch the
+        // background-session set a single time instead of once per entry.
+        for provider in providers { provider.prepareForRestore() }
         var succeeded = 0
         var failed = 0
         for (offset, action) in actions.enumerated() {
@@ -119,23 +123,25 @@ struct TabRestorer {
             }
             let args: [String]
             switch action {
-            case let .inputText(cwd, sessionID):
-                args = RestoreScript.inputTextArgs(
-                    text: RestoreCommand.text(cwd: cwd, sessionID: sessionID,
-                                              isBackground: isBackground(sessionID, in: background)))
-            case let .newTab(cwd, sessionID):
-                args = RestoreScript.newTabArgs(
-                    cwd: cwd,
-                    text: RestoreCommand.text(cwd: cwd, sessionID: sessionID,
-                                              isBackground: isBackground(sessionID, in: background)))
+            case let .inputText(cwd, sessionID, provider):
+                args = RestoreScript.inputTextArgs(text: command(cwd: cwd, sessionID: sessionID, providerID: provider))
+            case let .newTab(cwd, sessionID, provider):
+                args = RestoreScript.newTabArgs(cwd: cwd,
+                                                text: command(cwd: cwd, sessionID: sessionID, providerID: provider))
             }
             if runner.run(args) { succeeded += 1 } else { failed += 1 }
         }
         return RestoreOutcome(succeeded: succeeded, failed: failed)
     }
 
-    private func isBackground(_ sessionID: String?, in background: Set<String>) -> Bool {
-        guard let sessionID else { return false }
-        return background.contains(sessionID)
+    /// A tab with no resolved session, or whose provider is no longer registered, still opens a
+    /// shell in its directory — the feature's whole safety story, and why this never returns
+    /// nothing to type at all.
+    private func command(cwd: String, sessionID: String?, providerID: String) -> String {
+        guard let sessionID else { return RestoreCommand.text(cwd: cwd, sessionID: nil) }
+        guard let provider = providers.first(where: { $0.id == providerID }) else {
+            return RestoreCommand.text(cwd: cwd, sessionID: nil)
+        }
+        return provider.command(resuming: sessionID, in: cwd)
     }
 }
