@@ -649,20 +649,18 @@ final class ClaudeTabsModel {
     /// never through a transcript or a session listing — that expensive path is `SessionResolver`'s
     /// alone, and only the open-tabs snapshot needs it.
     ///
-    /// A read that fails or finds Ghostty not running falls back to the snapshot's own session ids
-    /// — today's (imperfect, but safe) behaviour, and no worse.
+    /// A read that fails falls back to the snapshot's own session ids — today's (imperfect, but
+    /// safe) behaviour, and no worse, for the one case where this genuinely does not know: `.failed`
+    /// is Automation denied or some other error, not an answer. `.notRunning` gets no such fallback
+    /// — see `GhosttyTabsResult.liveOpenSessionIDs(catalog:providers:fallback:)`, the pure decision
+    /// this wires up.
     func refreshLiveOpenSessionIDs() async {
         let reader = self.reader
         let providers = self.providers
         let catalog = self.historyEntries
         let fallback = Set((snapshot?.tabs ?? []).compactMap(\.sessionID))
         let result = await Task.detached(priority: .utility) { () -> Set<String> in
-            switch reader.readTabs() {
-            case .notRunning, .failed:
-                return fallback
-            case let .tabs(tabs):
-                return SessionCatalog.liveOpenSessionIDs(tabs: tabs, catalog: catalog, providers: providers)
-            }
+            reader.readTabs().liveOpenSessionIDs(catalog: catalog, providers: providers, fallback: fallback)
         }.value
         liveOpenSessionIDs = result
     }
@@ -702,6 +700,25 @@ private extension GhosttyTabsResult {
         switch self {
         case let .tabs(tabs): return tabs.count
         case .notRunning, .failed: return 0
+        }
+    }
+
+    /// The truthful live-open-session set this read supports — the pure decision
+    /// `ClaudeTabsModel.refreshLiveOpenSessionIDs()` wires up. Unlike `openTabCount` above, the two
+    /// non-`.tabs` cases are NOT the same answer here: `.notRunning` is positive knowledge (Ghostty
+    /// is not running, so exactly zero tabs are open — see `GhosttyTabReading`'s own doc), and the
+    /// right answer is the empty set, not `fallback`. Returning `fallback` there would reproduce
+    /// the very bug this feature exists to fix, in the window most likely to matter: right after a
+    /// reboot, before Ghostty has even been launched, when the user opens this page specifically to
+    /// find a session that is NOT open. `.failed` is genuinely "we do not know" — Automation denied,
+    /// or some other read error — so `fallback` (the snapshot's own session ids) stands in there,
+    /// same as before.
+    func liveOpenSessionIDs(catalog: [CatalogEntry], providers: [AgentSessionProvider],
+                            fallback: Set<String>) -> Set<String> {
+        switch self {
+        case .notRunning: return []
+        case .failed: return fallback
+        case let .tabs(tabs): return SessionCatalog.liveOpenSessionIDs(tabs: tabs, catalog: catalog, providers: providers)
         }
     }
 }
