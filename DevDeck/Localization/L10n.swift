@@ -538,9 +538,39 @@ enum L10n {
         t("The linked tunnel command is missing — re-create the proxy.",
           "Привязанная команда туннеля отсутствует — пересоздайте прокси.")
     }
+    static var proxyRemoteEdit: String { t("Edit remote proxy…", "Изменить удалённый прокси…") }
+    static var proxyRemoteEditHelp: String { t("Edit this remote proxy", "Изменить этот удалённый прокси") }
     static var proxyRemoteDelete: String { t("Delete remote proxy", "Удалить удалённый прокси") }
+    static var proxyRemoteDeleteHelp: String { t("Delete this remote proxy", "Удалить этот удалённый прокси") }
     static var proxyRemoteDeleteTunnelToo: String {
         t("Also delete its SSH tunnel command", "Удалить и её команду SSH-туннеля")
+    }
+    static func proxyRemoteDeleteConfirmTitle(_ name: String) -> String {
+        t("Delete “\(name)”?", "Удалить «\(name)»?")
+    }
+    static var proxyRemoteDeleteConfirmMessage: String {
+        t("The tunnel command stays in the deck unless you choose to remove it too.",
+          "Команда туннеля останется в деке, если вы не выберете удалить и её.")
+    }
+    static var proxyRemoteDeleteProxyOnly: String {
+        t("Delete Proxy Only", "Удалить только прокси")
+    }
+    /// Prefill failed: the tunnel command doesn't start with the generated prefix at the proxy's
+    /// current SOCKS port, so the destination inside it can't be parsed out reliably.
+    static var proxyRemoteTunnelHandEdited: String {
+        t("The tunnel command was edited by hand — its destination isn’t shown here to avoid "
+          + "overwriting your changes. Edit the command directly instead.",
+          "Команда туннеля отредактирована вручную — её назначение здесь не показано, чтобы не "
+          + "затереть правки. Отредактируйте команду напрямую.")
+    }
+    static var proxyRemoteOpenTunnelCommand: String {
+        t("Open tunnel command…", "Открыть команду туннеля…")
+    }
+    static var proxyRemoteSocksPortHandEditedHint: String {
+        t("The tunnel command is hand-edited, so this port won’t be written into it — change it "
+          + "there too if you change it here.",
+          "Команда туннеля отредактирована вручную, поэтому этот порт не будет записан в неё — "
+          + "поменяйте его и там, если меняете здесь.")
     }
     static var proxyBrowserButton: String { t("Browser via proxy", "Браузер через прокси") }
     static var proxyBrowserHint: String {
