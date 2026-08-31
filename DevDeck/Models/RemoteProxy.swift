@@ -61,11 +61,28 @@ struct RemoteProxy: Codable, Equatable, Identifiable {
     func makeTunnelCommand(destination: String) -> Command {
         Command(
             name: L10n.proxyTunnelCommandName(name),
-            command: "ssh -N -D 127.0.0.1:\(socksPort) \(destination)",
+            command: Self.tunnelCommandString(destination: destination, socksPort: socksPort),
             isDaemon: true,
             watchdogEnabled: true,
             port: socksPort
         )
+    }
+
+    /// The generated shape of the tunnel command's `command` string — the single source both
+    /// `makeTunnelCommand` and `TunnelCommandUpdate` build from and check against, so the
+    /// generator and the "was this hand-edited?" parser can never drift apart.
+    static func tunnelCommandString(destination: String, socksPort: Int) -> String {
+        "ssh -N -D 127.0.0.1:\(socksPort) \(destination)"
+    }
+
+    /// Recover the destination a tunnel command was generated from — how the edit sheet prefills
+    /// its destination field. nil when `command` does not start with the expected prefix at
+    /// `socksPort`: the command was edited by hand beyond the destination suffix (a jump host, an
+    /// identity file, reordered flags…), or predates this field, and can't be parsed reliably.
+    static func parsedDestination(fromTunnelCommand command: String, socksPort: Int) -> String? {
+        let prefix = tunnelCommandString(destination: "", socksPort: socksPort)
+        guard command.hasPrefix(prefix) else { return nil }
+        return String(command.dropFirst(prefix.count))
     }
 
     /// The synthetic bridge daemon: the built-in engine with a SOCKS upstream, expressed through
