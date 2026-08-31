@@ -279,4 +279,90 @@ final class ProxyManagerRemoteTests: XCTestCase {
                          message: "a selected remote proxy must come up at launch, like the share")
         XCTAssertTrue(relaunched.runner.startedCommandIDs.contains(RemoteProxy.bridgeDaemonID))
     }
+
+    // MARK: - "Check" says why (Fix 3)
+
+    func testCheckReportsBothDownBeforeEitherDaemonStarts() async {
+        let rig = makeRig()
+        addAndSelect(rig)
+        await sleepUntil({ rig.runner.startedCommandIDs.count >= 2 },
+                         message: "expected both daemons to launch")
+
+        rig.manager.checkActiveProxy()
+
+        XCTAssertEqual(rig.manager.clientCheck, .unavailable(L10n.proxyCheckUnavailableBothDown))
+    }
+
+    func testCheckReportsTunnelDownWhenOnlyTheBridgeIsUp() async {
+        let rig = makeRig()
+        addAndSelect(rig)
+        await sleepUntil({ rig.runner.startedCommandIDs.count >= 2 },
+                         message: "expected both daemons to launch")
+        rig.bridgeController?.started(pid: nil)
+        await yieldUntil { rig.processManager.states[RemoteProxy.bridgeDaemonID] == .daemonRunning }
+
+        rig.manager.checkActiveProxy()
+
+        XCTAssertEqual(rig.manager.clientCheck, .unavailable(L10n.proxyCheckUnavailableTunnelDown),
+                       "the bug report: the bridge alone being up must not look identical to nothing at all")
+    }
+
+    func testCheckReportsBridgeDownWhenOnlyTheTunnelIsUp() async {
+        let rig = makeRig()
+        addAndSelect(rig)
+        await sleepUntil({ rig.runner.startedCommandIDs.count >= 2 },
+                         message: "expected both daemons to launch")
+        rig.tunnelController?.started(pid: 42)
+        await yieldUntil { rig.processManager.states[rig.remote.tunnelCommandID!] == .daemonRunning }
+
+        rig.manager.checkActiveProxy()
+
+        XCTAssertEqual(rig.manager.clientCheck, .unavailable(L10n.proxyCheckUnavailableBridgeDown))
+    }
+
+    func testCheckReportsTunnelMissingWhenTheLinkedCommandIsGone() {
+        let rig = makeRig()
+        rig.manager.addRemoteProxy(name: "vds", destination: "user@vds", localPort: 18888, socksPort: 1080)
+        let remote = rig.remote
+        rig.store.delete(commandID: remote.tunnelCommandID!)
+        rig.manager.setActiveRemoteProxy(remote)   // startRemote() finds nothing to launch
+
+        rig.manager.checkActiveProxy()
+
+        XCTAssertEqual(rig.manager.clientCheck, .unavailable(L10n.proxyRemoteTunnelMissing))
+    }
+
+    func testCheckSucceedsOnceBothDaemonsAreUpEvenThoughItWasUnavailableBefore() async {
+        let probe: @Sendable (String) -> String? = { _ in "1.2.3.4" }
+        let store = CommandStore(configURL: url)
+        let runner = FakeCommandRunner()
+        let processManager = ProcessManager(runner: runner, notifier: FakeNotifier(),
+                                           reaper: FakeDaemonReaper(), portInspector: FakePortInspector(),
+                                           policy: Self.fastPolicy)
+        let manager = ProxyManager(discovering: FakeProxyDiscovering(), advertiser: FakeProxyAdvertising(),
+                                   credentials: FakeProxyCredentialStore(), lanIP: { "192.168.1.42" },
+                                   gostPath: { _ in nil }, exitIPProbe: probe,
+                                   exitIPRetryDelay: .milliseconds(1),
+                                   envFile: FakePrivateFile(), shareConfigFile: FakePrivateFile(),
+                                   bridgeConfigFile: FakePrivateFile(url: URL(fileURLWithPath: "/fake/proxy-bridge.json")))
+        manager.store = store
+        manager.processManager = processManager
+        manager.addRemoteProxy(name: "vds", destination: "user@vds", localPort: 18888, socksPort: 1080)
+        manager.setActiveRemoteProxy(store.config.remoteProxies[0])
+        await sleepUntil({ runner.startedCommandIDs.count >= 2 }, message: "expected both daemons to launch")
+        let tunnelID = store.config.remoteProxies[0].tunnelCommandID!
+
+        manager.checkActiveProxy()
+        XCTAssertEqual(manager.clientCheck, .unavailable(L10n.proxyCheckUnavailableBothDown))
+
+        runner.controller(for: tunnelID)?.started(pid: 42)
+        runner.controller(for: RemoteProxy.bridgeDaemonID)?.started(pid: nil)
+        await yieldUntil {
+            processManager.states[tunnelID] == .daemonRunning
+                && processManager.states[RemoteProxy.bridgeDaemonID] == .daemonRunning
+        }
+
+        manager.checkActiveProxy()
+        await sleepUntil { manager.clientCheck == .success("1.2.3.4") }
+    }
 }

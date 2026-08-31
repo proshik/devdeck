@@ -182,6 +182,10 @@ struct ProxySectionView: View {
                     Image(systemName: "xmark.circle.fill").font(.system(size: 9))
                         .foregroundStyle(.red)
                     Text(L10n.proxyCheckFailed)
+                case .unavailable(let reason):
+                    Image(systemName: "exclamationmark.triangle.fill").font(.system(size: 9))
+                        .foregroundStyle(.orange)
+                    Text(reason)
                 }
                 Spacer()
             }
