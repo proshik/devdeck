@@ -39,6 +39,30 @@ enum ClaudeTabsCaptureInterval {
     }
 }
 
+/// The tab-set fingerprint `ClaudeTabsModel.collect` compares against the previous capture — see
+/// `ClaudeTabsModel.lastSignature`. Never displayed and never fed to `SessionResolver`: both of
+/// those always work from the reader's raw tabs, with real titles intact.
+enum CaptureSignature {
+    /// Strips each title's leading run of non-alphanumeric characters before comparing. Claude Code
+    /// animates a status glyph (`✳`, `◐`, `◑`) while it works, so the raw title changes on most
+    /// ticks even when the tab SET has not — comparing it unnormalized would make the signature
+    /// check fire the expensive resolve pass on nearly every tick of a busy session, defeating the
+    /// "unchanged → skip it" optimisation exactly when it matters most. A tab-set change that is
+    /// only ever a glyph is not a tab-set change.
+    static func normalized(_ tabs: [GhosttyTab]) -> [GhosttyTab] {
+        tabs.map { tab in
+            var copy = tab
+            copy.title = stripLeadingNonAlphanumeric(tab.title)
+            return copy
+        }
+    }
+
+    private static func stripLeadingNonAlphanumeric(_ title: String) -> String {
+        guard let start = title.firstIndex(where: { $0.isLetter || $0.isNumber }) else { return "" }
+        return String(title[start...])
+    }
+}
+
 /// Ghostty, as an application on this Mac.
 enum GhosttyApp {
     static let bundleID = "com.mitchellh.ghostty"
@@ -92,9 +116,12 @@ final class ClaudeTabsModel {
     /// capture", which is also why it is reset on `.failed` and `.notRunning`: a read that didn't
     /// produce a tab set must not be mistaken for an unchanged one.
     ///
-    /// The signature IS the tab set: comparing `[GhosttyTab]` directly (rather than joining fields
-    /// into a string) is what keeps a tab character embedded in a title from shifting field
-    /// boundaries and making two different tab sets compare equal.
+    /// This is `CaptureSignature.normalized(tabs)`, not the raw tabs: comparing `[GhosttyTab]`
+    /// directly (rather than joining fields into a string) is what keeps a tab character embedded
+    /// in a title from shifting field boundaries and making two different tab sets compare equal,
+    /// and normalizing each title before that comparison is what keeps Claude's animated status
+    /// glyph from doing the opposite — making the SAME tab set compare as different on every tick
+    /// it happens to redraw. See `CaptureSignature`.
     private var lastSignature: [GhosttyTab]?
     /// Throttles the automatic timer path only; `captureNow()` is an explicit user action and
     /// `captureBeforeShutdown()` has its own 30-second freshness rule — neither goes through `tick`.
@@ -230,19 +257,27 @@ final class ClaudeTabsModel {
     }
 
     /// The last capture before the machine — or the app — goes away: `willPowerOffNotification`
-    /// and `applicationWillTerminate`. Neither can await, so this path is synchronous, and made
-    /// safe by being **bounded** rather than by being asynchronous:
+    /// and `applicationWillTerminate`. Neither can await, so this path is synchronous.
     ///
-    /// - the transcript work is bounded by `LiveTranscriptIndex`'s two caches (titles per (file,
-    ///   mtime), project directories per working directory including misses), so the full-corpus
-    ///   fallback cannot run here more than once per directory per app run;
+    /// Costs that stay bounded the way they always have:
+    /// - a `pgrep` and one `osascript` tab enumeration;
+    /// - Claude transcript re-reads, bounded by `LiveTranscriptIndex`'s two caches (titles per
+    ///   (file, mtime), project directories per working directory including misses) to at most one
+    ///   full-corpus fallback per directory per app run;
     /// - a snapshot taken in the last 30 seconds is current enough for a shutdown, and this path
-    ///   then does no work at all. The tab set does not change in the half minute before a
+    ///   then does no work at all — the tab set does not change in the half minute before a
     ///   shutdown; the risk of being killed mid-read does.
     ///
-    /// The remaining cost is a `pgrep`, one `osascript` enumeration and re-reading the transcripts
-    /// whose mtime moved since the last capture — hundreds of milliseconds, spent inside the
-    /// window macOS gives, and spent only when the snapshot on disk is genuinely stale.
+    /// What is NOT bounded the same way: with an opencode tab open, `collect` also shells out to
+    /// `opencode session list --format json`, once per opencode working directory whose
+    /// `LiveOpencodeSessions` cache entry is missing or older than its 60 s TTL. That call runs
+    /// synchronously, on the main actor, with no timeout on `waitUntilExit()` — a hung `opencode`
+    /// binary blocks quit until the OS itself intervenes, not until this method decides to give up.
+    /// Two things keep it rare rather than eliminating it: the normalized-title signature check
+    /// (`CaptureSignature`) means most ticks — including every one where only Claude's status glyph
+    /// changed — resolve nothing and reach no provider at all, and the 60 s cache means even a real
+    /// change asks each opencode directory at most once a minute. "Rare" is not "bounded", though,
+    /// and this path must not be read as safe by construction the way the Claude side still is.
     func captureBeforeShutdown() {
         guard isEnabled(), !isRestoring, mayOverwriteSnapshot() else { return }
         if let capturedAt = snapshot?.capturedAt,
@@ -316,12 +351,25 @@ final class ClaudeTabsModel {
     /// Read + resolve, with nothing actor-bound in it, so the async path and the synchronous
     /// shutdown path run exactly the same code.
     ///
-    /// `previousSignature` is the tab set of the last APPLIED capture; a `.tabs` read that matches
-    /// it exactly (`GhosttyTab` is `Equatable`) skips the transcript pass entirely — that pass is
-    /// the expensive part (whole transcripts re-read on every mtime change), while enumerating the
-    /// tabs themselves is one cheap AppleScript round trip. Comparing the tabs directly, rather
-    /// than a string joined from their fields, is deliberate: a title containing a tab character
-    /// could otherwise shift field boundaries and make two different tab sets compare equal.
+    /// `previousSignature` is the tab set of the last APPLIED capture, in whatever form the caller
+    /// has it — `lastSignature` already holds a normalized signature (see below), but this method
+    /// normalizes it again on the way in regardless, so a caller is never required to know that
+    /// contract. A `.tabs` read whose OWN normalized signature then matches skips the
+    /// transcript/session pass entirely — that pass is the expensive part (whole transcripts
+    /// re-read on every mtime change, an `opencode` subprocess per opencode directory), while
+    /// enumerating the tabs themselves is one cheap AppleScript round trip.
+    ///
+    /// Comparing the tabs directly, rather than a string joined from their fields, is deliberate: a
+    /// title containing a tab character could otherwise shift field boundaries and make two
+    /// different tab sets compare equal. Normalizing each title before that comparison is the other
+    /// half: Claude Code's animated status glyph must not make the SAME tab set compare as
+    /// different on every redraw — see `CaptureSignature`. Normalizing is idempotent, so comparing
+    /// an already-normalized `previousSignature` against a freshly-normalized one costs nothing
+    /// extra beyond the second pass itself.
+    ///
+    /// `SessionResolver.resolve` still runs against the RAW `tabs`, never the normalized signature:
+    /// the signature exists only to decide whether to resolve at all, not to stand in for the tabs
+    /// once the decision is made.
     nonisolated static func collect(reader: GhosttyTabReading,
                                     providers: [AgentSessionProvider],
                                     previousSignature: [GhosttyTab]?) -> CaptureOutcome {
@@ -331,8 +379,9 @@ final class ClaudeTabsModel {
         case let .failed(message):
             return .failed(message)
         case let .tabs(tabs):
-            guard tabs != previousSignature else { return .unchanged }
-            return .entries(SessionResolver.resolve(tabs: tabs, providers: providers), signature: tabs)
+            let signature = CaptureSignature.normalized(tabs)
+            guard signature != previousSignature.map(CaptureSignature.normalized) else { return .unchanged }
+            return .entries(SessionResolver.resolve(tabs: tabs, providers: providers), signature: signature)
         }
     }
 
