@@ -176,7 +176,8 @@ final class ClaudeTabsModel {
                            object: nil, queue: .main) { [weak self] _ in
             // Synchronously, on the notification's own main-queue delivery: the session is being
             // torn down and a Task scheduled here may simply never be run. `captureBeforeShutdown`
-            // is the bounded path that exists for this.
+            // is the synchronous path that exists for this — read its own comment for what it
+            // actually costs, which is no longer strictly bounded now that a provider can shell out.
             MainActor.assumeIsolated { self?.captureBeforeShutdown() }
         }
 

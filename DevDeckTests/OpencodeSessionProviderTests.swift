@@ -3,8 +3,9 @@ import XCTest
 
 /// `opencode session list --format json` parsing, `OpencodeSessionProvider`'s prefix/normalize/
 /// command logic, and the resolver working the two agents together. No process is ever spawned —
-/// `LiveOpencodeSessions` itself is exercised nowhere here, only through `OpencodeSessionListing`
-/// fakes, the same probe pattern `ClaudeSessionProvider`/`TranscriptIndexing` already use.
+/// `LiveOpencodeSessions` is constructed here only for the caching tests, and even there its
+/// subprocess is replaced by an injected `fetch` closure — the same probe pattern
+/// `ClaudeSessionProvider`/`TranscriptIndexing` already use.
 final class OpencodeSessionProviderTests: XCTestCase {
 
     // MARK: - OpencodeSessions.parse
