@@ -563,7 +563,15 @@ final class ProxyManager {
 
     /// Feed the listener's own output to the connected-clients monitor, and nothing else's: any
     /// other daemon may legitimately print JSON that looks like a gost session.
-    func ingestDaemonOutput(_ commandID: UUID, _ line: String) {
+    func ingestDaemonOutput(_ commandID: UUID, _ line: String, _ stream: OutputChannel = .stdout) {
+        // The bridge is a synthetic daemon with no deck row, no log button and no port-conflict
+        // panel — the user never sees it. Dropping its output meant that when it died the reason
+        // died with it, and "Check" simply went quiet with nothing to explain why. The diagnostic
+        // log is the only place this daemon can be heard, so it speaks there.
+        if commandID == RemoteProxy.bridgeDaemonID {
+            DiagnosticLog.shared.log("Proxy bridge: \(line)", level: stream == .stderr ? .error : .info)
+            return
+        }
         guard commandID == ProxyShare.daemonID else { return }
         clientMonitor.ingest(line)
     }

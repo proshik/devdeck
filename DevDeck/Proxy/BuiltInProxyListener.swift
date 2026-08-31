@@ -100,7 +100,11 @@ final class BuiltInProxyListener: @unchecked Sendable {
         do {
             // Scope and reuse both live in `builtInProxyBindParameters` — see its comment.
             let params = builtInProxyBindParameters(port: requestedPort, isBridge: upstream != nil)
-            if requestedPort == 0 {
+            // When the parameters already pin the local endpoint — the bridge, which must bind
+            // loopback-only — the port is ALREADY specified there. Passing it a second time via
+            // `on:` states the same thing twice and the two forms conflict: NWListener throws
+            // EINVAL at creation, every time, and the bridge died at birth on every restart.
+            if requestedPort == 0 || params.requiredLocalEndpoint != nil {
                 listener = try NWListener(using: params)
             } else {
                 listener = try NWListener(using: params, on: NWEndpoint.Port(rawValue: requestedPort)!)

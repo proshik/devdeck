@@ -334,6 +334,32 @@ final class BuiltInProxyListenerTests: XCTestCase {
                        "the bridge must not be reachable on \(lan) — that is the whole point")
     }
 
+    /// The bridge on a REAL port, which is the only way it ever runs in production.
+    ///
+    /// Every other bridge test binds port 0, and port 0 takes a different branch in `bind()` —
+    /// so the combination that actually ships was never exercised. It was broken from v0.13.3
+    /// until this test existed: the parameters pinned the local endpoint AND the port was passed
+    /// again through `NWListener(using:on:)`, which is EINVAL, so the bridge died at birth on
+    /// every start and the remote proxy silently never worked.
+    func testBridgeListenerBindsARealPortNotOnlyPortZero() throws {
+        let port: UInt16 = 18_913
+        let started = expectation(description: "listener started")
+        var terminal: RunnerOutput?
+        let proxy = BuiltInProxyListener(port: port, auth: nil,
+                                         upstream: .hostPort(host: "127.0.0.1", port: 9_050)) { event in
+            if case .started = event { started.fulfill() }
+            if case .terminated = event { terminal = event }
+        }
+        proxy.start()
+        wait(for: [started], timeout: 5)
+        defer { proxy.stop() }
+
+        XCTAssertEqual(awaitBoundPort(of: proxy), port, "the bridge must actually bind the port it was given")
+        XCTAssertNil(terminal, "binding must not fail: \(String(describing: terminal))")
+        XCTAssertTrue(connects(host: "127.0.0.1", port: NWEndpoint.Port(rawValue: port)!),
+                      "a bound bridge must accept loopback connections")
+    }
+
     /// True when a TCP connection to `host:port` reaches `.ready` inside the timeout. A refused
     /// port leaves NWConnection in `.waiting`/`.failed`, so "never ready" is the negative signal.
     private func connects(host: NWEndpoint.Host, port: NWEndpoint.Port, timeout: TimeInterval = 3) -> Bool {

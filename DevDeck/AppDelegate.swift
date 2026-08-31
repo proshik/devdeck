@@ -43,8 +43,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             proxyManager?.routing(for: command) ?? .notRouted
         }
         // The listener's own log lines are where "who is connected" comes from.
-        manager.outputObserver = { [weak proxyManager] commandID, line, _ in
-            proxyManager?.ingestDaemonOutput(commandID, line)
+        manager.outputObserver = { [weak proxyManager] commandID, line, stream in
+            proxyManager?.ingestDaemonOutput(commandID, line, stream)
         }
         proxyManager.start()
         // Start Sparkle with the persisted auto-update preference; populates the indicator when off.
