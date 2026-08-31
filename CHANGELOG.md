@@ -6,6 +6,20 @@ versioning follows [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **Session history on the Agent tabs page, and reopening one tab at a time.** The page used to
+  mirror only what was open, so a tab closed an hour ago was gone from it. It now also lists the
+  sessions both agents remember from the last 7 days — across every project, newest first, with a
+  search over title and directory — and every row carries a button that reopens just that one, in
+  its own directory, without touching the reboot snapshot. A row whose session is already open
+  offers nothing, since reopening it would only create a duplicate tab.
+
+  The window is 7 days for a measured reason: a transcript older than it is skipped without being
+  opened at all, which on a real machine is the difference between reading 270 MB and 1.1 GB. What
+  is read is remembered in `agent-sessions.json` (owner-only, beside the other files this app
+  writes), keyed by file and modification time, so the seconds a first build costs are paid once
+  rather than at every launch.
+
 ### Fixed
 - **A remote proxy could not be edited, only deleted and recreated.** `ProxyManager` already had
   `saveRemoteProxy`, but no screen called it — a typo'd SSH destination meant starting over. The

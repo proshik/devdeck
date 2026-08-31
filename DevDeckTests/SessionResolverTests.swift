@@ -9,6 +9,7 @@ final class SessionResolverTests: XCTestCase {
         func titles(forWorkingDirectory workingDirectory: String) -> [TranscriptTitle] {
             byDirectory[workingDirectory] ?? []
         }
+        func recentTranscripts(since: Date, known: [String: KnownTranscript]) -> [RecentTranscript] { [] }
     }
 
     private func title(_ text: String, _ id: String, _ seconds: TimeInterval) -> TranscriptTitle {
@@ -87,6 +88,7 @@ final class SessionResolverTests: XCTestCase {
 
         func mayOwn(tabTitle: String) -> Bool { owns(tabTitle) }
         func sessions(inDirectory directory: String) -> [AgentSession] { byDirectory[directory] ?? [] }
+        func recentSessions(since: Date) -> [AgentSession] { [] }
         func normalize(tabTitle: String) -> String { tabTitle }
         func command(resuming sessionID: String, in cwd: String) -> String { "" }
     }

@@ -91,11 +91,48 @@ final class ClaudeTabsModel {
     private(set) var snapshot: ClaudeTabsSnapshot?
     private(set) var lastError: String?
 
+    /// The session history list — `ClaudeTabsView`'s history section. Loaded once at `init` (like
+    /// `snapshot`), then replaced wholesale by `rebuildHistory()`; nothing ever mutates it in place.
+    private(set) var historyEntries: [CatalogEntry] = []
+    /// True for the duration of `rebuildHistory()` — the UI's cue to show a spinner instead of
+    /// looking frozen for the seconds a first build can take.
+    private(set) var isBuildingHistory = false
+
+    /// The session ids open in Ghostty **right now** — the truthful set `ClaudeTabsView` must
+    /// exclude the history section by, and must consult before offering to reopen a snapshot row
+    /// as a second tab. Replaces a read of `snapshot?.tabs`, which is wrong in exactly the state
+    /// the history section exists for: right after a reboot, before this boot's restore has run,
+    /// the snapshot still lists the PREVIOUS boot's tabs — not one of which Ghostty has reopened
+    /// yet. See `SessionCatalog.liveOpenSessionIDs` for how a live tab is matched against the
+    /// catalogue.
+    ///
+    /// Seeded here from the snapshot — the same value `refreshLiveOpenSessionIDs()` falls back to
+    /// when the read fails — so a view rendered before the first refresh completes is no worse off
+    /// than it was before this property existed.
+    private(set) var liveOpenSessionIDs: Set<String> = []
+
     private let reader: GhosttyTabReading
     /// Opencode's prefix-bearing provider, then Claude last as the fallback — though
     /// `SessionResolver.resolve` no longer trusts that ordering, it enforces it via `isFallback`.
     private let providers: [AgentSessionProvider]
     private let store: ClaudeTabsStore
+    private let sessionCatalog: SessionCatalog
+    /// Builds the ONE Claude provider a catalogue rebuild asks, wired with that rebuild's own
+    /// `knownTranscripts` hint — never `self.providers`' own `ClaudeSessionProvider`, which always
+    /// carries an empty hint because the capture path has no catalogue to consult. A factory rather
+    /// than a stored provider because the hint is different on every call.
+    private let makeClaudeProvider: @Sendable ([String: KnownTranscript]) -> AgentSessionProvider
+    /// Same reasoning for opencode: its provider must be constructed with the directories worth
+    /// asking, and those directories are only known once the rebuild has read the cached catalogue.
+    private let makeOpencodeProvider: @Sendable ([String]) -> AgentSessionProvider
+    /// Where `SessionCatalog.claudeCatalogEntry(for:projectsRoot:)` reconstructs a Claude session's
+    /// transcript path from — see that function's doc comment for why `AgentSession` does not carry
+    /// `sourcePath` itself. Must agree with whatever `LiveTranscriptIndex` the `makeClaudeProvider`
+    /// closure builds its provider on. In production both default to the one shared
+    /// `ClaudeProjectSlug.defaultProjectsRoot`, so that agreement is automatic; a test overriding
+    /// one without the other would see every build "succeed" while never actually reusing a cached
+    /// entry, since the reconstructed path would never match the one the index itself reports.
+    private let claudeProjectsRoot: URL
     private let bootTime: BootTimeProviding
     private let restorer: TabRestorer
     private let defaults: UserDefaults
@@ -134,6 +171,14 @@ final class ClaudeTabsModel {
     init(reader: GhosttyTabReading = LiveGhosttyTabReader(),
          providers: [AgentSessionProvider] = AgentProviders.makeDefault(),
          store: ClaudeTabsStore = ClaudeTabsStore(),
+         sessionCatalog: SessionCatalog = SessionCatalog(),
+         makeClaudeProvider: @escaping @Sendable ([String: KnownTranscript]) -> AgentSessionProvider = {
+             ClaudeSessionProvider(knownTranscripts: $0)
+         },
+         makeOpencodeProvider: @escaping @Sendable ([String]) -> AgentSessionProvider = {
+             OpencodeSessionProvider(recentDirectories: $0)
+         },
+         claudeProjectsRoot: URL = ClaudeProjectSlug.defaultProjectsRoot,
          bootTime: BootTimeProviding = LiveBootTime(),
          restorer: TabRestorer = TabRestorer(),
          defaults: UserDefaults = .standard,
@@ -142,12 +187,18 @@ final class ClaudeTabsModel {
         self.reader = reader
         self.providers = providers
         self.store = store
+        self.sessionCatalog = sessionCatalog
+        self.makeClaudeProvider = makeClaudeProvider
+        self.makeOpencodeProvider = makeOpencodeProvider
+        self.claudeProjectsRoot = claudeProjectsRoot
         self.bootTime = bootTime
         self.restorer = restorer
         self.defaults = defaults
         self.isEnabled = isEnabled
         self.isGhosttyRunning = isGhosttyRunning
         self.snapshot = store.load()
+        self.historyEntries = sessionCatalog.load()
+        self.liveOpenSessionIDs = Set((self.snapshot?.tabs ?? []).compactMap(\.sessionID))
     }
 
     func start(isEnabled: @escaping () -> Bool,
@@ -500,6 +551,145 @@ final class ClaudeTabsModel {
             }
         }
     }
+
+    // MARK: - Session history
+
+    /// Opens ONE session — from the tabs open right now or from the history list below them — as a
+    /// brand-new Ghostty tab. Deliberately the smallest possible thing: a single `.newTab` action
+    /// through the same `TabRestorer` a full restore uses, with no planner, no boot-time check, and
+    /// no snapshot write anywhere in it. This is an explicit, one-off user action, not a restore —
+    /// the plan's decision #5 ("one row, one action").
+    ///
+    /// `providerID` travels separately from `session` because `AgentSession` (Task 1) only ever
+    /// carries what a provider hands back about a session it already owns — id, title, activity,
+    /// directory — never which provider that was. `TabRestorer.restore` already resolves a
+    /// `RestoreAction.newTab`'s `provider` id against its own provider list to build the actual
+    /// command, exactly as it does for a full restore; this method's only job is to hand it the
+    /// right id for the row the user clicked.
+    ///
+    /// `RestoreAction.newTab` carries only a directory, a session id and a provider — no title, no
+    /// activity timestamp — so this is the shape a caller with just those three actually has. The
+    /// `AgentSession` overload below exists for callers (the history table) that already hold a
+    /// real session with real values; a caller with no `lastActivity` of its own (the open-tabs
+    /// row, which only ever fabricated `Date()` to satisfy the old `AgentSession`-only signature)
+    /// should call this one instead of inventing one.
+    func open(directory: String, sessionID: String, providerID: String) {
+        Task { @MainActor in
+            let outcome = await restorer.restore(
+                [.newTab(cwd: directory, sessionID: sessionID, provider: providerID)])
+            lastError = outcome.failed > 0 ? L10n.claudeTabsRestoreFailed : nil
+        }
+    }
+
+    /// Convenience for a caller that already holds a full `AgentSession` (the history table) —
+    /// delegates to the directory/session-id/provider overload above, which is all `open` ever
+    /// actually needs.
+    func open(_ session: AgentSession, providerID: String) {
+        open(directory: session.directory, sessionID: session.id, providerID: providerID)
+    }
+
+    /// Rebuilds the on-disk session catalogue — `ClaudeTabsView`'s history section, entirely
+    /// separate from the open-tabs snapshot above. Built on demand only (page open, refresh
+    /// button), never on a timer: the plan's decision #3.
+    ///
+    /// Everything expensive — loading the cached catalogue, asking each provider what it remembers
+    /// within `SessionHistoryWindow`, merging the two — runs off the main actor inside
+    /// `Task.detached`, the same split `capture()` gives the snapshot read: a cold walk of
+    /// `~/.claude/projects` plus, when opencode directories are new, a subprocess per directory can
+    /// take seconds, and a menu-bar app may not do that on its own UI thread. Only the store write
+    /// and the `@Observable` update happen back here.
+    func rebuildHistory() async {
+        guard !isBuildingHistory else { return }
+        isBuildingHistory = true
+        defer { isBuildingHistory = false }
+
+        let sessionCatalog = self.sessionCatalog
+        // The directories of the tabs open right now — the other half of what
+        // `SessionCatalog.opencodeDirectories(in:alsoInclude:)` needs, so a directory is never
+        // forgotten just because its tab closed, nor missed just because nothing has been
+        // catalogued for it yet. Read here, on the main actor, because `snapshot` lives here.
+        let openDirectories = snapshot?.tabs.map(\.workingDirectory) ?? []
+        let makeClaudeProvider = self.makeClaudeProvider
+        let makeOpencodeProvider = self.makeOpencodeProvider
+        let claudeProjectsRoot = self.claudeProjectsRoot
+        let merged = await Task.detached(priority: .utility) {
+            let cached = sessionCatalog.load()
+            return Self.rebuiltCatalog(cached: cached, openDirectories: openDirectories,
+                                       makeClaudeProvider: makeClaudeProvider,
+                                       makeOpencodeProvider: makeOpencodeProvider,
+                                       claudeProjectsRoot: claudeProjectsRoot,
+                                       since: SessionHistoryWindow.since())
+        }.value
+
+        do {
+            try sessionCatalog.save(merged)
+            historyEntries = merged
+            lastError = nil
+        } catch {
+            lastError = error.localizedDescription
+            DiagnosticLog.shared.log("ClaudeTabs: session catalogue write failed — "
+                + "\(error.localizedDescription)", level: .error)
+        }
+
+        // Refreshed here rather than left to the view: `ClaudeTabsView` already calls
+        // `rebuildHistory()` both when the page appears (`.task`) and from its own "Rebuild"
+        // button, so hanging this off the end of it covers both triggers FIX 1 asks for with one
+        // hook — no second call site in the view that could forget to make it. A failed save above
+        // still leaves `historyEntries` at its previous (still valid) value, so this has something
+        // sensible to match against either way.
+        await refreshLiveOpenSessionIDs()
+    }
+
+    /// Recomputes `liveOpenSessionIDs` — see that property's doc for why the snapshot alone cannot
+    /// be trusted for it. Reads Ghostty off the main actor, the same treatment `capture()` gives
+    /// its own Ghostty read: `reader.readTabs()` is a real ~0.3 s AppleScript round trip, not
+    /// something a menu-bar app may do on its own UI thread.
+    ///
+    /// Deliberately cheap: the match goes through `historyEntries`, the already-built catalogue,
+    /// never through a transcript or a session listing — that expensive path is `SessionResolver`'s
+    /// alone, and only the open-tabs snapshot needs it.
+    ///
+    /// A read that fails falls back to the snapshot's own session ids — today's (imperfect, but
+    /// safe) behaviour, and no worse, for the one case where this genuinely does not know: `.failed`
+    /// is Automation denied or some other error, not an answer. `.notRunning` gets no such fallback
+    /// — see `GhosttyTabsResult.liveOpenSessionIDs(catalog:providers:fallback:)`, the pure decision
+    /// this wires up.
+    func refreshLiveOpenSessionIDs() async {
+        let reader = self.reader
+        let providers = self.providers
+        let catalog = self.historyEntries
+        let fallback = Set((snapshot?.tabs ?? []).compactMap(\.sessionID))
+        let result = await Task.detached(priority: .utility) { () -> Set<String> in
+            reader.readTabs().liveOpenSessionIDs(catalog: catalog, providers: providers, fallback: fallback)
+        }.value
+        liveOpenSessionIDs = result
+    }
+
+    /// The pure half of `rebuildHistory()`: nothing actor-bound, so it can run inside
+    /// `Task.detached` exactly like `collect(reader:providers:previousSignature:)` does for a
+    /// capture. Asks Claude for everything it remembers within the window (using `cached`'s own
+    /// entries as the "already know this transcript" hint, so an unchanged file is never reread —
+    /// see `SessionCatalog.knownClaudeTranscripts`), asks opencode the same over the directories
+    /// worth asking (`cached`'s opencode entries plus `openDirectories`), and merges the two
+    /// providers' fresh answers against `cached` so an unchanged entry is reused rather than
+    /// rebuilt.
+    nonisolated private static func rebuiltCatalog(
+        cached: [CatalogEntry], openDirectories: [String],
+        makeClaudeProvider: @Sendable ([String: KnownTranscript]) -> AgentSessionProvider,
+        makeOpencodeProvider: @Sendable ([String]) -> AgentSessionProvider,
+        claudeProjectsRoot: URL,
+        since: Date
+    ) -> [CatalogEntry] {
+        let known = SessionCatalog.knownClaudeTranscripts(in: cached)
+        let claudeSessions = makeClaudeProvider(known).recentSessions(since: since)
+
+        let directories = SessionCatalog.opencodeDirectories(in: cached, alsoInclude: openDirectories)
+        let opencodeSessions = makeOpencodeProvider(directories).recentSessions(since: since)
+
+        let rescanned = claudeSessions.map { SessionCatalog.claudeCatalogEntry(for: $0, projectsRoot: claudeProjectsRoot) }
+            + opencodeSessions.map { SessionCatalog.opencodeCatalogEntry(for: $0) }
+        return SessionCatalog.merge(cached: cached, rescanned: rescanned)
+    }
 }
 
 private extension GhosttyTabsResult {
@@ -510,6 +700,25 @@ private extension GhosttyTabsResult {
         switch self {
         case let .tabs(tabs): return tabs.count
         case .notRunning, .failed: return 0
+        }
+    }
+
+    /// The truthful live-open-session set this read supports — the pure decision
+    /// `ClaudeTabsModel.refreshLiveOpenSessionIDs()` wires up. Unlike `openTabCount` above, the two
+    /// non-`.tabs` cases are NOT the same answer here: `.notRunning` is positive knowledge (Ghostty
+    /// is not running, so exactly zero tabs are open — see `GhosttyTabReading`'s own doc), and the
+    /// right answer is the empty set, not `fallback`. Returning `fallback` there would reproduce
+    /// the very bug this feature exists to fix, in the window most likely to matter: right after a
+    /// reboot, before Ghostty has even been launched, when the user opens this page specifically to
+    /// find a session that is NOT open. `.failed` is genuinely "we do not know" — Automation denied,
+    /// or some other read error — so `fallback` (the snapshot's own session ids) stands in there,
+    /// same as before.
+    func liveOpenSessionIDs(catalog: [CatalogEntry], providers: [AgentSessionProvider],
+                            fallback: Set<String>) -> Set<String> {
+        switch self {
+        case .notRunning: return []
+        case .failed: return fallback
+        case let .tabs(tabs): return SessionCatalog.liveOpenSessionIDs(tabs: tabs, catalog: catalog, providers: providers)
         }
     }
 }
