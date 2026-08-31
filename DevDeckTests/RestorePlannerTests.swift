@@ -27,8 +27,8 @@ final class RestorePlannerTests: XCTestCase {
 
     func testRestoresAfterReboot() {
         XCTAssertEqual(decide(snapshot(2)),
-                       .restore([.inputText(cwd: "/tmp/0", sessionID: "s0"),
-                                 .newTab(cwd: "/tmp/1", sessionID: "s1")]))
+                       .restore([.inputText(cwd: "/tmp/0", sessionID: "s0", provider: "claude"),
+                                 .newTab(cwd: "/tmp/1", sessionID: "s1", provider: "claude")]))
     }
 
     func testSkipsWhenDisabled() {
@@ -55,8 +55,8 @@ final class RestorePlannerTests: XCTestCase {
         guard case let .restore(actions) = decide(snapshot(2), openTabs: 3) else {
             return XCTFail("expected restore")
         }
-        XCTAssertEqual(actions, [.newTab(cwd: "/tmp/0", sessionID: "s0"),
-                                 .newTab(cwd: "/tmp/1", sessionID: "s1")])
+        XCTAssertEqual(actions, [.newTab(cwd: "/tmp/0", sessionID: "s0", provider: "claude"),
+                                 .newTab(cwd: "/tmp/1", sessionID: "s1", provider: "claude")])
     }
 
     func testCapsTheNumberOfTabs() {
@@ -123,7 +123,7 @@ final class RestorePlannerTests: XCTestCase {
         guard case let .restore(actions) = decide(snapshot(2), openTabs: 0) else {
             return XCTFail("expected restore")
         }
-        XCTAssertEqual(actions, [.newTab(cwd: "/tmp/0", sessionID: "s0"),
-                                 .newTab(cwd: "/tmp/1", sessionID: "s1")])
+        XCTAssertEqual(actions, [.newTab(cwd: "/tmp/0", sessionID: "s0", provider: "claude"),
+                                 .newTab(cwd: "/tmp/1", sessionID: "s1", provider: "claude")])
     }
 }

@@ -68,7 +68,9 @@ final class ClaudeTabsModel {
     private(set) var lastError: String?
 
     private let reader: GhosttyTabReading
-    private let index: TranscriptIndexing
+    /// Opencode's prefix-bearing provider, then Claude last as the fallback — though
+    /// `SessionResolver.resolve` no longer trusts that ordering, it enforces it via `isFallback`.
+    private let providers: [AgentSessionProvider]
     private let store: ClaudeTabsStore
     private let bootTime: BootTimeProviding
     private let restorer: TabRestorer
@@ -103,7 +105,7 @@ final class ClaudeTabsModel {
     private var wasEnabled = false
 
     init(reader: GhosttyTabReading = LiveGhosttyTabReader(),
-         index: TranscriptIndexing = LiveTranscriptIndex(),
+         providers: [AgentSessionProvider] = [OpencodeSessionProvider(), ClaudeSessionProvider()],
          store: ClaudeTabsStore = ClaudeTabsStore(),
          bootTime: BootTimeProviding = LiveBootTime(),
          restorer: TabRestorer = TabRestorer(),
@@ -111,7 +113,7 @@ final class ClaudeTabsModel {
          isEnabled: @escaping () -> Bool = { false },
          isGhosttyRunning: @escaping () -> Bool = GhosttyApp.isRunning) {
         self.reader = reader
-        self.index = index
+        self.providers = providers
         self.store = store
         self.bootTime = bootTime
         self.restorer = restorer
@@ -249,7 +251,7 @@ final class ClaudeTabsModel {
                 + "\(Int(Self.shutdownFreshness)) s old, keeping it as it is")
             return
         }
-        apply(Self.collect(reader: reader, index: index, previousSignature: lastSignature), explicit: false)
+        apply(Self.collect(reader: reader, providers: providers, previousSignature: lastSignature), explicit: false)
     }
 
     /// THE INVARIANT: a snapshot from a previous boot is the only copy of the user's tabs and must
@@ -304,9 +306,9 @@ final class ClaudeTabsModel {
     /// see `captureNow()` and `captureIfEnabled()`.
     private func capture(explicit: Bool, previousSignature: [GhosttyTab]?) async {
         let reader = self.reader
-        let index = self.index
+        let providers = self.providers
         let outcome = await Task.detached(priority: .utility) {
-            Self.collect(reader: reader, index: index, previousSignature: previousSignature)
+            Self.collect(reader: reader, providers: providers, previousSignature: previousSignature)
         }.value
         apply(outcome, explicit: explicit)
     }
@@ -321,7 +323,7 @@ final class ClaudeTabsModel {
     /// than a string joined from their fields, is deliberate: a title containing a tab character
     /// could otherwise shift field boundaries and make two different tab sets compare equal.
     nonisolated static func collect(reader: GhosttyTabReading,
-                                    index: TranscriptIndexing,
+                                    providers: [AgentSessionProvider],
                                     previousSignature: [GhosttyTab]?) -> CaptureOutcome {
         switch reader.readTabs() {
         case .notRunning:
@@ -330,7 +332,6 @@ final class ClaudeTabsModel {
             return .failed(message)
         case let .tabs(tabs):
             guard tabs != previousSignature else { return .unchanged }
-            let providers: [AgentSessionProvider] = [ClaudeSessionProvider(index: index)]
             return .entries(SessionResolver.resolve(tabs: tabs, providers: providers), signature: tabs)
         }
     }

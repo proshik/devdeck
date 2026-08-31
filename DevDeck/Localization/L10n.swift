@@ -623,7 +623,18 @@ enum L10n {
     }
     static var claudeTabsColumnTitle: String { t("Tab", "Вкладка") }
     static var claudeTabsColumnDirectory: String { t("Directory", "Каталог") }
+    static var claudeTabsColumnAgent: String { t("Agent", "Агент") }
     static var claudeTabsColumnSession: String { t("Session", "Сессия") }
+    /// Display name for a `ClaudeTabEntry.provider` id. Falls back to the raw id for one this
+    /// build does not know — a future provider id in an old snapshot must still show something,
+    /// not crash the table.
+    static func claudeTabsAgentName(_ providerID: String) -> String {
+        switch providerID {
+        case AgentProviderID.claude: return t("Claude", "Claude")
+        case AgentProviderID.opencode: return t("opencode", "opencode")
+        default: return providerID
+        }
+    }
     static var claudeTabsSessionFound: String { t("resumable", "восстановится") }
     static var claudeTabsDirectoryOnly: String { t("directory only", "только каталог") }
 
