@@ -32,12 +32,71 @@ enum TranscriptTitleScanner {
     }
 }
 
+/// Pulls the working directory out of transcript lines — the same field the full-corpus fallback
+/// in `LiveTranscriptIndex.scan(for:)` already matches on, read here instead of reversed out of
+/// the project directory's slug: a path segment can itself contain "-", which a naive
+/// slug-to-path reversal would get wrong.
+///
+/// Deliberately lenient, same rule as `TranscriptTitleScanner`: the first line carrying a `cwd` is
+/// enough, and a transcript that has none yields "directory not found" rather than a crash.
+enum TranscriptCwdScanner {
+    static func firstCwd(in lines: [String]) -> String? {
+        for line in lines where line.contains("\"cwd\":\"") {
+            guard let data = line.data(using: .utf8),
+                  let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let cwd = object["cwd"] as? String, !cwd.isEmpty else { continue }
+            return cwd
+        }
+        return nil
+    }
+}
+
+/// A transcript found by `recentTranscripts(since:known:)`: its title plus everything the catalog
+/// needs to place and later re-identify it — the directory it belongs to, and the file path a
+/// future build can compare mtimes against instead of opening it again.
+struct RecentTranscript: Equatable, Sendable {
+    var title: TranscriptTitle
+    var directory: String
+    var sourcePath: String
+}
+
+/// What the catalog already knows about one transcript file from a previous build — enough to
+/// trust its title and directory without opening it again, provided the file's mtime still
+/// matches. Keyed by `sourcePath` (a `CatalogEntry.sourcePath`) wherever this is passed around.
+struct KnownTranscript: Equatable, Sendable {
+    var modifiedAt: Date
+    var title: TranscriptTitle
+    var directory: String
+}
+
 /// Titles known for a working directory — behind a protocol so the resolver is tested with a fake.
 protocol TranscriptIndexing: Sendable {
     /// Newest transcript first — and that is a contract, not a convenience: `SessionResolver`
     /// resolves a tie between two sessions with the same title by taking the first candidate, so
     /// the ordering here is the whole of "the most recent session wins".
     func titles(forWorkingDirectory workingDirectory: String) -> [TranscriptTitle]
+
+    /// Every transcript across ALL projects whose mtime falls at or after `since` — the
+    /// corpus-wide counterpart to `titles(forWorkingDirectory:)`, and what
+    /// `ClaudeSessionProvider.recentSessions(since:)` is built on.
+    ///
+    /// A file whose mtime is older than `since` is skipped by its directory listing's own mtime
+    /// alone and never opened at all — measured at 787 transcripts / 1.1 GB total against 230 /
+    /// 270 MB within 7 days, so that skip is the whole of the window's saving.
+    ///
+    /// A file whose path appears in `known` WITH THE SAME mtime is trusted without being opened
+    /// either — the disk catalog's own saving, which survives an app restart where the window
+    /// skip alone would not: `LiveTranscriptIndex`'s in-memory cache is empty again on every fresh
+    /// launch, but a `known` entry loaded from the on-disk catalog is not.
+    func recentTranscripts(since: Date, known: [String: KnownTranscript]) -> [RecentTranscript]
+}
+
+extension TranscriptIndexing {
+    /// Convenience for a caller with no prior catalog to consult — every current call site that
+    /// does not care about `known` reads better without spelling out `known: [:]`.
+    func recentTranscripts(since: Date) -> [RecentTranscript] {
+        recentTranscripts(since: since, known: [:])
+    }
 }
 
 /// Scans `~/.claude/projects`. Two caches keep the once-a-minute snapshot cheap: titles per
@@ -46,8 +105,12 @@ protocol TranscriptIndexing: Sendable {
 /// directory per app run.
 final class LiveTranscriptIndex: TranscriptIndexing, @unchecked Sendable {
     private let projectsRoot: URL
+    /// The one place this type ever touches a transcript's content — overridable so a test can
+    /// wrap it in a counting fake and prove a file was (or was not) opened, the same seam
+    /// `LiveOpencodeSessions` gives its subprocess call via `fetch`.
+    private let readFile: (URL) -> String?
     private let lock = NSLock()
-    private var cache: [URL: (modifiedAt: Date, title: TranscriptTitle?)] = [:]
+    private var cache: [URL: (modifiedAt: Date, title: TranscriptTitle?, cwd: String?)] = [:]
     /// Working directory → its project directory, **including the misses**. A negative result is
     /// the expensive one to recompute: a plain shell tab in `~/Downloads` has no project directory
     /// and never will, and without this entry every capture would read the whole corpus again
@@ -56,8 +119,10 @@ final class LiveTranscriptIndex: TranscriptIndexing, @unchecked Sendable {
     private var directories: [String: URL?] = [:]
 
     init(projectsRoot: URL = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".claude/projects")) {
+            .appendingPathComponent(".claude/projects"),
+         readFile: @escaping (URL) -> String? = { try? String(contentsOf: $0, encoding: .utf8) }) {
         self.projectsRoot = projectsRoot
+        self.readFile = readFile
     }
 
     func titles(forWorkingDirectory workingDirectory: String) -> [TranscriptTitle] {
@@ -68,6 +133,35 @@ final class LiveTranscriptIndex: TranscriptIndexing, @unchecked Sendable {
             .filter { $0.pathExtension == "jsonl" }
             .compactMap { title(of: $0) }
             .sorted { $0.modifiedAt > $1.modifiedAt }
+    }
+
+    /// Walks every project directory once, skipping (without opening) any transcript whose mtime
+    /// is older than `since` — see the protocol doc for why that skip is the entire saving the
+    /// window buys. For the rest, a `known` hit with a matching mtime is trusted as-is; anything
+    /// else is scanned (and, on a cache miss, actually opened) via `scan(of:)`.
+    func recentTranscripts(since: Date, known: [String: KnownTranscript]) -> [RecentTranscript] {
+        guard let projects = try? FileManager.default.contentsOfDirectory(
+                at: projectsRoot, includingPropertiesForKeys: nil) else { return [] }
+        return projects
+            .flatMap { project -> [RecentTranscript] in
+                guard let files = try? FileManager.default.contentsOfDirectory(
+                        at: project, includingPropertiesForKeys: [.contentModificationDateKey]) else { return [] }
+                return files.filter { $0.pathExtension == "jsonl" }.compactMap { file -> RecentTranscript? in
+                    // A `stat`, not a read — cheap enough to pay for every file in the corpus, and
+                    // the only thing this function does for a file it goes on to skip.
+                    let modifiedAt = (try? file.resourceValues(forKeys: [.contentModificationDateKey])
+                        .contentModificationDate) ?? .distantPast
+                    guard modifiedAt >= since else { return nil }
+
+                    if let hint = known[file.path], hint.modifiedAt == modifiedAt {
+                        return RecentTranscript(title: hint.title, directory: hint.directory, sourcePath: file.path)
+                    }
+                    let found = scan(of: file)
+                    guard let title = found.title, let cwd = found.cwd else { return nil }
+                    return RecentTranscript(title: title, directory: cwd, sourcePath: file.path)
+                }
+            }
+            .sorted { $0.title.modifiedAt > $1.title.modifiedAt }
     }
 
     /// The slug is the fast path; the fallback below reads **every** transcript in
@@ -122,24 +216,38 @@ final class LiveTranscriptIndex: TranscriptIndexing, @unchecked Sendable {
     }
 
     private func title(of file: URL) -> TranscriptTitle? {
+        scan(of: file).title
+    }
+
+    /// The per-(file, mtime) cache both `titles(forWorkingDirectory:)` and
+    /// `recentTranscripts(since:known:)` share: a file already read for its title is not opened
+    /// again to also learn its `cwd`, and vice versa — both come out of the one read.
+    ///
+    /// The lock is never held across the read itself, same discipline as `projectDirectory(for:)`:
+    /// take it to look, drop it to work, take it again to record.
+    private func scan(of file: URL) -> (title: TranscriptTitle?, cwd: String?) {
         let modifiedAt = (try? file.resourceValues(forKeys: [.contentModificationDateKey])
             .contentModificationDate) ?? .distantPast
         lock.lock()
         if let cached = cache[file], cached.modifiedAt == modifiedAt {
             lock.unlock()
-            return cached.title
+            return (cached.title, cached.cwd)
         }
         lock.unlock()
 
-        var result: TranscriptTitle?
-        if let content = try? String(contentsOf: file, encoding: .utf8),
-           let found = TranscriptTitleScanner.lastTitle(in: content.components(separatedBy: "\n")) {
-            result = TranscriptTitle(aiTitle: found.aiTitle, sessionID: found.sessionID, modifiedAt: modifiedAt)
+        var title: TranscriptTitle?
+        var cwd: String?
+        if let content = readFile(file) {
+            let lines = content.components(separatedBy: "\n")
+            if let found = TranscriptTitleScanner.lastTitle(in: lines) {
+                title = TranscriptTitle(aiTitle: found.aiTitle, sessionID: found.sessionID, modifiedAt: modifiedAt)
+            }
+            cwd = TranscriptCwdScanner.firstCwd(in: lines)
         }
         lock.lock()
-        cache[file] = (modifiedAt, result)
+        cache[file] = (modifiedAt, title, cwd)
         lock.unlock()
-        return result
+        return (title, cwd)
     }
 }
 
@@ -196,11 +304,18 @@ struct ClaudeSessionProvider: AgentSessionProvider {
     /// Fresh per `ClaudeSessionProvider` instance — each restore's own provider gets its own
     /// cache, refetched by `prepareForRestore()` at the start of that restore.
     private let backgroundCache = BackgroundSessionCache()
+    /// What the on-disk catalog already knew, as of the last build — see
+    /// `recentSessions(since:)`. Empty by default: the tab-resolve path (`sessions(inDirectory:)`)
+    /// never needs this, only a catalog rebuild does, and it is the catalog's job to load it and
+    /// pass it in.
+    private let knownTranscripts: [String: KnownTranscript]
 
     init(index: TranscriptIndexing = LiveTranscriptIndex(),
-         backgroundSessions: BackgroundSessionListing = LiveBackgroundSessions()) {
+         backgroundSessions: BackgroundSessionListing = LiveBackgroundSessions(),
+         knownTranscripts: [String: KnownTranscript] = [:]) {
         self.index = index
         self.backgroundSessions = backgroundSessions
+        self.knownTranscripts = knownTranscripts
     }
 
     /// No prefix to check — every tab is a candidate.
@@ -208,7 +323,17 @@ struct ClaudeSessionProvider: AgentSessionProvider {
 
     func sessions(inDirectory directory: String) -> [AgentSession] {
         index.titles(forWorkingDirectory: directory).map {
-            AgentSession(id: $0.sessionID, title: $0.aiTitle, lastActivity: $0.modifiedAt)
+            AgentSession(id: $0.sessionID, title: $0.aiTitle, lastActivity: $0.modifiedAt, directory: directory)
+        }
+    }
+
+    /// Every transcript across `~/.claude/projects` within the window — see the protocol doc and
+    /// `LiveTranscriptIndex.recentTranscripts(since:known:)` for how a stale file is skipped
+    /// without opening it, and a `knownTranscripts` hit is trusted without opening it either.
+    func recentSessions(since: Date) -> [AgentSession] {
+        index.recentTranscripts(since: since, known: knownTranscripts).map {
+            AgentSession(id: $0.title.sessionID, title: $0.title.aiTitle,
+                        lastActivity: $0.title.modifiedAt, directory: $0.directory)
         }
     }
 

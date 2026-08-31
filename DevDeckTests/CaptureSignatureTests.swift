@@ -18,6 +18,7 @@ final class CaptureSignatureTests: XCTestCase {
             calls += 1
             return []
         }
+        func recentTranscripts(since: Date, known: [String: KnownTranscript]) -> [RecentTranscript] { [] }
     }
 
     /// Resolves every tab it is asked about to the same fixed session, so a capture through it
@@ -25,6 +26,7 @@ final class CaptureSignatureTests: XCTestCase {
     private struct ResolvingIndex: TranscriptIndexing {
         var title: TranscriptTitle
         func titles(forWorkingDirectory workingDirectory: String) -> [TranscriptTitle] { [title] }
+        func recentTranscripts(since: Date, known: [String: KnownTranscript]) -> [RecentTranscript] { [] }
     }
 
     /// Same idea as `ResolvingIndex`, but counting — the one fake both
@@ -40,6 +42,7 @@ final class CaptureSignatureTests: XCTestCase {
             calls += 1
             return [title]
         }
+        func recentTranscripts(since: Date, known: [String: KnownTranscript]) -> [RecentTranscript] { [] }
     }
 
     private struct FixedBootTime: BootTimeProviding {

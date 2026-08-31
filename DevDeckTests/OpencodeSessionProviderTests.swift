@@ -55,6 +55,18 @@ final class OpencodeSessionProviderTests: XCTestCase {
         XCTAssertEqual(OpencodeSessions.parse(data).map(\.id), ["ses_b"])
     }
 
+    /// The listing's own `directory` field, not the directory it happened to be queried in — see
+    /// `AgentSession.directory`'s doc comment.
+    func testParseFillsDirectoryFromTheListingsOwnField() {
+        let data = json(#"[{"id":"ses_a","title":"alpha","directory":"/tmp/base13"}]"#)
+        XCTAssertEqual(OpencodeSessions.parse(data).map(\.directory), ["/tmp/base13"])
+    }
+
+    func testParseLeavesDirectoryEmptyWhenTheFieldIsMissing() {
+        let data = json(#"[{"id":"ses_a","title":"alpha"}]"#)
+        XCTAssertEqual(OpencodeSessions.parse(data).map(\.directory), [""])
+    }
+
     // MARK: - mayOwn
 
     func testMayOwnRecognizesTheOpencodePrefix() {
@@ -121,6 +133,44 @@ final class OpencodeSessionProviderTests: XCTestCase {
             listing: FakeOpencodeSessionListing(byDirectory: ["/tmp/a": [session]]))
         XCTAssertEqual(provider.sessions(inDirectory: "/tmp/a"), [session])
         XCTAssertEqual(provider.sessions(inDirectory: "/tmp/other"), [])
+    }
+
+    // MARK: - recentSessions(since:) — directory-scoped, so only the configured directories count
+
+    /// With no directories configured, there is nothing to ask — opencode's listing has no
+    /// "everything" mode, so an unconfigured provider must answer empty rather than guess.
+    func testRecentSessionsIsEmptyWithNoConfiguredDirectories() {
+        let provider = OpencodeSessionProvider(
+            listing: FakeOpencodeSessionListing(byDirectory: ["/tmp/a": [
+                AgentSession(id: "s1", title: "alpha", lastActivity: Date())]]))
+        XCTAssertTrue(provider.recentSessions(since: Date.distantPast).isEmpty)
+    }
+
+    func testRecentSessionsQueriesEveryConfiguredDirectoryAndFiltersByWindow() {
+        let old = AgentSession(id: "old", title: "old", lastActivity: Date(timeIntervalSince1970: 0),
+                               directory: "/tmp/a")
+        let recentA = AgentSession(id: "recent-a", title: "recent a", lastActivity: Date(timeIntervalSince1970: 200),
+                                   directory: "/tmp/a")
+        let recentB = AgentSession(id: "recent-b", title: "recent b", lastActivity: Date(timeIntervalSince1970: 300),
+                                   directory: "/tmp/b")
+        let provider = OpencodeSessionProvider(
+            listing: FakeOpencodeSessionListing(byDirectory: ["/tmp/a": [old, recentA], "/tmp/b": [recentB]]),
+            recentDirectories: ["/tmp/a", "/tmp/b"])
+
+        let sessions = provider.recentSessions(since: Date(timeIntervalSince1970: 100))
+
+        XCTAssertEqual(sessions, [recentB, recentA], "newest first, and the old session excluded")
+    }
+
+    /// A directory never mentioned in `recentDirectories` is never asked about at all — the same
+    /// "silently forgotten" failure the catalog builder exists to avoid, made visible here as
+    /// "opencode's own listing never even ran for it".
+    func testRecentSessionsIgnoresDirectoriesNotConfigured() {
+        let provider = OpencodeSessionProvider(
+            listing: FakeOpencodeSessionListing(byDirectory: ["/tmp/unconfigured": [
+                AgentSession(id: "s1", title: "alpha", lastActivity: Date())]]),
+            recentDirectories: ["/tmp/configured"])
+        XCTAssertTrue(provider.recentSessions(since: Date.distantPast).isEmpty)
     }
 
     // MARK: - LiveOpencodeSessions caching
@@ -198,6 +248,7 @@ final class OpencodeSessionProviderTests: XCTestCase {
         func titles(forWorkingDirectory workingDirectory: String) -> [TranscriptTitle] {
             byDirectory[workingDirectory] ?? []
         }
+        func recentTranscripts(since: Date, known: [String: KnownTranscript]) -> [RecentTranscript] { [] }
     }
 
     /// The production default order — opencode's prefix-bearing provider first, Claude the

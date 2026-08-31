@@ -7,6 +7,15 @@ struct AgentSession: Equatable, Sendable {
     /// Newest first is what breaks ties between two tabs with the same title, so every provider
     /// must supply something orderable — a transcript's mtime, a listing's `updated`.
     var lastActivity: Date
+    /// Where the session lives. Needed to reopen a session found by `recentSessions(since:)`,
+    /// which — unlike `sessions(inDirectory:)` — is not itself called with a directory: the
+    /// history list has no `GhosttyTab.workingDirectory` to fall back on for an entry that is not
+    /// (or is no longer) an open tab. Claude fills it from the project directory whose transcript
+    /// this is; opencode fills it from the listing's own `directory` field.
+    ///
+    /// Defaulted to `""` only so the many existing call sites that predate this field — none of
+    /// which exercise it — keep compiling; both real providers always set it explicitly.
+    var directory: String = ""
 }
 
 /// The provider id Claude Code is stored and matched under.
@@ -42,6 +51,18 @@ protocol AgentSessionProvider: Sendable {
     func mayOwn(tabTitle: String) -> Bool
 
     func sessions(inDirectory directory: String) -> [AgentSession]
+
+    /// Everything this agent remembers whose last activity falls inside the window — across all
+    /// projects, not one directory. Used by the history list, never by the capture path.
+    ///
+    /// Unlike `sessions(inDirectory:)`, which is asked once per open tab's own directory, this is
+    /// asked once per catalog build and must find sessions the caller has no directory for yet.
+    /// Claude satisfies it by walking every project under `~/.claude/projects`, skipping (without
+    /// opening) any transcript whose mtime is older than `since` — see `ClaudeSessionProvider`.
+    /// opencode's listing is scoped to one project directory at a time and has no "list
+    /// everything" mode, so its provider must be constructed with the directories worth asking —
+    /// see `OpencodeSessionProvider`.
+    func recentSessions(since: Date) -> [AgentSession]
 
     /// The agent's own title normalization: Claude prefixes a status glyph, opencode "OC | ".
     ///
