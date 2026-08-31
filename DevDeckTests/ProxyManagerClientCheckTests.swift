@@ -132,13 +132,14 @@ final class ProxyManagerClientCheckTests: XCTestCase {
                        "same URL builder as routing — a check that skipped auth would lie")
     }
 
-    func testCheckWithoutAResolvableProxyStaysIdle() {
+    func testCheckWithoutAResolvableProxyReportsWhy() {
         let probe = RecordingProbe(response: "unused")
         let (manager, _, _) = makeManager(probe: probe)
 
         manager.checkActiveProxy()
 
-        XCTAssertEqual(manager.clientCheck, .idle, "nothing to check — the button is hidden anyway")
+        XCTAssertEqual(manager.clientCheck, .unavailable(L10n.proxyCheckUnavailableNoProxy),
+                       "the button used to go silent here — it must say why instead")
         XCTAssertEqual(probe.probedURLs, [], "no probe without an active proxy")
     }
 

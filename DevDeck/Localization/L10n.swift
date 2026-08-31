@@ -489,6 +489,18 @@ enum L10n {
     static var proxyCheck: String { t("Check", "Проверить") }
     static var proxyChecking: String { t("Checking…", "Проверяем…") }
     static var proxyCheckFailed: String { t("No response through the proxy", "Прокси не отвечает") }
+    /// "Check" pressed with nothing usable to probe — the row shows one of these instead of doing
+    /// nothing, which used to look like a hang and was actually a dead tunnel or bridge.
+    static var proxyCheckUnavailableNoProxy: String { t("No active proxy", "Нет активного прокси") }
+    static var proxyCheckUnavailableTunnelDown: String {
+        t("SSH tunnel is not running", "SSH-туннель не запущен")
+    }
+    static var proxyCheckUnavailableBridgeDown: String {
+        t("Local bridge is not running", "Локальный мост не запущен")
+    }
+    static var proxyCheckUnavailableBothDown: String {
+        t("Neither the SSH tunnel nor the bridge is running", "Не запущены ни SSH-туннель, ни мост")
+    }
     static var proxySearching: String { t("Searching…", "Идёт поиск…") }
     static var proxyNoneFound: String { t("No proxies found yet", "Прокси пока не найдены") }
     static var proxyLastKnownAddress: String {

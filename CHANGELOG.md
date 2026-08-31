@@ -18,6 +18,11 @@ versioning follows [SemVer](https://semver.org/).
   also carries visible pencil/trash buttons; the context menu stays for whoever already used it.
   Deleting the linked tunnel command remains a separate, explicit choice in the confirmation
   dialog, never a side effect of deleting the proxy.
+- **"Check" did nothing when a remote proxy's route was down.** The popover's check button
+  resolves the active proxy first and does nothing at all if that fails — for a remote proxy that
+  happens whenever the SSH tunnel or the local bridge isn't up, which used to look exactly like a
+  hang. The check row now reports which half is missing (no active proxy, tunnel down, bridge
+  down, or both), the same way a failed probe already reports "no response".
 - **"VM minikube" was blank almost always.** The node probe only runs while a command is
   building, but the 1 s sampler also runs for as long as any daemon is alive — and it wrote an
   empty value into the line on every tick, so with a port-forward up the figure never showed.

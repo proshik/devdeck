@@ -76,6 +76,11 @@ final class ProxyManager {
         /// The egress IP the internet reported through the proxy — the check's proof.
         case success(String)
         case failed
+        /// The button was pressed but there was nothing to probe — the associated string is a
+        /// localized, user-facing reason (no active proxy at all, the tunnel isn't up, the bridge
+        /// isn't up…) so the row can say why instead of doing nothing, which is what this whole
+        /// case exists to replace.
+        case unavailable(String)
     }
 
     /// What the popover's check row shows. Reset whenever the active proxy changes — a green check
@@ -666,7 +671,7 @@ final class ProxyManager {
     func checkActiveProxy() {
         guard let resolved = resolvedEndpoint() else {
             clientCheckToken = nil
-            clientCheck = .idle
+            clientCheck = .unavailable(unavailableCheckReason())
             return
         }
         let url = proxyURL(host: resolved.proxy.host, port: resolved.proxy.port,
@@ -681,6 +686,26 @@ final class ProxyManager {
             let ip = output?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             self.clientCheck = ip.isEmpty ? .failed : .success(ip)
         }
+    }
+
+    /// Why `checkActiveProxy()` found nothing to probe. `remoteDaemonsRunning`'s all-or-nothing
+    /// answer is enough to gate routing, but a silent "no" here is exactly the bug being fixed —
+    /// this looks at the same two states separately so the row can say which half is the problem.
+    private func unavailableCheckReason() -> String {
+        if let remote = activeRemoteProxy {
+            guard let tunnelID = remote.tunnelCommandID, store?.commandsByID[tunnelID] != nil else {
+                return L10n.proxyRemoteTunnelMissing
+            }
+            let tunnelUp = processManager?.states[tunnelID] == .daemonRunning
+            let bridgeUp = processManager?.states[RemoteProxy.bridgeDaemonID] == .daemonRunning
+            if !tunnelUp && !bridgeUp { return L10n.proxyCheckUnavailableBothDown }
+            if !tunnelUp { return L10n.proxyCheckUnavailableTunnelDown }
+            if !bridgeUp { return L10n.proxyCheckUnavailableBridgeDown }
+            // Unreachable: both up would have made `resolvedEndpoint()` succeed already.
+            return L10n.proxyCheckUnavailableBridgeDown
+        }
+        if activeProxy != nil { return L10n.proxyAuthRequired }
+        return L10n.proxyCheckUnavailableNoProxy
     }
 
     /// Choose the active proxy. Switching to a DIFFERENT peer drops the stored username —
