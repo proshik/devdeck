@@ -150,6 +150,9 @@ final class LiveTranscriptIndex: TranscriptIndexing, @unchecked Sendable {
 /// the list, tried only once every prefix-bearing provider has passed.
 struct ClaudeSessionProvider: AgentSessionProvider {
     let id = AgentProviderID.claude
+    /// Claude is the fallback: no prefix, so it is tried last — `SessionResolver.resolve` reorders
+    /// providers by this, regardless of the order the caller built the array in.
+    let isFallback = true
 
     private let index: TranscriptIndexing
     private let backgroundSessions: BackgroundSessionListing
