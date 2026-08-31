@@ -1,0 +1,151 @@
+import Foundation
+
+/// How far back "recent" reaches — the history list's own boundary AND, for Claude, the
+/// permission to skip a transcript without opening it at all. One constant: measured at 787
+/// transcripts / 1.1 GB in total against 230 / 270 MB within 7 days on the machine this was
+/// designed against, so the window is what makes the difference, not a smaller number that would
+/// barely trim an actively-used corpus. See `docs/agent-session-history-plan.md`.
+enum SessionHistoryWindow {
+    static let length: TimeInterval = 7 * 24 * 60 * 60
+
+    static func since(_ now: Date = Date()) -> Date {
+        now.addingTimeInterval(-length)
+    }
+}
+
+/// A remembered session title, and what it took to learn it.
+///
+/// `sourcePath`/`sourceModifiedAt` exist so the next build can skip a file it has already read: a
+/// transcript is opened only to learn its title, and the title changes far less often than the
+/// file does not. Both are `nil` for opencode: its listing is cheap enough to trust fresh on every
+/// build (see the plan's decision #4), so it has no file of its own to compare mtimes against.
+struct CatalogEntry: Codable, Equatable {
+    var provider: String
+    var sessionID: String
+    var title: String
+    var directory: String
+    var lastActivity: Date
+    var sourcePath: String?
+    var sourceModifiedAt: Date?
+}
+
+/// Reads and writes `~/Library/Application Support/DevDeck/agent-sessions.json` — every session
+/// each agent remembers within the window, built on demand (page open, refresh button) rather
+/// than on a timer, per the plan's decision #3.
+struct SessionCatalog {
+    let url: URL
+
+    init(url: URL = PrivateFile.applicationSupportDirectory
+            .appendingPathComponent("agent-sessions.json")) {
+        self.url = url
+    }
+
+    /// Missing or malformed reads as "no entries", never throws — the catalog is disposable,
+    /// rebuilt from the agents' own memory whenever it is asked for.
+    func load() -> [CatalogEntry] {
+        guard let data = try? Data(contentsOf: url) else { return [] }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return (try? decoder.decode([CatalogEntry].self, from: data)) ?? []
+    }
+
+    /// Through `PrivateFile`, like every other file DevDeck persists: 0600 in a 0700 directory —
+    /// this file names every project directory the user works in, together with titles describing
+    /// what they were doing in each, same reasoning `ClaudeTabsStore.save` documents.
+    ///
+    /// `.atomic` lands a fresh inode at the default 0644, so the mode is reapplied after the write.
+    func save(_ entries: [CatalogEntry]) throws {
+        try PrivateFile.makeDirectory(at: url.deletingLastPathComponent())
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        try encoder.encode(entries).write(to: url, options: .atomic)
+        PrivateFile.restrict(url)
+    }
+
+    /// Entries whose source is unchanged are reused as-is; everything else is rebuilt. Pure so the
+    /// "did we avoid the re-read" property is testable without touching a disk.
+    ///
+    /// Keyed by (provider, sessionID) — two providers are free to hand out the same raw id without
+    /// one's entry reading as the other's. A cached entry wins only when BOTH `sourcePath` and
+    /// `sourceModifiedAt` are present on the rescanned side AND match the cached one exactly;
+    /// opencode's entries carry neither, so they always take the rescanned value, matching the
+    /// "no incrementality for opencode" decision. Anything in `cached` that `rescanned` has
+    /// nothing to say about — a session that fell out of the window, or one a failed rescan
+    /// momentarily lost — is simply absent from the result: `rescanned` is what a full walk of the
+    /// window found just now, and that is the list's whole boundary.
+    static func merge(cached: [CatalogEntry], rescanned: [CatalogEntry]) -> [CatalogEntry] {
+        struct Key: Hashable { var provider: String; var sessionID: String }
+        var cachedByKey: [Key: CatalogEntry] = [:]
+        for entry in cached {
+            cachedByKey[Key(provider: entry.provider, sessionID: entry.sessionID)] = entry
+        }
+        return rescanned.map { entry in
+            guard let sourcePath = entry.sourcePath, let sourceModifiedAt = entry.sourceModifiedAt,
+                  let hit = cachedByKey[Key(provider: entry.provider, sessionID: entry.sessionID)],
+                  hit.sourcePath == sourcePath, hit.sourceModifiedAt == sourceModifiedAt else {
+                return entry
+            }
+            return hit
+        }
+    }
+}
+
+extension SessionCatalog {
+    /// `cached`'s claude entries, reshaped into what `ClaudeSessionProvider.recentSessions(since:)`
+    /// needs to skip re-reading them — the bridge between what got saved last time and what the
+    /// next build hands `ClaudeSessionProvider(knownTranscripts:)`.
+    ///
+    /// A cached claude entry missing either `sourcePath` or `sourceModifiedAt` is dropped rather
+    /// than guessed at: those two fields are written together by `rebuildingClaudeEntries` below,
+    /// so a claude entry without them can only be a hand-edited or otherwise foreign file, and
+    /// `LiveTranscriptIndex.recentTranscripts` already treats an absent hint as "read it".
+    static func knownClaudeTranscripts(in cached: [CatalogEntry]) -> [String: KnownTranscript] {
+        var result: [String: KnownTranscript] = [:]
+        for entry in cached where entry.provider == AgentProviderID.claude {
+            guard let sourcePath = entry.sourcePath, let sourceModifiedAt = entry.sourceModifiedAt else { continue }
+            result[sourcePath] = KnownTranscript(
+                modifiedAt: sourceModifiedAt,
+                title: TranscriptTitle(aiTitle: entry.title, sessionID: entry.sessionID, modifiedAt: sourceModifiedAt),
+                directory: entry.directory)
+        }
+        return result
+    }
+
+    /// Every directory `recentSessions(since:)` should ask opencode's directory-scoped listing
+    /// about: the ones already on file for opencode in `cached`, plus whatever the caller adds —
+    /// currently open tabs, so a directory is never forgotten just because its tab closed, and
+    /// never missed just because nothing has been cataloged for it yet either. Sorted for a
+    /// stable, testable order; deduplicated since either source may repeat the other.
+    static func opencodeDirectories(in cached: [CatalogEntry], alsoInclude extra: [String] = []) -> [String] {
+        let fromCatalog = cached.filter { $0.provider == AgentProviderID.opencode }.map(\.directory)
+        return Array(Set(fromCatalog).union(extra)).sorted()
+    }
+
+    /// Turns one Claude `AgentSession` into a `CatalogEntry` carrying `sourcePath`/
+    /// `sourceModifiedAt` — the two fields `ClaudeSessionProvider.recentSessions(since:)` itself
+    /// has no reason to know about, since they describe the catalog's own bookkeeping, not the
+    /// session. Reconstructed rather than threaded through `AgentSession`: Claude names a
+    /// transcript `<sessionID>.jsonl` inside the project directory `ClaudeProjectSlug.slug(for:)`
+    /// names, and `AgentSession.lastActivity` for Claude already IS that file's own mtime — see
+    /// `ClaudeSessionProvider.sessions(inDirectory:)` / `recentSessions(since:)`.
+    static func claudeCatalogEntry(for session: AgentSession,
+                                   projectsRoot: URL = FileManager.default.homeDirectoryForCurrentUser
+                                       .appendingPathComponent(".claude/projects")) -> CatalogEntry {
+        let sourcePath = projectsRoot
+            .appendingPathComponent(ClaudeProjectSlug.slug(for: session.directory))
+            .appendingPathComponent("\(session.id).jsonl")
+            .path
+        return CatalogEntry(provider: AgentProviderID.claude, sessionID: session.id, title: session.title,
+                            directory: session.directory, lastActivity: session.lastActivity,
+                            sourcePath: sourcePath, sourceModifiedAt: session.lastActivity)
+    }
+
+    /// The opencode counterpart of `claudeCatalogEntry(for:)` — no source file of its own, so
+    /// `sourcePath`/`sourceModifiedAt` stay `nil` and `merge` always takes the rescanned value.
+    static func opencodeCatalogEntry(for session: AgentSession) -> CatalogEntry {
+        CatalogEntry(provider: AgentProviderID.opencode, sessionID: session.id, title: session.title,
+                    directory: session.directory, lastActivity: session.lastActivity,
+                    sourcePath: nil, sourceModifiedAt: nil)
+    }
+}
