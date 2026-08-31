@@ -44,6 +44,20 @@ final class GhosttyTabParserTests: XCTestCase {
                        "`tab` inside the tell block is Ghostty's class, not a tab character")
     }
 
+    /// A tab that closes WHILE the script is walking the list must cost that tab, not the snapshot.
+    ///
+    /// Observed in the field: `Can't get item 5 of every tab of item 1 of every window. Invalid
+    /// index. (-1719)` — one tab vanished mid-enumeration and the whole read failed, so no snapshot
+    /// was taken at all. The append is guarded per tab, and the inner loop per window, so a
+    /// disappearing item is skipped and everything still standing is still reported.
+    func testEachTabReadIsGuardedSoOneClosingTabDoesNotKillTheEnumeration() throws {
+        // The argv interleaves a "-e" before every line; compare the SCRIPT, not the argv.
+        let lines = LiveGhosttyTabReader.scriptArgs.filter { $0 != "-e" }
+        let i = try XCTUnwrap(lines.firstIndex { $0.contains("set out to out &") })
+        XCTAssertEqual(lines[i - 1], "try", "the per-tab append must sit inside its own try")
+        XCTAssertEqual(lines[i + 1], "end try", "and that try must close right after it")
+    }
+
     func testEmptyOutputGivesNoTabs() {
         XCTAssertTrue(GhosttyTabParser.parse("").isEmpty)
     }
