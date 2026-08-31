@@ -21,12 +21,19 @@ enum SessionResolver {
     /// When several candidates share a normalized title, the winner is simply the first the
     /// provider returned — `resolve` never reads `lastActivity` itself. "Most recently active wins
     /// a tie" depends entirely on each provider handing over newest-first entries.
+    ///
+    /// A tab that no provider could resolve to a session still records which agent it belongs to:
+    /// the last non-fallback provider whose `mayOwn` claimed it, or Claude — the fallback — only
+    /// when none did. That is what keeps an opencode-titled tab that merely failed to match a
+    /// session from being mislabelled Claude in the Agent column.
     static func resolve(tabs: [GhosttyTab], providers: [AgentSessionProvider]) -> [ClaudeTabEntry] {
         let ordered = tabs.sorted { ($0.windowID, $0.index) < ($1.windowID, $1.index) }
-        // Fallbacks last, regardless of the order the caller passed in. Swift's `sorted` is a
-        // stable sort, so two non-fallback (or two fallback) providers keep their given order —
-        // this only ever moves a fallback provider down, never reshuffles among equals.
-        let providers = providers.sorted { !$0.isFallback && $1.isFallback }
+        // Fallbacks last, regardless of the order the caller passed in. Built by filtering rather
+        // than sorting: the standard library does NOT document `sorted` as stable, so relying on it
+        // to keep two non-fallback (or two fallback) providers in their given order would be
+        // unfounded — filtering into two passes preserves each group's relative order by
+        // construction, no stability guarantee needed.
+        let providers = providers.filter { !$0.isFallback } + providers.filter(\.isFallback)
         var claimed: Set<ClaimKey> = []
 
         // One `sessions(inDirectory:)` call per (provider, directory) for the whole resolve, not
@@ -41,13 +48,21 @@ enum SessionResolver {
         }
 
         return ordered.enumerated().map { position, tab in
+            // The last non-fallback provider whose `mayOwn` claimed this tab — recorded even when
+            // it found no match, so an unresolved tab still names its real agent instead of
+            // silently defaulting to Claude. Claude itself is excluded here: its `mayOwn` is an
+            // unconditional `true`, not a real claim, and it is what the final fallback already is.
+            var lastOwner: String?
             for provider in providers where provider.mayOwn(tabTitle: tab.title) {
                 let wanted = provider.normalize(tabTitle: tab.title)
                 let candidates = sessions(for: provider, in: tab.workingDirectory)
                     .filter { !claimed.contains(ClaimKey(providerID: provider.id, sessionID: $0.id)) }
                 let match = candidates.first { provider.normalize(tabTitle: $0.title) == wanted }
                     ?? candidates.first { !wanted.isEmpty && provider.normalize(tabTitle: $0.title).hasPrefix(wanted) }
-                guard let match else { continue }
+                guard let match else {
+                    if !provider.isFallback { lastOwner = provider.id }
+                    continue
+                }
                 claimed.insert(ClaimKey(providerID: provider.id, sessionID: match.id))
                 return ClaudeTabEntry(order: position, title: tab.title,
                                       workingDirectory: tab.workingDirectory,
@@ -55,7 +70,7 @@ enum SessionResolver {
             }
             return ClaudeTabEntry(order: position, title: tab.title,
                                   workingDirectory: tab.workingDirectory,
-                                  sessionID: nil, provider: AgentProviderID.claude)
+                                  sessionID: nil, provider: lastOwner ?? AgentProviderID.claude)
         }
     }
 }

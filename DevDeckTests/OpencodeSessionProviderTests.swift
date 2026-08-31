@@ -235,7 +235,7 @@ final class OpencodeSessionProviderTests: XCTestCase {
             providers: [opencode, claude])
 
         XCTAssertEqual(entries.map(\.sessionID), [nil])
-        XCTAssertEqual(entries.map(\.provider), ["claude"],
-                       "an entirely unresolved tab still records the fallback provider")
+        XCTAssertEqual(entries.map(\.provider), ["opencode"],
+                       "opencode claimed this tab via mayOwn, so it must be named even though no session matched")
     }
 }
