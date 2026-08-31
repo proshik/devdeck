@@ -615,8 +615,8 @@ enum L10n {
         t("\(count) tab(s) · \(time)", "вкладок: \(count) · \(time)")
     }
     static var claudeTabsIntro: String {
-        t("What DevDeck would reopen in Ghostty after a restart. A tab whose Claude session could not be identified still comes back — as a shell in its directory.",
-          "Что DevDeck вернёт в Ghostty после перезагрузки. Вкладка, чью сессию Claude опознать не удалось, всё равно вернётся — шеллом в своём каталоге.")
+        t("What DevDeck would reopen in Ghostty after a restart. A tab whose agent session could not be identified still comes back — as a shell in its directory.",
+          "Что DevDeck вернёт в Ghostty после перезагрузки. Вкладка, чью сессию агента опознать не удалось, всё равно вернётся — шеллом в своём каталоге.")
     }
     static func claudeTabsCapturedAt(_ when: String) -> String {
         t("Snapshot taken \(when)", "Снимок снят \(when)")
@@ -651,8 +651,8 @@ enum L10n {
           "Не удалось прочитать вкладки Ghostty — проверь разрешение Automation в «Системных настройках › Конфиденциальность». \(detail)")
     }
     static var claudeTabsNothingResolved: String {
-        t("None of the open tabs could be tied to a Claude session — the previous snapshot was kept.",
-          "Ни одну открытую вкладку не удалось связать с сессией Claude — прежний снимок сохранён.")
+        t("None of the open tabs could be tied to an agent session — the previous snapshot was kept.",
+          "Ни одну открытую вкладку не удалось связать с сессией агента — прежний снимок сохранён.")
     }
     static var claudeTabsRestoreInProgress: String {
         t("A restore is running — try again once the tabs are back.",
