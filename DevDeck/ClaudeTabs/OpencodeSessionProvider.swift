@@ -24,13 +24,63 @@ protocol OpencodeSessionListing: Sendable {
     func sessions(inDirectory directory: String) -> [AgentSession]
 }
 
-/// Real implementation over `opencode session list --format json`.
+/// Real implementation over `opencode session list --format json`, cached per directory for a
+/// short time.
 ///
 /// `opencode` may not be installed at all, or the directory may not be one of its projects —
 /// either way this returns an empty list silently, the same rule every external tool in this
 /// feature follows for "the answer is: nothing".
-struct LiveOpencodeSessions: OpencodeSessionListing {
+///
+/// Without a cache, every capture that reaches this provider spawns one `/bin/zsh -lc "opencode
+/// session list …"` per opencode directory — measured at 0.44 s on this machine — and
+/// `ClaudeTabsModel.captureBeforeShutdown` runs synchronously on the main actor with no timeout,
+/// so an uncached call there is a real (if now rare — see `CaptureSignature`) way to make quit
+/// hang. 60 s matches the base feature's original capture cadence: it is the same bound
+/// `LiveTranscriptIndex`'s caches give the Claude side, and it caps how long a brand-new opencode
+/// session can take to show up in a resolve at one minute.
+///
+/// `NSLock`, never held across the subprocess call — the same discipline `LiveTranscriptIndex` and
+/// `BackgroundSessionCache` already use: take it to look or to record, drop it to do the actual
+/// work.
+final class LiveOpencodeSessions: OpencodeSessionListing, @unchecked Sendable {
+    static let defaultTimeToLive: TimeInterval = 60
+
+    private let timeToLive: TimeInterval
+    private let now: () -> Date
+    private let fetch: (String) -> [AgentSession]
+
+    private let lock = NSLock()
+    private var cache: [String: (fetchedAt: Date, sessions: [AgentSession])] = [:]
+
+    /// `now` and `fetch` are overridable only for tests — nothing in production ever passes them,
+    /// so `LiveOpencodeSessions()` alone is the real implementation, matching every other `Live*`
+    /// type in this feature.
+    init(timeToLive: TimeInterval = LiveOpencodeSessions.defaultTimeToLive,
+         now: @escaping () -> Date = Date.init,
+         fetch: @escaping (String) -> [AgentSession] = LiveOpencodeSessions.runProcess) {
+        self.timeToLive = timeToLive
+        self.now = now
+        self.fetch = fetch
+    }
+
     func sessions(inDirectory directory: String) -> [AgentSession] {
+        lock.lock()
+        if let cached = cache[directory], now().timeIntervalSince(cached.fetchedAt) < timeToLive {
+            let sessions = cached.sessions
+            lock.unlock()
+            return sessions
+        }
+        lock.unlock()
+
+        let fetched = fetch(directory)
+
+        lock.lock()
+        cache[directory] = (now(), fetched)
+        lock.unlock()
+        return fetched
+    }
+
+    private static func runProcess(inDirectory directory: String) -> [AgentSession] {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/zsh")
         process.arguments = ["-lc", "opencode session list --format json"]

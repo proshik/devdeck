@@ -122,6 +122,74 @@ final class OpencodeSessionProviderTests: XCTestCase {
         XCTAssertEqual(provider.sessions(inDirectory: "/tmp/other"), [])
     }
 
+    // MARK: - LiveOpencodeSessions caching
+
+    /// Counts calls per directory rather than just answering them — the whole point of these tests
+    /// is to observe how OFTEN `fetch` runs, not merely that the right sessions come back.
+    private final class CountingFetch: @unchecked Sendable {
+        private let lock = NSLock()
+        private var callCounts: [String: Int] = [:]
+        var sessionsByDirectory: [String: [AgentSession]] = [:]
+
+        func calls(for directory: String) -> Int {
+            lock.lock(); defer { lock.unlock() }
+            return callCounts[directory, default: 0]
+        }
+
+        func fetch(_ directory: String) -> [AgentSession] {
+            lock.lock()
+            callCounts[directory, default: 0] += 1
+            lock.unlock()
+            return sessionsByDirectory[directory] ?? []
+        }
+    }
+
+    /// A mutable, thread-unsafe-but-single-threaded-here clock: each test advances it by hand
+    /// instead of sleeping for real seconds.
+    private final class FakeClock {
+        var now = Date(timeIntervalSince1970: 0)
+    }
+
+    func testCachesWithinTheTimeToLive() {
+        let fetch = CountingFetch()
+        fetch.sessionsByDirectory["/tmp/a"] = [AgentSession(id: "s1", title: "one", lastActivity: Date())]
+        let clock = FakeClock()
+        let listing = LiveOpencodeSessions(timeToLive: 60, now: { clock.now }, fetch: fetch.fetch)
+
+        _ = listing.sessions(inDirectory: "/tmp/a")
+        clock.now.addTimeInterval(59)
+        _ = listing.sessions(inDirectory: "/tmp/a")
+
+        XCTAssertEqual(fetch.calls(for: "/tmp/a"), 1, "a call inside the TTL must reuse the cached result")
+    }
+
+    func testRefetchesOnceTheTimeToLiveHasElapsed() {
+        let fetch = CountingFetch()
+        let clock = FakeClock()
+        let listing = LiveOpencodeSessions(timeToLive: 60, now: { clock.now }, fetch: fetch.fetch)
+
+        _ = listing.sessions(inDirectory: "/tmp/a")
+        clock.now.addTimeInterval(60)
+        _ = listing.sessions(inDirectory: "/tmp/a")
+
+        XCTAssertEqual(fetch.calls(for: "/tmp/a"), 2,
+                       "a call at or past the TTL must not reuse a stale cached result")
+    }
+
+    func testEachDirectoryCachesIndependently() {
+        let fetch = CountingFetch()
+        let clock = FakeClock()
+        let listing = LiveOpencodeSessions(timeToLive: 60, now: { clock.now }, fetch: fetch.fetch)
+
+        _ = listing.sessions(inDirectory: "/tmp/a")
+        _ = listing.sessions(inDirectory: "/tmp/b")
+        _ = listing.sessions(inDirectory: "/tmp/a")
+        _ = listing.sessions(inDirectory: "/tmp/b")
+
+        XCTAssertEqual(fetch.calls(for: "/tmp/a"), 1)
+        XCTAssertEqual(fetch.calls(for: "/tmp/b"), 1)
+    }
+
     // MARK: - Resolver, end to end on a mixed tab set
 
     private struct FakeTranscriptIndex: TranscriptIndexing {
