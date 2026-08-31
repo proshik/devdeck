@@ -3,9 +3,13 @@ import Foundation
 /// One thing to do to Ghostty when restoring.
 enum RestoreAction: Equatable, Sendable {
     /// Type into the terminal Ghostty already opened for itself.
-    case inputText(cwd: String, sessionID: String?)
+    ///
+    /// `provider` is the entry's `ClaudeTabEntry.provider` — the id `TabRestorer` looks up to ask
+    /// the right `AgentSessionProvider` for the resume command. `TabRestorer` ignores it when
+    /// `sessionID` is `nil`, but it is carried regardless, so both cases share one uniform shape.
+    case inputText(cwd: String, sessionID: String?, provider: String)
     /// Open a fresh tab configured with the directory and the command.
-    case newTab(cwd: String, sessionID: String?)
+    case newTab(cwd: String, sessionID: String?, provider: String)
 }
 
 enum RestoreDecision: Equatable {
@@ -55,8 +59,8 @@ enum RestorePlanner {
             .enumerated()
             .map { offset, entry -> RestoreAction in
                 offset == 0 && reuseFirstTab
-                    ? .inputText(cwd: entry.workingDirectory, sessionID: entry.sessionID)
-                    : .newTab(cwd: entry.workingDirectory, sessionID: entry.sessionID)
+                    ? .inputText(cwd: entry.workingDirectory, sessionID: entry.sessionID, provider: entry.provider)
+                    : .newTab(cwd: entry.workingDirectory, sessionID: entry.sessionID, provider: entry.provider)
             }
         return .restore(actions)
     }

@@ -75,10 +75,11 @@ final class ClaudeTabsModelTests: XCTestCase {
         runner.result = runnerResult
         let model = ClaudeTabsModel(
             reader: reader ?? FakeGhosttyTabReader(result: .tabs((0..<tabs).map(tab))),
-            index: index, store: store,
+            providers: [ClaudeSessionProvider(index: index, backgroundSessions: FakeBackgroundSessions(ids: []))],
+            store: store,
             bootTime: FakeBootTime(now: currentBoot),
             restorer: TabRestorer(runner: runner,
-                                  sessions: FakeBackgroundSessions(ids: []),
+                                  providers: [ClaudeSessionProvider(backgroundSessions: FakeBackgroundSessions(ids: []))],
                                   stepDelay: stepDelay),
             defaults: defaults,
             isEnabled: { enabled },
@@ -337,10 +338,10 @@ final class ClaudeTabsModelTests: XCTestCase {
         var enabled = false
         let model = ClaudeTabsModel(
             reader: FakeGhosttyTabReader(result: .tabs([tab(0)])),
-            index: FakeTranscriptIndex(),
+            providers: [ClaudeSessionProvider(index: FakeTranscriptIndex(), backgroundSessions: FakeBackgroundSessions(ids: []))],
             store: store,
             bootTime: FakeBootTime(now: currentBoot),
-            restorer: TabRestorer(runner: runner, sessions: FakeBackgroundSessions(ids: []), stepDelay: .zero),
+            restorer: TabRestorer(runner: runner, providers: [ClaudeSessionProvider(backgroundSessions: FakeBackgroundSessions(ids: []))], stepDelay: .zero),
             defaults: defaults,
             isEnabled: { enabled },
             isGhosttyRunning: { true })
