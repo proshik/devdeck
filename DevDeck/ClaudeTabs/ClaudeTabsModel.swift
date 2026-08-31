@@ -105,7 +105,7 @@ final class ClaudeTabsModel {
     private var wasEnabled = false
 
     init(reader: GhosttyTabReading = LiveGhosttyTabReader(),
-         providers: [AgentSessionProvider] = [OpencodeSessionProvider(), ClaudeSessionProvider()],
+         providers: [AgentSessionProvider] = AgentProviders.makeDefault(),
          store: ClaudeTabsStore = ClaudeTabsStore(),
          bootTime: BootTimeProviding = LiveBootTime(),
          restorer: TabRestorer = TabRestorer(),
