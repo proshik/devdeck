@@ -46,6 +46,16 @@ protocol AgentSessionProvider: Sendable {
     /// The agent's own title normalization: Claude prefixes a status glyph, opencode "OC | ".
     func normalize(tabTitle: String) -> String
 
+    /// Called once by `TabRestorer.restore`, before any `command` is built for any entry — for a
+    /// provider that needs to observe something about the moment of restore once, rather than
+    /// re-asking it fresh for every entry that resolves to it.
+    ///
+    /// Claude uses this to fetch "which sessions are running in the background" a single time
+    /// instead of once per entry: the set describes the restore as a whole, not any one command,
+    /// and a hidden per-call memo would bury that. The default here is a no-op for a provider
+    /// (opencode) with nothing to observe up front.
+    func prepareForRestore()
+
     /// The shell line that reopens the session.
     func command(resuming sessionID: String, in cwd: String) -> String
 }
@@ -54,4 +64,26 @@ extension AgentSessionProvider {
     /// Most providers have a real prefix to check and may run in any order — only the one
     /// provider that claims everything needs to opt into running last.
     var isFallback: Bool { false }
+
+    func prepareForRestore() {}
+}
+
+/// The one definition of "the agents this build knows about, in resolution order" — a factory,
+/// not a shared array.
+///
+/// `ClaudeTabsModel` (capture) and `TabRestorer` (restore) each need their own default provider
+/// list, and before this they were two independently written `[OpencodeSessionProvider(),
+/// ClaudeSessionProvider()]` literals that happened to agree. Adding a third provider to one and
+/// not the other would have made every tab of that kind silently degrade to an unresolved shell on
+/// restore — no crash, no error, just sessions that quietly stopped resuming. Routing both call
+/// sites through this factory makes that a one-line fix instead of a two-file one it is easy to
+/// half-do.
+///
+/// A factory rather than a `static let` array on purpose: capture and restore must not share
+/// provider *instances* (each needs its own `LiveTranscriptIndex` cache, its own
+/// `prepareForRestore()` state) — only the same list of *kinds*.
+enum AgentProviders {
+    static func makeDefault() -> [AgentSessionProvider] {
+        [OpencodeSessionProvider(), ClaudeSessionProvider()]
+    }
 }

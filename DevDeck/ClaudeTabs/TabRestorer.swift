@@ -100,7 +100,7 @@ struct TabRestorer {
     let stepDelay: Duration
 
     init(runner: AppleScriptRunning = LiveAppleScriptRunner(),
-         providers: [AgentSessionProvider] = [OpencodeSessionProvider(), ClaudeSessionProvider()],
+         providers: [AgentSessionProvider] = AgentProviders.makeDefault(),
          stepDelay: Duration = .milliseconds(700)) {
         self.runner = runner
         self.providers = providers
@@ -111,6 +111,10 @@ struct TabRestorer {
     /// rest from being attempted, so every action always runs.
     @discardableResult
     func restore(_ actions: [RestoreAction]) async -> RestoreOutcome {
+        // Once for the whole restore, before any command is built — see
+        // `AgentSessionProvider.prepareForRestore()`. Claude uses this to fetch the
+        // background-session set a single time instead of once per entry.
+        for provider in providers { provider.prepareForRestore() }
         var succeeded = 0
         var failed = 0
         for (offset, action) in actions.enumerated() {
