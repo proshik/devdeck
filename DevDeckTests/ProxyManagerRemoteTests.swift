@@ -226,6 +226,9 @@ final class ProxyManagerRemoteTests: XCTestCase {
         XCTAssertEqual(rig.store.config.remoteProxies.first?.name, "renamed")
         XCTAssertEqual(rig.store.config.remoteProxies.first?.socksPort, 2080)
         XCTAssertEqual(rig.store.commandsByID[updated.tunnelCommandID!]?.command, newCommand)
+        XCTAssertEqual(rig.store.commandsByID[updated.tunnelCommandID!]?.port, 2080,
+                       "the occupied-port precheck and the watchdog's recheck key off Command.port, "
+                       + "not the command string — it must move with a safe SOCKS-port rewrite")
     }
 
     func testApplyRemoteProxyEditLeavesAHandEditedTunnelCommandUntouched() {
@@ -237,11 +240,15 @@ final class ProxyManagerRemoteTests: XCTestCase {
         rig.store.upsert(tunnel)
         var updated = rig.remote
         updated.name = "renamed"
+        updated.socksPort = 2080   // a port change the hand-edited command's real -D port may not match
 
         rig.manager.applyRemoteProxyEdit(updated, tunnelCommandUpdate: .handEdited)
 
         XCTAssertEqual(rig.store.config.remoteProxies.first?.name, "renamed",
                        "name/ports are saved regardless of the tunnel command's fate")
+        XCTAssertEqual(rig.store.commandsByID[rig.remote.tunnelCommandID!]?.port, 1080,
+                       "we don't know what port a hand-edited command actually uses — writing an "
+                       + "assumed value would be worse than leaving Command.port as it was")
         XCTAssertEqual(rig.store.commandsByID[rig.remote.tunnelCommandID!]?.command, tunnel.command,
                        "a hand-edited tunnel command must never be silently overwritten")
     }
