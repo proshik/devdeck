@@ -724,6 +724,36 @@ enum L10n {
         t("Replace", "Заменить")
     }
 
+    /// The action on every row of both the open-tabs table and the history list below it — opening
+    /// one entry as a brand-new Ghostty tab. One label for both, since it is the same action.
+    static var claudeTabsOpen: String { t("Open", "Открыть") }
+
+    static var claudeTabsHistorySection: String { t("History", "История") }
+    static var claudeTabsHistoryIntro: String {
+        t("Sessions from the last 7 days, across every project — including ones whose tab you already closed. Open the one you want back.",
+          "Сессии за последние 7 дней, во всех проектах — включая те, чью вкладку ты уже закрыл. Открой нужную.")
+    }
+    static var claudeTabsHistoryRefresh: String { t("Rebuild", "Перестроить") }
+    static var claudeTabsHistorySearchPlaceholder: String {
+        t("Search by title or directory", "Поиск по названию или каталогу")
+    }
+    static var claudeTabsColumnLastActive: String { t("Last active", "Последняя активность") }
+    /// Shown once a rebuild has run and found nothing — as opposed to `claudeTabsHistoryBuilding`,
+    /// which covers the first build still in flight.
+    static var claudeTabsHistoryEmpty: String {
+        t("No session history yet — try Rebuild.", "Истории сессий пока нет — нажми «Перестроить».")
+    }
+    /// A first build can take a few seconds (a cold walk of every Claude transcript) — this is what
+    /// keeps the empty list from reading as a bug in that window rather than work in progress.
+    static var claudeTabsHistoryBuilding: String {
+        t("Building the session history…", "Строим историю сессий…")
+    }
+    /// Shown under the search field when a query matches nothing — distinct from
+    /// `claudeTabsHistoryEmpty`, which means the catalogue itself has nothing in it yet.
+    static var claudeTabsHistoryNoMatches: String {
+        t("No sessions match your search.", "По запросу ничего не найдено.")
+    }
+
     // MARK: - Duplicate
 
     static var duplicate: String { t("Duplicate", "Дублировать") }

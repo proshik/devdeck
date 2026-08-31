@@ -6,16 +6,36 @@ import XCTest
 /// nothing changed in the move.
 final class ClaudeSessionProviderTests: XCTestCase {
 
-    private struct FakeTranscriptIndex: TranscriptIndexing {
+    /// Records what it was called with, so a test can prove `ClaudeSessionProvider` forwards
+    /// `since`/`known` to its index rather than swallowing either. `@unchecked Sendable` — test-only,
+    /// single-threaded, same allowance `OpencodeSessionProviderTests.CountingFetch` takes.
+    private final class FakeTranscriptIndex: TranscriptIndexing, @unchecked Sendable {
         var byDirectory: [String: [TranscriptTitle]] = [:]
+        var recent: [RecentTranscript] = []
+        private(set) var lastSince: Date?
+        private(set) var lastKnown: [String: KnownTranscript]?
+
+        init(byDirectory: [String: [TranscriptTitle]] = [:], recent: [RecentTranscript] = []) {
+            self.byDirectory = byDirectory
+            self.recent = recent
+        }
+
         func titles(forWorkingDirectory workingDirectory: String) -> [TranscriptTitle] {
             byDirectory[workingDirectory] ?? []
+        }
+
+        func recentTranscripts(since: Date, known: [String: KnownTranscript]) -> [RecentTranscript] {
+            lastSince = since
+            lastKnown = known
+            return recent
         }
     }
 
     private func provider(index: TranscriptIndexing = FakeTranscriptIndex(),
-                          backgroundIDs: Set<String> = []) -> ClaudeSessionProvider {
-        ClaudeSessionProvider(index: index, backgroundSessions: FakeBackgroundSessions(ids: backgroundIDs))
+                          backgroundIDs: Set<String> = [],
+                          knownTranscripts: [String: KnownTranscript] = [:]) -> ClaudeSessionProvider {
+        ClaudeSessionProvider(index: index, backgroundSessions: FakeBackgroundSessions(ids: backgroundIDs),
+                             knownTranscripts: knownTranscripts)
     }
 
     func testIDIsClaude() {
@@ -55,13 +75,45 @@ final class ClaudeSessionProviderTests: XCTestCase {
         ]))
         let sessions = claude.sessions(inDirectory: "/tmp/a")
         XCTAssertEqual(sessions, [
-            AgentSession(id: "s1", title: "alpha", lastActivity: Date(timeIntervalSince1970: 20)),
-            AgentSession(id: "s2", title: "beta", lastActivity: Date(timeIntervalSince1970: 10)),
+            AgentSession(id: "s1", title: "alpha", lastActivity: Date(timeIntervalSince1970: 20), directory: "/tmp/a"),
+            AgentSession(id: "s2", title: "beta", lastActivity: Date(timeIntervalSince1970: 10), directory: "/tmp/a"),
         ])
     }
 
     func testSessionsIsEmptyForAnUnknownDirectory() {
         XCTAssertTrue(provider().sessions(inDirectory: "/tmp/nope").isEmpty)
+    }
+
+    // MARK: - recentSessions(since:)
+
+    /// A thin map from `RecentTranscript` to `AgentSession`, mirroring `sessions(inDirectory:)` —
+    /// the actual window/skip/reuse behaviour is `LiveTranscriptIndex`'s, pinned in
+    /// `TranscriptIndexTests`; this only pins that `ClaudeSessionProvider` carries the fields
+    /// across correctly.
+    func testRecentSessionsMapsRecentTranscriptsToAgentSessions() {
+        let index = FakeTranscriptIndex(recent: [
+            RecentTranscript(title: TranscriptTitle(aiTitle: "alpha", sessionID: "s1",
+                                                    modifiedAt: Date(timeIntervalSince1970: 20)),
+                             directory: "/tmp/a", sourcePath: "/tmp/a.jsonl"),
+        ])
+        let sessions = provider(index: index).recentSessions(since: Date(timeIntervalSince1970: 0))
+        XCTAssertEqual(sessions, [
+            AgentSession(id: "s1", title: "alpha", lastActivity: Date(timeIntervalSince1970: 20), directory: "/tmp/a"),
+        ])
+    }
+
+    /// `since` and the provider's own `knownTranscripts` must reach the index unchanged — this is
+    /// the whole of what lets a catalog rebuild skip re-reading a transcript across an app restart.
+    func testRecentSessionsForwardsSinceAndKnownTranscriptsToTheIndex() {
+        let index = FakeTranscriptIndex()
+        let known = ["/tmp/a.jsonl": KnownTranscript(
+            modifiedAt: Date(timeIntervalSince1970: 5),
+            title: TranscriptTitle(aiTitle: "alpha", sessionID: "s1", modifiedAt: Date(timeIntervalSince1970: 5)),
+            directory: "/tmp/a")]
+        let since = Date(timeIntervalSince1970: 100)
+        _ = provider(index: index, knownTranscripts: known).recentSessions(since: since)
+        XCTAssertEqual(index.lastSince, since)
+        XCTAssertEqual(index.lastKnown, known)
     }
 
     // MARK: - command(resuming:in:)

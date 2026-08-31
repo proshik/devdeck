@@ -20,6 +20,7 @@ final class ClaudeTabsModelTests: XCTestCase {
         func titles(forWorkingDirectory workingDirectory: String) -> [TranscriptTitle] {
             byDirectory[workingDirectory] ?? []
         }
+        func recentTranscripts(since: Date, known: [String: KnownTranscript]) -> [RecentTranscript] { [] }
     }
 
     private struct FakeBootTime: BootTimeProviding {
