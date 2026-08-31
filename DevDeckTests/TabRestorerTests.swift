@@ -64,11 +64,19 @@ final class TabRestorerTests: XCTestCase {
         XCTAssertFalse(args.contains { $0.contains("\\n\"") })
     }
 
+    /// The default `providers` — real `ClaudeSessionProvider`/`OpencodeSessionProvider` — never
+    /// need to be exercised by these tests: they are about pacing and the AppleScript args, not
+    /// about resuming a session, so a session-less action (`sessionID: nil`) never even looks the
+    /// provider up.
+    private func restorer(runner: AppleScriptRunning, stepDelay: Duration) -> TabRestorer {
+        TabRestorer(runner: runner, providers: [FakeAgentProvider(id: "claude")], stepDelay: stepDelay)
+    }
+
     func testRestorerRunsOneScriptPerAction() async {
         let runner = FakeAppleScriptRunner()
-        let restorer = TabRestorer(runner: runner, sessions: FakeBackgroundSessions(ids: []), stepDelay: .zero)
-        let outcome = await restorer.restore([.inputText(cwd: "/tmp/a", sessionID: "s1"),
-                                              .newTab(cwd: "/tmp/b", sessionID: nil)])
+        let outcome = await restorer(runner: runner, stepDelay: .zero)
+            .restore([.inputText(cwd: "/tmp/a", sessionID: "s1", provider: "claude"),
+                      .newTab(cwd: "/tmp/b", sessionID: nil, provider: "claude")])
         XCTAssertEqual(outcome, RestoreOutcome(succeeded: 2, failed: 0))
         XCTAssertEqual(runner.calls.count, 2)
         XCTAssertTrue(runner.calls[0].contains { $0.contains("input text") })
@@ -78,8 +86,8 @@ final class TabRestorerTests: XCTestCase {
     func testRestorerReportsFailure() async {
         let runner = FakeAppleScriptRunner()
         runner.result = false
-        let outcome = await TabRestorer(runner: runner, sessions: FakeBackgroundSessions(ids: []), stepDelay: .zero)
-            .restore([.newTab(cwd: "/tmp/a", sessionID: nil)])
+        let outcome = await restorer(runner: runner, stepDelay: .zero)
+            .restore([.newTab(cwd: "/tmp/a", sessionID: nil, provider: "claude")])
         XCTAssertEqual(outcome, RestoreOutcome(succeeded: 0, failed: 1))
     }
 
@@ -89,15 +97,41 @@ final class TabRestorerTests: XCTestCase {
     func testRestorerContinuesPastAFailedAction() async {
         let runner = FakeAppleScriptRunner()
         runner.failingCalls = [1]
-        let outcome = await TabRestorer(runner: runner, sessions: FakeBackgroundSessions(ids: []), stepDelay: .zero)
-            .restore([.newTab(cwd: "/tmp/a", sessionID: "s1"),
-                      .newTab(cwd: "/tmp/b", sessionID: "s2"),
-                      .newTab(cwd: "/tmp/c", sessionID: "s3")])
+        let outcome = await restorer(runner: runner, stepDelay: .zero)
+            .restore([.newTab(cwd: "/tmp/a", sessionID: "s1", provider: "claude"),
+                      .newTab(cwd: "/tmp/b", sessionID: "s2", provider: "claude"),
+                      .newTab(cwd: "/tmp/c", sessionID: "s3", provider: "claude")])
 
         XCTAssertEqual(outcome, RestoreOutcome(succeeded: 2, failed: 1),
                        "a failed action must still be counted, and must not stop the rest")
         XCTAssertEqual(runner.calls.count, 3, "the restore stopped at the first failure")
         XCTAssertTrue(runner.calls[2].contains { $0.contains("/tmp/c") },
                       "the last tab was never attempted")
+    }
+
+    /// An entry whose `provider` id is not among the ones registered — an old id, a provider that
+    /// got removed — must still degrade to a plain shell in the directory, never crash or drop the
+    /// tab silently.
+    func testUnrecognizedProviderStillOpensAShellInTheDirectory() async {
+        let runner = FakeAppleScriptRunner()
+        let outcome = await TabRestorer(runner: runner, providers: [], stepDelay: .zero)
+            .restore([.newTab(cwd: "/tmp/a", sessionID: "s1", provider: "unknown-agent")])
+        XCTAssertEqual(outcome, RestoreOutcome(succeeded: 1, failed: 0))
+        XCTAssertTrue(runner.calls[0].contains { $0.contains("cd '/tmp/a'") })
+        XCTAssertFalse(runner.calls[0].contains { $0.contains("--resume") || $0.contains("--session") })
+    }
+}
+
+/// A minimal `AgentSessionProvider` whose `command` just proves which provider `TabRestorer`
+/// picked — the AppleScript-args tests above only need to see one script per action, not a real
+/// resume command.
+struct FakeAgentProvider: AgentSessionProvider {
+    var id: String
+    var isFallback = false
+    func mayOwn(tabTitle: String) -> Bool { true }
+    func sessions(inDirectory directory: String) -> [AgentSession] { [] }
+    func normalize(tabTitle: String) -> String { tabTitle }
+    func command(resuming sessionID: String, in cwd: String) -> String {
+        "cd \(shellQuote(cwd)) && \(id) --resume \(shellQuote(sessionID))"
     }
 }

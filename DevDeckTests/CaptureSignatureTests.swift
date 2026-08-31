@@ -71,7 +71,7 @@ final class CaptureSignatureTests: XCTestCase {
         let index = CountingIndex()
 
         let outcome = ClaudeTabsModel.collect(reader: FakeReader(result: .tabs(tabs)),
-                                              index: index,
+                                              providers: [ClaudeSessionProvider(index: index, backgroundSessions: FakeBackgroundSessions(ids: []))],
                                               previousSignature: tabs)
 
         XCTAssertEqual(outcome, .unchanged)
@@ -84,7 +84,7 @@ final class CaptureSignatureTests: XCTestCase {
         let index = CountingIndex()
 
         let outcome = ClaudeTabsModel.collect(reader: FakeReader(result: .tabs(after)),
-                                              index: index,
+                                              providers: [ClaudeSessionProvider(index: index, backgroundSessions: FakeBackgroundSessions(ids: []))],
                                               previousSignature: before)
 
         guard case .entries = outcome else { return XCTFail("expected a fresh resolve") }
@@ -102,7 +102,7 @@ final class CaptureSignatureTests: XCTestCase {
         let index = CountingIndex()
 
         let outcome = ClaudeTabsModel.collect(reader: FakeReader(result: .tabs(after)),
-                                              index: index,
+                                              providers: [ClaudeSessionProvider(index: index, backgroundSessions: FakeBackgroundSessions(ids: []))],
                                               previousSignature: before)
 
         guard case .entries = outcome else {
@@ -120,7 +120,7 @@ final class CaptureSignatureTests: XCTestCase {
         let tab = GhosttyTab(windowID: "w1", index: 1, title: "✳ a", workingDirectory: "/tmp/a")
         let index = ResolvingIndex(title: TranscriptTitle(aiTitle: "a", sessionID: "s1", modifiedAt: Date()))
         let model = ClaudeTabsModel(reader: FakeReader(result: .tabs([tab])),
-                                    index: index,
+                                    providers: [ClaudeSessionProvider(index: index, backgroundSessions: FakeBackgroundSessions(ids: []))],
                                     store: store,
                                     bootTime: FixedBootTime(date: Date(timeIntervalSince1970: 1_000)),
                                     defaults: makeDefaults(),
@@ -151,7 +151,7 @@ final class CaptureSignatureTests: XCTestCase {
         let index = CountingResolvingIndex(title: TranscriptTitle(aiTitle: "a", sessionID: "s1",
                                                                    modifiedAt: Date()))
         let model = ClaudeTabsModel(reader: FakeReader(result: .tabs([tab])),
-                                    index: index,
+                                    providers: [ClaudeSessionProvider(index: index, backgroundSessions: FakeBackgroundSessions(ids: []))],
                                     store: ClaudeTabsStore(url: tempStoreURL()),
                                     bootTime: FixedBootTime(date: Date(timeIntervalSince1970: 1_000)),
                                     defaults: makeDefaults(),

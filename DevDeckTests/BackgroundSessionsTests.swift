@@ -41,10 +41,10 @@ final class BackgroundSessionsTests: XCTestCase {
     func testRestorerAttachesOnlyTheBackgroundOnes() async {
         let runner = TabRestorerTests.FakeAppleScriptRunner()
         let restorer = TabRestorer(runner: runner,
-                                   sessions: FakeBackgroundSessions(ids: ["bg"]),
+                                   providers: [ClaudeSessionProvider(backgroundSessions: FakeBackgroundSessions(ids: ["bg"]))],
                                    stepDelay: .zero)
-        _ = await restorer.restore([.newTab(cwd: "/tmp/a", sessionID: "bg"),
-                                    .newTab(cwd: "/tmp/b", sessionID: "plain")])
+        _ = await restorer.restore([.newTab(cwd: "/tmp/a", sessionID: "bg", provider: "claude"),
+                                    .newTab(cwd: "/tmp/b", sessionID: "plain", provider: "claude")])
         let scripts = runner.calls.map { $0.joined(separator: " ") }
         XCTAssertTrue(scripts[0].contains("claude attach 'bg'"), "a background session must attach")
         XCTAssertTrue(scripts[1].contains("claude --resume 'plain'"), "an ordinary session must resume")
