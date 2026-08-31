@@ -34,6 +34,26 @@ final class SessionCatalogTests: XCTestCase {
         XCTAssertEqual(SessionCatalog(url: tempURL()).load(), [])
     }
 
+    /// `sourceModifiedAt` exists to be compared bit-for-bit against a transcript's live `stat()`
+    /// result — see `LiveTranscriptIndex.recentTranscripts(since:known:)` — and a real file's mtime
+    /// almost always carries sub-second precision. Two encodings were tried and rejected before
+    /// `.deferredToDate`: `.iso8601` truncates the fractional part outright, and `.secondsSince1970`
+    /// LOOKS exact but is not — it round-trips through `date.timeIntervalSince1970`, adding then
+    /// subtracting the ~978-million-second 1970/2001 offset, and that arithmetic rounds differently
+    /// often enough to change the result for a Date built the way a real mtime is (from
+    /// `timeIntervalSinceReferenceDate`, not from a `timeIntervalSince1970` literal — measured at
+    /// roughly half of a 500k-sample sweep). Building `sourceModifiedAt` via
+    /// `timeIntervalSinceReferenceDate` here, not `timeIntervalSince1970`, is deliberate: a
+    /// `timeIntervalSince1970` literal would round-trip through the OLD `.secondsSince1970` bug too
+    /// and this test would not have caught it.
+    func testRoundTripPreservesSubSecondPrecisionInSourceModifiedAt() throws {
+        let url = tempURL()
+        let precise = entry(sourceModifiedAt: Date(timeIntervalSinceReferenceDate: 800_000_000.123456789))
+        try SessionCatalog(url: url).save([precise])
+        XCTAssertEqual(SessionCatalog(url: url).load(), [precise],
+                       "a fractional-second mtime must round-trip exactly, not get rounded to a nearby value")
+    }
+
     func testCorruptFileReadsAsEmpty() throws {
         let url = tempURL()
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(),
@@ -184,5 +204,63 @@ final class SessionCatalogTests: XCTestCase {
     func testSessionHistoryWindowIsSevenDaysBack() {
         let now = Date(timeIntervalSince1970: 1_000_000)
         XCTAssertEqual(SessionHistoryWindow.since(now), now.addingTimeInterval(-7 * 24 * 60 * 60))
+    }
+
+    // MARK: - historyEntries (the page's own exclusion of what is already open)
+
+    /// The property `ClaudeTabsView`'s history section exists for: a session that is currently
+    /// open must not also show up below as something to reopen. Asserting the exclusion itself,
+    /// not merely that SOME list comes back, is the whole point — a version that forgot to filter
+    /// at all would still return a non-empty list.
+    func testHistoryEntriesExcludesSessionsThatAreCurrentlyOpen() {
+        let open = entry(sessionID: "open-1", title: "open one")
+        let closed = entry(sessionID: "closed-1", title: "closed one")
+        let result = SessionCatalog.historyEntries(from: [open, closed], excludingOpenSessionIDs: ["open-1"])
+        XCTAssertEqual(result, [closed], "a session already open must not also appear in the history list")
+    }
+
+    func testHistoryEntriesKeepsEverythingWhenNothingIsOpen() {
+        let a = entry(sessionID: "a")
+        let b = entry(sessionID: "b")
+        XCTAssertEqual(SessionCatalog.historyEntries(from: [a, b], excludingOpenSessionIDs: []), [a, b].sorted {
+            $0.lastActivity > $1.lastActivity
+        })
+    }
+
+    func testHistoryEntriesOrdersNewestActivityFirst() {
+        let older = entry(sessionID: "older", lastActivity: Date(timeIntervalSince1970: 100))
+        let newer = entry(sessionID: "newer", lastActivity: Date(timeIntervalSince1970: 200))
+        // Deliberately passed in the "wrong" order, so a passthrough that skipped sorting would fail.
+        XCTAssertEqual(SessionCatalog.historyEntries(from: [older, newer], excludingOpenSessionIDs: []),
+                       [newer, older])
+    }
+
+    // MARK: - matching (the history section's search field)
+
+    func testMatchingFiltersByTitle() {
+        let bug = entry(sessionID: "a", title: "fix the login bug", directory: "/tmp/x")
+        let docs = entry(sessionID: "b", title: "write the docs", directory: "/tmp/y")
+        XCTAssertEqual(SessionCatalog.matching([bug, docs], query: "bug"), [bug])
+    }
+
+    func testMatchingFiltersByDirectory() {
+        let projectX = entry(sessionID: "a", title: "alpha", directory: "/tmp/project-x")
+        let projectY = entry(sessionID: "b", title: "beta", directory: "/tmp/project-y")
+        XCTAssertEqual(SessionCatalog.matching([projectX, projectY], query: "project-y"), [projectY])
+    }
+
+    func testMatchingIsCaseInsensitive() {
+        let entry = entry(sessionID: "a", title: "Fix The Bug", directory: "/tmp/x")
+        XCTAssertEqual(SessionCatalog.matching([entry], query: "the bug"), [entry])
+    }
+
+    func testMatchingWithBlankQueryReturnsEverything() {
+        let entries = [entry(sessionID: "a"), entry(sessionID: "b")]
+        XCTAssertEqual(SessionCatalog.matching(entries, query: "   "), entries)
+    }
+
+    func testMatchingWithNoHitsReturnsEmpty() {
+        let entries = [entry(sessionID: "a", title: "alpha", directory: "/tmp/x")]
+        XCTAssertTrue(SessionCatalog.matching(entries, query: "nothing-like-this").isEmpty)
     }
 }
