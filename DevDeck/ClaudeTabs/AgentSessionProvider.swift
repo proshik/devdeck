@@ -16,6 +16,7 @@ struct AgentSession: Equatable, Sendable {
 /// provider could claim.
 enum AgentProviderID {
     static let claude = "claude"
+    static let opencode = "opencode"
 }
 
 /// One coding agent, from the restore mechanism's point of view.
@@ -25,6 +26,15 @@ enum AgentProviderID {
 protocol AgentSessionProvider: Sendable {
     /// Stable key stored in the snapshot, e.g. "claude" / "opencode".
     var id: String { get }
+
+    /// True for the provider that must be tried last and claims whatever nothing else did —
+    /// Claude, which has no title prefix of its own to check.
+    ///
+    /// Encoded here rather than left to a comment on the call site: `SessionResolver.resolve`
+    /// reorders providers by this flag itself, so a caller who happens to build `[Claude,
+    /// Opencode]` gets the same result as `[Opencode, Claude]` — Claude's unconditional `mayOwn`
+    /// can no longer swallow every tab before a prefix-bearing provider gets a look.
+    var isFallback: Bool { get }
 
     /// Cheap pre-filter: does this tab title look like it belongs to this agent at all?
     /// Answering false must be free — it exists so we do not spawn a process per directory
@@ -38,4 +48,10 @@ protocol AgentSessionProvider: Sendable {
 
     /// The shell line that reopens the session.
     func command(resuming sessionID: String, in cwd: String) -> String
+}
+
+extension AgentSessionProvider {
+    /// Most providers have a real prefix to check and may run in any order — only the one
+    /// provider that claims everything needs to opt into running last.
+    var isFallback: Bool { false }
 }
