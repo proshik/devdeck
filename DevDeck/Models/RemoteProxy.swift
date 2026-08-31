@@ -79,6 +79,15 @@ struct RemoteProxy: Codable, Equatable, Identifiable {
     /// its destination field. nil when `command` does not start with the expected prefix at
     /// `socksPort`: the command was edited by hand beyond the destination suffix (a jump host, an
     /// identity file, reordered flags…), or predates this field, and can't be parsed reliably.
+    ///
+    /// Definitional boundary, not a bug: everything after the fixed prefix is folded into
+    /// "destination", flags included. A flag placed BEFORE or BETWEEN the fixed tokens breaks the
+    /// prefix match above and is correctly seen as hand-edited (`nil`); a flag appended AFTER a
+    /// pristine destination — `… root@host -o ServerAliveInterval=30` — has no such marker and
+    /// parses right along with it into the destination field. The full string is visible there
+    /// before the user ever touches it, so this is not silent; it only becomes lossy if the field is
+    /// retyped without preserving that tail, which is what the field's hint text now says outright
+    /// rather than leaving the user to discover it.
     static func parsedDestination(fromTunnelCommand command: String, socksPort: Int) -> String? {
         let prefix = tunnelCommandString(destination: "", socksPort: socksPort)
         guard command.hasPrefix(prefix) else { return nil }

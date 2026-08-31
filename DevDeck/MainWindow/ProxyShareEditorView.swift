@@ -154,11 +154,11 @@ struct ProxyShareEditorView: View {
         }
         .contextMenu {
             Button(L10n.proxyRemoteEdit) { beginEditingRemote(remote) }
+            // Same confirmation the row's trash button opens — a right-click must not be a way to
+            // skip the "also delete the tunnel command?" dialog. One entry point into the shared
+            // `deletingRemote` sheet, not a shortcut that calls `deleteRemoteProxy` directly.
             Button(L10n.proxyRemoteDelete, role: .destructive) {
-                proxy.deleteRemoteProxy(remote, alsoTunnelCommand: false)
-            }
-            Button(L10n.proxyRemoteDeleteTunnelToo, role: .destructive) {
-                proxy.deleteRemoteProxy(remote, alsoTunnelCommand: true)
+                deletingRemote = remote
             }
         }
     }
