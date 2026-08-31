@@ -52,4 +52,26 @@ final class ClaudeTabsStoreTests: XCTestCase {
         try Data("{ not json".utf8).write(to: url)
         XCTAssertNil(ClaudeTabsStore(url: url).load())
     }
+
+    /// A snapshot written before `provider` existed has no such key at all. It must still load —
+    /// as a Claude snapshot, since Claude was the only agent this feature knew about then — rather
+    /// than fail to decode and silently lose the user's tabs.
+    func testOldFormatSnapshotWithoutProviderDecodesAsClaude() throws {
+        let url = tempURL()
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(),
+                                                withIntermediateDirectories: true)
+        let json = """
+        {
+          "bootTime": "1970-01-12T13:46:40Z",
+          "capturedAt": "1970-01-12T13:48:20Z",
+          "tabs": [
+            { "order": 0, "title": "✳ work", "workingDirectory": "/tmp/a", "sessionID": "s1" }
+          ]
+        }
+        """
+        try Data(json.utf8).write(to: url)
+
+        let loaded = try XCTUnwrap(ClaudeTabsStore(url: url).load())
+        XCTAssertEqual(loaded.tabs.map(\.provider), ["claude"])
+    }
 }

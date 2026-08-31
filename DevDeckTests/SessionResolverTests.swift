@@ -1,8 +1,15 @@
 import XCTest
 @testable import DevDeck
 
-/// Matching a Ghostty tab to the Claude session running in it. Pure — no Ghostty, no filesystem.
+/// Matching a Ghostty tab to an agent session. Pure — no Ghostty, no filesystem, no live provider.
 final class SessionResolverTests: XCTestCase {
+
+    private struct FakeTranscriptIndex: TranscriptIndexing {
+        var byDirectory: [String: [TranscriptTitle]] = [:]
+        func titles(forWorkingDirectory workingDirectory: String) -> [TranscriptTitle] {
+            byDirectory[workingDirectory] ?? []
+        }
+    }
 
     private func title(_ text: String, _ id: String, _ seconds: TimeInterval) -> TranscriptTitle {
         TranscriptTitle(aiTitle: text, sessionID: id, modifiedAt: Date(timeIntervalSince1970: seconds))
@@ -12,46 +19,48 @@ final class SessionResolverTests: XCTestCase {
         GhosttyTab(windowID: "w1", index: index, title: title, workingDirectory: cwd)
     }
 
-    func testStripsStatusGlyph() {
-        XCTAssertEqual(SessionResolver.normalize("✳ fix-own-memory"), "fix-own-memory")
-        XCTAssertEqual(SessionResolver.normalize("◐  Ghostty session"), "Ghostty session")
+    /// A single-provider setup — Claude, wired to a fake transcript index — for the tests that are
+    /// about the matching mechanics rather than the multi-provider dispatch itself.
+    private func claude(_ byDirectory: [String: [TranscriptTitle]]) -> [AgentSessionProvider] {
+        [ClaudeSessionProvider(index: FakeTranscriptIndex(byDirectory: byDirectory),
+                               backgroundSessions: FakeBackgroundSessions(ids: []))]
     }
 
     func testExactMatch() {
         let entries = SessionResolver.resolve(
             tabs: [tab(1, "✳ alpha", "/tmp/a")],
-            titlesByDirectory: ["/tmp/a": [title("alpha", "s1", 10)]])
+            providers: claude(["/tmp/a": [title("alpha", "s1", 10)]]))
         XCTAssertEqual(entries.map(\.sessionID), ["s1"])
+        XCTAssertEqual(entries.map(\.provider), ["claude"])
     }
 
     func testPrefixMatchForTruncatedTitle() {
         let entries = SessionResolver.resolve(
             tabs: [tab(1, "✳ long title that got", "/tmp/a")],
-            titlesByDirectory: ["/tmp/a": [title("long title that got cut off", "s1", 10)]])
+            providers: claude(["/tmp/a": [title("long title that got cut off", "s1", 10)]]))
         XCTAssertEqual(entries.map(\.sessionID), ["s1"])
     }
 
     func testTwoTabsWithTheSameTitleGetDifferentSessions() {
         let entries = SessionResolver.resolve(
             tabs: [tab(1, "✳ same", "/tmp/a"), tab(2, "✳ same", "/tmp/a")],
-            titlesByDirectory: ["/tmp/a": [title("same", "newer", 20), title("same", "older", 10)]])
+            providers: claude(["/tmp/a": [title("same", "newer", 20), title("same", "older", 10)]]))
         XCTAssertEqual(entries.map(\.sessionID), ["newer", "older"])
     }
 
     func testUnresolvedTabIsKeptWithoutSession() {
-        let entries = SessionResolver.resolve(
-            tabs: [tab(1, "zsh", "/tmp/a")],
-            titlesByDirectory: [:])
+        let entries = SessionResolver.resolve(tabs: [tab(1, "zsh", "/tmp/a")], providers: claude([:]))
         XCTAssertEqual(entries.count, 1)
         XCTAssertNil(entries[0].sessionID)
         XCTAssertEqual(entries[0].workingDirectory, "/tmp/a")
+        XCTAssertEqual(entries[0].provider, "claude", "an unresolved tab still defaults to claude")
     }
 
     func testOrderFollowsWindowThenTabIndex() {
         let tabs = [GhosttyTab(windowID: "w2", index: 1, title: "c", workingDirectory: "/tmp/c"),
                     GhosttyTab(windowID: "w1", index: 2, title: "b", workingDirectory: "/tmp/b"),
                     GhosttyTab(windowID: "w1", index: 1, title: "a", workingDirectory: "/tmp/a")]
-        let entries = SessionResolver.resolve(tabs: tabs, titlesByDirectory: [:])
+        let entries = SessionResolver.resolve(tabs: tabs, providers: [])
         XCTAssertEqual(entries.map(\.order), [0, 1, 2])
         XCTAssertEqual(entries.map(\.workingDirectory), ["/tmp/a", "/tmp/b", "/tmp/c"])
     }
@@ -61,13 +70,60 @@ final class SessionResolverTests: XCTestCase {
     func testGlyphOnlyTitleMatchesNothingEvenWithCandidatesPresent() {
         let entries = SessionResolver.resolve(
             tabs: [tab(1, "✳", "/tmp/a")],
-            titlesByDirectory: ["/tmp/a": [title("alpha", "s1", 10)]])
+            providers: claude(["/tmp/a": [title("alpha", "s1", 10)]]))
         XCTAssertEqual(entries.count, 1)
         XCTAssertNil(entries[0].sessionID)
     }
 
-    func testNormalizeReturnsEmptyForAGlyphOnlyTitle() {
-        XCTAssertEqual(SessionResolver.normalize("✳"), "")
-        XCTAssertEqual(SessionResolver.normalize("  ◐  "), "")
+    // MARK: - Multi-provider dispatch
+
+    /// A minimal fake, independent of `ClaudeSessionProvider`, so the resolver's own dispatch logic
+    /// — provider order, `mayOwn` filtering, per-provider claiming — is tested in isolation.
+    private struct FakeProvider: AgentSessionProvider {
+        var id: String
+        var owns: (String) -> Bool = { _ in true }
+        var byDirectory: [String: [AgentSession]] = [:]
+
+        func mayOwn(tabTitle: String) -> Bool { owns(tabTitle) }
+        func sessions(inDirectory directory: String) -> [AgentSession] { byDirectory[directory] ?? [] }
+        func normalize(tabTitle: String) -> String { tabTitle }
+        func command(resuming sessionID: String, in cwd: String) -> String { "" }
+    }
+
+    /// A tab whose title only the second provider recognizes must skip straight past the first,
+    /// not settle for a coincidental match there.
+    func testATabTheFirstProviderDoesNotOwnFallsThroughToTheNext() {
+        let first = FakeProvider(id: "first", owns: { _ in false })
+        let second = FakeProvider(id: "second", byDirectory: ["/tmp/a": [AgentSession(
+            id: "s1", title: "alpha", lastActivity: Date())]])
+        let entries = SessionResolver.resolve(tabs: [tab(1, "alpha", "/tmp/a")], providers: [first, second])
+        XCTAssertEqual(entries.map(\.sessionID), ["s1"])
+        XCTAssertEqual(entries.map(\.provider), ["second"])
+    }
+
+    /// Two providers are both eligible and both have a session titled "alpha" — the first one in
+    /// the list must win, exactly like the first candidate wins within one provider.
+    func testFirstEligibleProviderWinsOverALaterOneThatAlsoMatches() {
+        let first = FakeProvider(id: "first", byDirectory: ["/tmp/a": [AgentSession(
+            id: "s1", title: "alpha", lastActivity: Date())]])
+        let second = FakeProvider(id: "second", byDirectory: ["/tmp/a": [AgentSession(
+            id: "s1", title: "alpha", lastActivity: Date())]])
+        let entries = SessionResolver.resolve(tabs: [tab(1, "alpha", "/tmp/a")], providers: [first, second])
+        XCTAssertEqual(entries.map(\.provider), ["first"])
+    }
+
+    /// The claim key is namespaced by provider: two providers handing out the identical raw
+    /// session id "s1" must not make one's claim block the other's tab from resolving.
+    func testTheSameRawSessionIDFromTwoDifferentProvidersDoesNotCollide() {
+        let first = FakeProvider(id: "first", owns: { $0 == "one" }, byDirectory: [
+            "/tmp/a": [AgentSession(id: "s1", title: "one", lastActivity: Date())]])
+        let second = FakeProvider(id: "second", owns: { $0 == "two" }, byDirectory: [
+            "/tmp/a": [AgentSession(id: "s1", title: "two", lastActivity: Date())]])
+        let entries = SessionResolver.resolve(
+            tabs: [tab(1, "one", "/tmp/a"), tab(2, "two", "/tmp/a")],
+            providers: [first, second])
+        XCTAssertEqual(entries.map(\.sessionID), ["s1", "s1"],
+                       "the same raw id from two different providers must not be treated as one claim")
+        XCTAssertEqual(entries.map(\.provider), ["first", "second"])
     }
 }
