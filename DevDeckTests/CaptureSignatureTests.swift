@@ -60,6 +60,47 @@ final class CaptureSignatureTests: XCTestCase {
         return defaults
     }
 
+    // MARK: - CaptureSignature normalization
+
+    /// Claude Code animates the leading status glyph (`✳`, `◐`, `◑`) while it works, so the raw
+    /// title changes on most ticks even when the tab SET has not. A signature built from the raw
+    /// titles would fire the expensive resolve pass on nearly every tick of a busy session —
+    /// exactly when the "unchanged → skip it" optimisation matters most.
+    func testTwoTabSetsDifferingOnlyInTheLeadingGlyphCompareAsUnchanged() {
+        let busy = [GhosttyTab(windowID: "w1", index: 1, title: "✳ fix-own-memory", workingDirectory: "/tmp/a")]
+        let stillBusy = [GhosttyTab(windowID: "w1", index: 1, title: "◐ fix-own-memory", workingDirectory: "/tmp/a")]
+
+        XCTAssertEqual(CaptureSignature.normalized(busy), CaptureSignature.normalized(stillBusy),
+                       "a status glyph changing mid-animation is not a tab-set change")
+
+        let index = CountingIndex()
+        let outcome = ClaudeTabsModel.collect(
+            reader: FakeReader(result: .tabs(stillBusy)),
+            providers: [ClaudeSessionProvider(index: index, backgroundSessions: FakeBackgroundSessions(ids: []))],
+            previousSignature: CaptureSignature.normalized(busy))
+        XCTAssertEqual(outcome, .unchanged)
+        XCTAssertEqual(index.calls, 0, "a glyph-only change must not trigger a real resolve")
+    }
+
+    /// The counterpart: a real title change past the glyph must still be seen as a change, so the
+    /// normalization above cannot be papering over every difference.
+    func testATabSetDifferingInTheRealTitleIsNotUnchanged() {
+        let before = [GhosttyTab(windowID: "w1", index: 1, title: "✳ fix-own-memory", workingDirectory: "/tmp/a")]
+        let after = [GhosttyTab(windowID: "w1", index: 1, title: "✳ a-completely-different-title", workingDirectory: "/tmp/a")]
+
+        XCTAssertNotEqual(CaptureSignature.normalized(before), CaptureSignature.normalized(after))
+
+        let index = CountingIndex()
+        let outcome = ClaudeTabsModel.collect(
+            reader: FakeReader(result: .tabs(after)),
+            providers: [ClaudeSessionProvider(index: index, backgroundSessions: FakeBackgroundSessions(ids: []))],
+            previousSignature: CaptureSignature.normalized(before))
+        guard case .entries = outcome else {
+            return XCTFail("a real title change must still trigger a fresh resolve")
+        }
+        XCTAssertEqual(index.calls, 1)
+    }
+
     func testClampsBothEnds() {
         XCTAssertEqual(ClaudeTabsCaptureInterval.clamped(0), 5)
         XCTAssertEqual(ClaudeTabsCaptureInterval.clamped(86_400), 300)
