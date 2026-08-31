@@ -284,7 +284,15 @@ final class ClaudeTabsHistoryTests: XCTestCase {
                       + "behaviour, and no worse")
     }
 
-    func testRefreshLiveOpenSessionIDsFallsBackToTheSnapshotWhenGhosttyIsNotRunning() async throws {
+    /// `.notRunning` is positive knowledge, not a failure: Ghostty is not running, so exactly zero
+    /// tabs are open (see `GhosttyTabReading`'s own doc), and the right answer is the empty set —
+    /// not the stale snapshot. Falling back to the snapshot here would reproduce the very bug this
+    /// feature exists to fix, in the window it matters most: right after a reboot, before Ghostty
+    /// has even been launched, when the user opens this page specifically to find a session that is
+    /// NOT open. This replaces the old pin (`...FallsBackToTheSnapshot...`), which asserted the
+    /// opposite; `testRefreshLiveOpenSessionIDsFallsBackToTheSnapshotWhenTheReadFails` above still
+    /// covers the one case — `.failed` — where a fallback is actually correct.
+    func testRefreshLiveOpenSessionIDsIsEmptyWhenGhosttyIsNotRunning() async throws {
         let store = ClaudeTabsStore(url: tempSnapshotURL())
         try store.save(ClaudeTabsSnapshot(
             bootTime: Date(), capturedAt: Date(),
@@ -295,6 +303,8 @@ final class ClaudeTabsHistoryTests: XCTestCase {
 
         await model.refreshLiveOpenSessionIDs()
 
-        XCTAssertEqual(model.liveOpenSessionIDs, ["s1"])
+        XCTAssertTrue(model.liveOpenSessionIDs.isEmpty,
+                     "Ghostty not running is positive knowledge that zero tabs are open — the stale "
+                     + "snapshot's session id must not leak into the live set")
     }
 }
