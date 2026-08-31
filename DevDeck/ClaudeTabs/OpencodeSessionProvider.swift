@@ -11,8 +11,12 @@ enum OpencodeSessions {
             guard let id = entry["id"] as? String, !id.isEmpty,
                   let title = entry["title"] as? String else { return nil }
             let millis = (entry["updated"] as? Double) ?? (entry["created"] as? Double) ?? 0
+            // opencode's own listing carries the session's directory — no need to trust the
+            // directory this listing happened to be queried in, which matters once
+            // `recentSessions(since:)` asks about several directories in one pass.
+            let directory = (entry["directory"] as? String) ?? ""
             return AgentSession(id: id, title: title,
-                                lastActivity: Date(timeIntervalSince1970: millis / 1000))
+                                lastActivity: Date(timeIntervalSince1970: millis / 1000), directory: directory)
         }
         .sorted { $0.lastActivity > $1.lastActivity }
     }
@@ -123,9 +127,14 @@ struct OpencodeSessionProvider: AgentSessionProvider {
     let id = AgentProviderID.opencode
 
     private let listing: OpencodeSessionListing
+    /// Directories worth asking when building the history window — see `recentSessions(since:)`.
+    /// Empty by default: `sessions(inDirectory:)`, the tab-resolve path, is always asked with a
+    /// directory of its own and never needs this.
+    private let recentDirectories: [String]
 
-    init(listing: OpencodeSessionListing = LiveOpencodeSessions()) {
+    init(listing: OpencodeSessionListing = LiveOpencodeSessions(), recentDirectories: [String] = []) {
         self.listing = listing
+        self.recentDirectories = recentDirectories
     }
 
     func mayOwn(tabTitle: String) -> Bool {
@@ -134,6 +143,20 @@ struct OpencodeSessionProvider: AgentSessionProvider {
 
     func sessions(inDirectory directory: String) -> [AgentSession] {
         listing.sessions(inDirectory: directory)
+    }
+
+    /// opencode's listing is scoped to one project directory at a time and has no "list
+    /// everything" mode, so this can only ever cover `recentDirectories` — the catalog builder is
+    /// expected to pass the union of directories already in the catalog and any directory with an
+    /// open tab right now, so a directory is never silently forgotten just because its tab closed.
+    func recentSessions(since: Date) -> [AgentSession] {
+        // Deduplicated AND sorted before querying — not just on the way out — so two sessions
+        // that happen to tie on `lastActivity` still come out in the same order every time,
+        // rather than whatever order `Set` felt like enumerating its directories in.
+        Set(recentDirectories).sorted()
+            .flatMap { listing.sessions(inDirectory: $0) }
+            .filter { $0.lastActivity >= since }
+            .sorted { $0.lastActivity > $1.lastActivity }
     }
 
     /// Strips the `"OC | "` prefix so the title matches the listing's `title` field exactly.

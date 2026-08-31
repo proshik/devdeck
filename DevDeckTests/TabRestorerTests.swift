@@ -150,6 +150,7 @@ struct FakeAgentProvider: AgentSessionProvider {
     var isFallback = false
     func mayOwn(tabTitle: String) -> Bool { true }
     func sessions(inDirectory directory: String) -> [AgentSession] { [] }
+    func recentSessions(since: Date) -> [AgentSession] { [] }
     func normalize(tabTitle: String) -> String { tabTitle }
     func command(resuming sessionID: String, in cwd: String) -> String {
         "cd \(shellQuote(cwd)) && \(id) --resume \(shellQuote(sessionID))"
