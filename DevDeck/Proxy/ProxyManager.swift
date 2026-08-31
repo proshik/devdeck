@@ -196,7 +196,10 @@ final class ProxyManager {
 
     /// Adopt a `gost` that survived a previous session, then start one if none is up.
     /// Supervision (watchdog restarts, port conflicts) is entirely the existing engine's job.
-    func startShare() {
+    ///
+    /// `forceRestart` mirrors `startRemote`'s parameter of the same name — `saveShare`'s restart
+    /// cycle needs it; see the comment there.
+    func startShare(forceRestart: Bool = false) {
         guard let processManager else { return }
         guard let command = shareCommand() else {
             gostMissing = true
@@ -218,10 +221,9 @@ final class ProxyManager {
         // (launch, the Settings toggle, or the popover's play button).
         observeDaemonState()
         processManager.adoptSurvivingDaemons(commands: [ProxyShare.daemonID: command])
-        switch processManager.states[ProxyShare.daemonID] {
-        case .running, .daemonRunning:
-            break   // already up (or adopted) — don't fight it over the port
-        default:
+        let alreadyUp = processManager.states[ProxyShare.daemonID] == .running
+            || processManager.states[ProxyShare.daemonID] == .daemonRunning
+        if forceRestart || !alreadyUp {
             processManager.run(command)
         }
         // An ADOPTED listener is already `daemonRunning`, so no state change will fire —
@@ -252,7 +254,17 @@ final class ProxyManager {
         guard store?.config.settings.proxyShareEnabled == true else { return }
         if wasRunning {
             stopShare()
-            startShare()
+            // forceRestart: `stopShare()` just ran, synchronously, in this same call — `stop()` only
+            // requests the stop, it never rewrites `states[]` itself (that happens later, when the
+            // runner's own termination event is drained). Read right now, `states[]` still says
+            // `.daemonRunning`, which is exactly the "already up — leave it alone" signal `startShare`
+            // uses elsewhere to avoid re-fighting a survivor over its port. Here it would misfire and
+            // skip the relaunch entirely, so the edit takes visible effect on the share while its
+            // listener quietly never comes back. `ProcessManager.run()` is safe to call unconditionally
+            // instead: it already preempts whatever is still active under the same id (the same
+            // mechanism a watchdog restart relies on) — the identical mechanism `saveRemoteProxy` above
+            // works around the same way.
+            startShare(forceRestart: true)
         }
     }
 
