@@ -104,10 +104,20 @@ struct LiveGhosttyTabReader: GhosttyTabReading {
         "-e", "tell application \"Ghostty\"",
         "-e", "set sep to (ASCII character 9)",
         "-e", "set out to \"\"",
+        // Each tab is read inside its own `try`, and each window's loop inside another. A tab
+        // that closes WHILE this walks the list makes its reference invalid, and unguarded that
+        // took down the entire enumeration — observed as "Can't get item 5 of every tab of item 1
+        // of every window. Invalid index. (-1719)", after which no snapshot was taken at all.
+        // Skipping the item that vanished is also the right answer on its own terms: a closed tab
+        // does not belong in the snapshot.
         "-e", "repeat with w in windows",
+        "-e", "try",
         "-e", "repeat with t in tabs of w",
+        "-e", "try",
         "-e", "set out to out & (id of w) & sep & (index of t) & sep & (name of t) & sep & (working directory of focused terminal of t) & linefeed",
+        "-e", "end try",
         "-e", "end repeat",
+        "-e", "end try",
         "-e", "end repeat",
         "-e", "return out",
         "-e", "end tell",
