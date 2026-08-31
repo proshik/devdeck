@@ -109,6 +109,26 @@ final class TabRestorerTests: XCTestCase {
                       "the last tab was never attempted")
     }
 
+    /// Every other test in this file uses one provider id throughout, so a `command(cwd:sessionID:
+    /// providerID:)` that looked up `providers.first` instead of `providers.first(where: { $0.id ==
+    /// providerID })` would pass all of them too. Two providers with different ids, and an action
+    /// list that puts the SECOND provider's action first, is what catches that: `providers.first`
+    /// would hand every action the first provider's command line regardless of which one it names.
+    func testEachActionGetsTheCommandLineOfItsOwnProviderNotTheFirstOne() async {
+        let runner = FakeAppleScriptRunner()
+        let providers = [FakeAgentProvider(id: "claude"), FakeAgentProvider(id: "opencode")]
+        let restorer = TabRestorer(runner: runner, providers: providers, stepDelay: .zero)
+
+        _ = await restorer.restore([.newTab(cwd: "/tmp/a", sessionID: "s1", provider: "opencode"),
+                                    .newTab(cwd: "/tmp/b", sessionID: "s2", provider: "claude")])
+
+        let scripts = runner.calls.map { $0.joined(separator: " ") }
+        XCTAssertTrue(scripts[0].contains("opencode --resume 's1'"),
+                      "the first action named \"opencode\" but got some other provider's command")
+        XCTAssertTrue(scripts[1].contains("claude --resume 's2'"),
+                      "the second action named \"claude\" but got some other provider's command")
+    }
+
     /// An entry whose `provider` id is not among the ones registered — an old id, a provider that
     /// got removed — must still degrade to a plain shell in the directory, never crash or drop the
     /// tab silently.
