@@ -186,6 +186,30 @@ final class ProxyManagerShareTests: XCTestCase {
                        "an already-running listener must not be restarted (it would fight over the port)")
     }
 
+    /// Fix 2: `saveShare` used to do `stopShare()` then `startShare()`, but `stop()` only REQUESTS
+    /// the stop — `states[]` is rewritten later, when the runner's own termination event is drained.
+    /// Read right back in the same call, `states[]` still said `.daemonRunning`, which is exactly
+    /// `startShare`'s "already up — leave it alone" signal, so `processManager.run` was never
+    /// reached again and an edit to a live share silently killed the listener for good. This is the
+    /// identical mechanism `testApplyRemoteProxyEditOnAnActiveProxyRestartsWithTheNewCommandAlreadyPersisted`
+    /// (`ProxyManagerRemoteTests`) covers for the remote pair — proven to fail without `forceRestart`
+    /// there, and the same is true here.
+    func testSaveShareOnALiveListenerActuallyRestartsIt() async {
+        let rig = makeRig()
+        rig.manager.startShare()
+        await rig.awaitLaunch()
+        rig.controller?.started(pid: 42)
+        await yieldUntil { rig.processManager.states[ProxyShare.daemonID] == .daemonRunning }
+
+        var updated = ProxyShare(port: 9999, engine: .gost)
+        updated.serviceName = "renamed-share"
+        rig.manager.saveShare(updated)
+
+        await sleepUntil({ rig.runner.startedCommandIDs.count == 2 },
+                         message: "expected the edit to actually relaunch the listener, not just "
+                             + "persist it while the old process quietly stays dead")
+    }
+
     func testSharePasswordIsReadFromTheCredentialStore() async {
         let rig = makeRig(share: ProxyShare(port: 8888, authEnabled: true, username: "dev", engine: .gost))
         rig.manager.setSharePassword("s3cret")
