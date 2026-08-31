@@ -330,12 +330,8 @@ final class ClaudeTabsModel {
             return .failed(message)
         case let .tabs(tabs):
             guard tabs != previousSignature else { return .unchanged }
-            var titles: [String: [TranscriptTitle]] = [:]
-            for directory in Set(tabs.map(\.workingDirectory)) {
-                titles[directory] = index.titles(forWorkingDirectory: directory)
-            }
-            return .entries(SessionResolver.resolve(tabs: tabs, titlesByDirectory: titles),
-                            signature: tabs)
+            let providers: [AgentSessionProvider] = [ClaudeSessionProvider(index: index)]
+            return .entries(SessionResolver.resolve(tabs: tabs, providers: providers), signature: tabs)
         }
     }
 

@@ -142,3 +142,45 @@ final class LiveTranscriptIndex: TranscriptIndexing, @unchecked Sendable {
         return result
     }
 }
+
+/// Claude Code, from the restore mechanism's point of view.
+///
+/// It has no title prefix of its own — only a status glyph that changes constantly while the
+/// model is working — so it always claims a tab: it is the default provider, and belongs last in
+/// the list, tried only once every prefix-bearing provider has passed.
+struct ClaudeSessionProvider: AgentSessionProvider {
+    let id = AgentProviderID.claude
+
+    private let index: TranscriptIndexing
+    private let backgroundSessions: BackgroundSessionListing
+
+    init(index: TranscriptIndexing = LiveTranscriptIndex(),
+         backgroundSessions: BackgroundSessionListing = LiveBackgroundSessions()) {
+        self.index = index
+        self.backgroundSessions = backgroundSessions
+    }
+
+    /// No prefix to check — every tab is a candidate.
+    func mayOwn(tabTitle: String) -> Bool { true }
+
+    func sessions(inDirectory directory: String) -> [AgentSession] {
+        index.titles(forWorkingDirectory: directory).map {
+            AgentSession(id: $0.sessionID, title: $0.aiTitle, lastActivity: $0.modifiedAt)
+        }
+    }
+
+    /// Strips the leading status glyph ("✳ ", "◐ ") so the title matches the `aiTitle` recorded
+    /// in the transcript.
+    func normalize(tabTitle: String) -> String {
+        let trimmed = tabTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let start = trimmed.firstIndex(where: { $0.isLetter || $0.isNumber }) else { return "" }
+        return String(trimmed[start...]).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// `attach` for a session currently running in the background, `--resume` otherwise — see
+    /// `RestoreCommand`.
+    func command(resuming sessionID: String, in cwd: String) -> String {
+        RestoreCommand.text(cwd: cwd, sessionID: sessionID,
+                            isBackground: backgroundSessions.backgroundSessionIDs().contains(sessionID))
+    }
+}
