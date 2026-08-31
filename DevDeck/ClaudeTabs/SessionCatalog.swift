@@ -151,8 +151,7 @@ extension SessionCatalog {
     /// names, and `AgentSession.lastActivity` for Claude already IS that file's own mtime — see
     /// `ClaudeSessionProvider.sessions(inDirectory:)` / `recentSessions(since:)`.
     static func claudeCatalogEntry(for session: AgentSession,
-                                   projectsRoot: URL = FileManager.default.homeDirectoryForCurrentUser
-                                       .appendingPathComponent(".claude/projects")) -> CatalogEntry {
+                                   projectsRoot: URL = ClaudeProjectSlug.defaultProjectsRoot) -> CatalogEntry {
         let sourcePath = projectsRoot
             .appendingPathComponent(ClaudeProjectSlug.slug(for: session.directory))
             .appendingPathComponent("\(session.id).jsonl")

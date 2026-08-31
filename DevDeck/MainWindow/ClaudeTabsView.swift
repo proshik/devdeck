@@ -97,12 +97,15 @@ struct ClaudeTabsView: View {
 
     /// Nothing to show for a directory-only row: `AgentSession.id` is not optional, so there is no
     /// session to open again — the live tab already IS the "open" state for that row.
+    ///
+    /// Calls the directory/session-id/provider overload of `open`, not the `AgentSession` one: a
+    /// `ClaudeTabEntry` has no activity timestamp of its own, and `RestoreAction.newTab` never
+    /// reads one either, so there is nothing here to fabricate one for.
     @ViewBuilder
     private func openTabButton(_ entry: ClaudeTabEntry) -> some View {
         if let sessionID = entry.sessionID {
             Button(L10n.claudeTabsOpen) {
-                claudeTabs.open(AgentSession(id: sessionID, title: entry.title, lastActivity: Date(),
-                                             directory: entry.workingDirectory),
+                claudeTabs.open(directory: entry.workingDirectory, sessionID: sessionID,
                                 providerID: entry.provider)
             }
         }
