@@ -12,10 +12,18 @@ versioning follows [SemVer](https://semver.org/).
   edit sheet described under Added below reuses it; saving a live pair used to silently never
   relaunch (a stale `states[]` read right after `stopRemote()` made the restart skip the relaunch
   entirely), which is now fixed alongside it.
+- **Editing the host share while it was live silently killed it for good.** The exact same
+  stale-`states[]` defect just fixed in `saveRemoteProxy` above was also sitting in `saveShare`
+  (`stopShare()` then `startShare()`) — changing the share's port, auth or engine while it was
+  running stopped the listener and then read its own not-yet-updated "already up" state back,
+  so the restart never happened and nothing came back short of toggling Share off and on.
+  `startShare` now takes the same `forceRestart` parameter `startRemote` already had, and
+  `saveShare` passes it.
 - **Deleting a remote proxy lived only in a right-click menu.** The action existed
   (`deleteRemoteProxy`, with or without its tunnel command) but nothing on the row hinted at it —
   exactly the kind of invisible affordance that gets reported as a missing feature. Each row now
-  also carries visible pencil/trash buttons; the context menu stays for whoever already used it.
+  also carries visible pencil/trash buttons; the context menu stays for whoever already used it,
+  and now asks the same confirmation the trash button does rather than deleting immediately.
   Deleting the linked tunnel command remains a separate, explicit choice in the confirmation
   dialog, never a side effect of deleting the proxy.
 - **"Check" did nothing when a remote proxy's route was down.** The popover's check button
@@ -42,7 +50,10 @@ versioning follows [SemVer](https://semver.org/).
   generator would have produced for the proxy's previous values (`TunnelCommandUpdate.plan`, a
   pure decision with its own tests); if the user has hand-edited the command since — a jump host,
   `-o ServerAliveInterval`, an identity file — the sheet leaves it untouched, says so, and offers a
-  button straight into the command editor instead of guessing.
+  button straight into the command editor instead of guessing. A safe SOCKS-port edit now also
+  updates the tunnel command's own `Command.port` (the occupied-port precheck and the watchdog's
+  post-crash recheck key off that field, not the command string) — a hand-edited command's `.port`
+  is deliberately left alone, since we no longer know which port that command actually uses.
 - **Claude Code tabs restored after a reboot.** With "Restore tabs after a restart" enabled in
   Settings, DevDeck watches Ghostty's open tabs and, on a timer, captures each one's working
   directory and — by matching the tab title against the project's transcript files — the Claude
