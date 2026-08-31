@@ -30,6 +30,13 @@ versioning follows [SemVer](https://semver.org/).
   the last snapshot at a glance with "Capture now" / "Restore now" buttons, and a matching page in
   the main window lists every tab with its directory and whether it will resume its session or
   restore the directory only.
+- **opencode joins Claude Code in tab restore.** The tab-restore feature now recognizes opencode's
+  own Ghostty tabs — titled `OC | <session title>` — alongside Claude Code's, resolving each to its
+  own agent's session (via `opencode session list --format json`, cached per directory for a
+  minute) and reopening it after a reboot with `opencode --session <id>`, the same way a Claude tab
+  reopens with `claude --resume`. The main window's tab table gained an **Agent** column showing
+  which agent a tab resolved against; a tab whose session cannot be identified still comes back as
+  a plain shell in its directory, whichever agent it belongs to.
 - **What the metrics mean.** Every cell in the popover header (Memory, Swap, Cluster, VM colima,
   VM minikube, Pressure, VM disk, Swap rate, CPU load) now carries a tooltip explaining what the
   figure measures, where it comes from and what a bad value means; the same texts sit under
