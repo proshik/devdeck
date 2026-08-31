@@ -28,6 +28,11 @@ final class ClaudeTabsHistoryTests: XCTestCase {
         return defaults
     }
 
+    private struct FakeGhosttyTabReader: GhosttyTabReading {
+        var result: GhosttyTabsResult
+        func readTabs() -> GhosttyTabsResult { result }
+    }
+
     // MARK: - open(_:providerID:)
 
     /// The test the brief calls for by name: two fake providers with DIFFERENT ids, registered
@@ -223,5 +228,73 @@ final class ClaudeTabsHistoryTests: XCTestCase {
         XCTAssertEqual(model.historyEntries.map(\.sessionID), ["s1"])
         XCTAssertEqual(SessionCatalog(url: catalogURL).load().map(\.sessionID), ["s1"],
                        "the rebuilt catalogue must have been saved to disk")
+    }
+
+    // MARK: - refreshLiveOpenSessionIDs() / FIX 1 — the live set, not the snapshot
+
+    /// THE bug, reproduced directly: a snapshot taken before this boot's restore lists "ghost" as
+    /// an open tab, but Ghostty (below) has not actually reopened anything yet — exactly the state
+    /// right after a reboot and before a restore. A version that excluded history by the
+    /// SNAPSHOT's session ids would hide "ghost" here; the fix must not, because the live read
+    /// found no such tab actually open. Building the snapshot and the live tab set to DISAGREE is
+    /// the whole point — a test where they happened to match would pin nothing.
+    func testRefreshLiveOpenSessionIDsUsesTheLiveTabsNotTheStaleSnapshot() async throws {
+        let catalogURL = tempCatalogURL()
+        try SessionCatalog(url: catalogURL).save([
+            CatalogEntry(provider: AgentProviderID.claude, sessionID: "ghost", title: "fix the bug",
+                        directory: "/tmp/project", lastActivity: Date(),
+                        sourcePath: "/tmp/project/ghost.jsonl", sourceModifiedAt: Date())
+        ])
+        let store = ClaudeTabsStore(url: tempSnapshotURL())
+        try store.save(ClaudeTabsSnapshot(
+            bootTime: Date(), capturedAt: Date(),
+            tabs: [ClaudeTabEntry(order: 0, title: "fix the bug", workingDirectory: "/tmp/project",
+                                  sessionID: "ghost")]))
+
+        let model = ClaudeTabsModel(reader: FakeGhosttyTabReader(result: .tabs([])),   // nothing open yet
+                                    store: store,
+                                    sessionCatalog: SessionCatalog(url: catalogURL),
+                                    defaults: makeDefaults())
+
+        await model.refreshLiveOpenSessionIDs()
+        XCTAssertTrue(model.liveOpenSessionIDs.isEmpty,
+                     "no tab is actually open — the snapshot's own session id must not leak into "
+                     + "the live set")
+
+        let shown = SessionCatalog.historyEntries(from: model.historyEntries,
+                                                  excludingOpenSessionIDs: model.liveOpenSessionIDs)
+        XCTAssertTrue(shown.contains { $0.sessionID == "ghost" },
+                     "a session the stale snapshot claims is open must still appear in history — "
+                     + "excluding by the snapshot instead of the live set would wrongly hide it")
+    }
+
+    func testRefreshLiveOpenSessionIDsFallsBackToTheSnapshotWhenTheReadFails() async throws {
+        let store = ClaudeTabsStore(url: tempSnapshotURL())
+        try store.save(ClaudeTabsSnapshot(
+            bootTime: Date(), capturedAt: Date(),
+            tabs: [ClaudeTabEntry(order: 0, title: "t", workingDirectory: "/tmp/x", sessionID: "s1")]))
+        let model = ClaudeTabsModel(
+            reader: FakeGhosttyTabReader(result: .failed("Not authorized to send Apple events")),
+            store: store, sessionCatalog: SessionCatalog(url: tempCatalogURL()), defaults: makeDefaults())
+
+        await model.refreshLiveOpenSessionIDs()
+
+        XCTAssertEqual(model.liveOpenSessionIDs, ["s1"],
+                      "a failed read must fall back to the snapshot's own session ids — today's "
+                      + "behaviour, and no worse")
+    }
+
+    func testRefreshLiveOpenSessionIDsFallsBackToTheSnapshotWhenGhosttyIsNotRunning() async throws {
+        let store = ClaudeTabsStore(url: tempSnapshotURL())
+        try store.save(ClaudeTabsSnapshot(
+            bootTime: Date(), capturedAt: Date(),
+            tabs: [ClaudeTabEntry(order: 0, title: "t", workingDirectory: "/tmp/x", sessionID: "s1")]))
+        let model = ClaudeTabsModel(reader: FakeGhosttyTabReader(result: .notRunning),
+                                    store: store, sessionCatalog: SessionCatalog(url: tempCatalogURL()),
+                                    defaults: makeDefaults())
+
+        await model.refreshLiveOpenSessionIDs()
+
+        XCTAssertEqual(model.liveOpenSessionIDs, ["s1"])
     }
 }

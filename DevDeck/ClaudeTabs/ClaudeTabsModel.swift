@@ -98,6 +98,19 @@ final class ClaudeTabsModel {
     /// looking frozen for the seconds a first build can take.
     private(set) var isBuildingHistory = false
 
+    /// The session ids open in Ghostty **right now** — the truthful set `ClaudeTabsView` must
+    /// exclude the history section by, and must consult before offering to reopen a snapshot row
+    /// as a second tab. Replaces a read of `snapshot?.tabs`, which is wrong in exactly the state
+    /// the history section exists for: right after a reboot, before this boot's restore has run,
+    /// the snapshot still lists the PREVIOUS boot's tabs — not one of which Ghostty has reopened
+    /// yet. See `SessionCatalog.liveOpenSessionIDs` for how a live tab is matched against the
+    /// catalogue.
+    ///
+    /// Seeded here from the snapshot — the same value `refreshLiveOpenSessionIDs()` falls back to
+    /// when the read fails — so a view rendered before the first refresh completes is no worse off
+    /// than it was before this property existed.
+    private(set) var liveOpenSessionIDs: Set<String> = []
+
     private let reader: GhosttyTabReading
     /// Opencode's prefix-bearing provider, then Claude last as the fallback — though
     /// `SessionResolver.resolve` no longer trusts that ordering, it enforces it via `isFallback`.
@@ -185,6 +198,7 @@ final class ClaudeTabsModel {
         self.isGhosttyRunning = isGhosttyRunning
         self.snapshot = store.load()
         self.historyEntries = sessionCatalog.load()
+        self.liveOpenSessionIDs = Set((self.snapshot?.tabs ?? []).compactMap(\.sessionID))
     }
 
     func start(isEnabled: @escaping () -> Bool,
@@ -616,6 +630,41 @@ final class ClaudeTabsModel {
             DiagnosticLog.shared.log("ClaudeTabs: session catalogue write failed — "
                 + "\(error.localizedDescription)", level: .error)
         }
+
+        // Refreshed here rather than left to the view: `ClaudeTabsView` already calls
+        // `rebuildHistory()` both when the page appears (`.task`) and from its own "Rebuild"
+        // button, so hanging this off the end of it covers both triggers FIX 1 asks for with one
+        // hook — no second call site in the view that could forget to make it. A failed save above
+        // still leaves `historyEntries` at its previous (still valid) value, so this has something
+        // sensible to match against either way.
+        await refreshLiveOpenSessionIDs()
+    }
+
+    /// Recomputes `liveOpenSessionIDs` — see that property's doc for why the snapshot alone cannot
+    /// be trusted for it. Reads Ghostty off the main actor, the same treatment `capture()` gives
+    /// its own Ghostty read: `reader.readTabs()` is a real ~0.3 s AppleScript round trip, not
+    /// something a menu-bar app may do on its own UI thread.
+    ///
+    /// Deliberately cheap: the match goes through `historyEntries`, the already-built catalogue,
+    /// never through a transcript or a session listing — that expensive path is `SessionResolver`'s
+    /// alone, and only the open-tabs snapshot needs it.
+    ///
+    /// A read that fails or finds Ghostty not running falls back to the snapshot's own session ids
+    /// — today's (imperfect, but safe) behaviour, and no worse.
+    func refreshLiveOpenSessionIDs() async {
+        let reader = self.reader
+        let providers = self.providers
+        let catalog = self.historyEntries
+        let fallback = Set((snapshot?.tabs ?? []).compactMap(\.sessionID))
+        let result = await Task.detached(priority: .utility) { () -> Set<String> in
+            switch reader.readTabs() {
+            case .notRunning, .failed:
+                return fallback
+            case let .tabs(tabs):
+                return SessionCatalog.liveOpenSessionIDs(tabs: tabs, catalog: catalog, providers: providers)
+            }
+        }.value
+        liveOpenSessionIDs = result
     }
 
     /// The pure half of `rebuildHistory()`: nothing actor-bound, so it can run inside
