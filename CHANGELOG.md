@@ -26,7 +26,7 @@ versioning follows [SemVer](https://semver.org/).
   reboot (told apart from an ordinary Ghostty restart by comparing the machine's boot time), each
   captured tab reopens in its directory over AppleScript and runs `claude --resume <id>` when a
   session was found; a tab whose session could not be resolved still comes back, as a plain shell
-  in the right directory, rather than being dropped. The popover's new "Claude tabs" section shows
+  in the right directory, rather than being dropped. The popover's new "Agent tabs" section shows
   the last snapshot at a glance with "Capture now" / "Restore now" buttons, and a matching page in
   the main window lists every tab with its directory and whether it will resume its session or
   restore the directory only.
