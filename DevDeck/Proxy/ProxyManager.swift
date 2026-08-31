@@ -317,7 +317,33 @@ final class ProxyManager {
         store?.upsertRemoteProxy(updated)
         guard wasActive else { return }
         stopRemote()
-        startRemote()
+        // forceRestart: `stopRemote()` just ran, synchronously, in this same call — `stop()` only
+        // requests the stop, it never rewrites `states[]` itself (that happens later, when the
+        // runner's own termination event is drained). Read right now, `states[]` still says
+        // `.daemonRunning`, which is exactly the "already up — leave it alone" signal `startRemote`
+        // uses elsewhere to avoid re-fighting a survivor over its port. Here it would misfire and
+        // skip the relaunch entirely, so the edit takes visible effect on the proxy while its
+        // daemons quietly never come back. `ProcessManager.run()` is safe to call unconditionally
+        // instead: it already preempts whatever is still active under the same id (the same
+        // mechanism a watchdog restart relies on).
+        startRemote(forceRestart: true)
+    }
+
+    /// Apply an edit made in the "edit remote proxy" sheet: name/ports always (via
+    /// `saveRemoteProxy`), and the tunnel command's text too when `tunnelCommandUpdate` says it is
+    /// still safe to rewrite (see `TunnelCommandUpdate`).
+    ///
+    /// The tunnel command is persisted FIRST, before `saveRemoteProxy` touches the proxy itself —
+    /// `saveRemoteProxy` restarts a live pair, and that restart reads the tunnel command straight
+    /// from the store, so it must already see the new text rather than the one it is replacing.
+    func applyRemoteProxyEdit(_ updated: RemoteProxy, tunnelCommandUpdate: TunnelCommandUpdate) {
+        if case .rewrite(let newCommand) = tunnelCommandUpdate,
+           let tunnelID = updated.tunnelCommandID,
+           var tunnel = store?.commandsByID[tunnelID] {
+            tunnel.command = newCommand
+            store?.upsert(tunnel)
+        }
+        saveRemoteProxy(updated)
     }
 
     /// Delete a remote proxy (and optionally its tunnel command). The store clears the selection;
@@ -332,8 +358,9 @@ final class ProxyManager {
     }
 
     /// Bring the pair up: config first (the bridge reads it at start), then both daemons.
-    /// Mirror of `startShare` — already-running daemons are left alone, not fought over the port.
-    private func startRemote() {
+    /// Mirror of `startShare` — already-running daemons are left alone, not fought over the port
+    /// — UNLESS `forceRestart` is set, which `saveRemoteProxy`'s restart cycle needs; see there.
+    private func startRemote(forceRestart: Bool = false) {
         guard let processManager, let remote = activeRemoteProxy else { return }
         guard let tunnelID = remote.tunnelCommandID,
               let tunnel = store?.commandsByID[tunnelID] else {
@@ -350,9 +377,10 @@ final class ProxyManager {
         }
         observeRemoteDaemonState()
         for command in [tunnel, remote.bridgeCommand(configPath: bridgeConfigFile.url.path)] {
-            switch processManager.states[command.id] {
-            case .running, .daemonRunning: break
-            default: processManager.run(command)
+            let alreadyUp = processManager.states[command.id] == .running
+                || processManager.states[command.id] == .daemonRunning
+            if forceRestart || !alreadyUp {
+                processManager.run(command)
             }
         }
     }

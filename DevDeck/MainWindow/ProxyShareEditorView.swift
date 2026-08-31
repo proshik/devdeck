@@ -6,6 +6,7 @@ import AppKit
 struct ProxyShareEditorView: View {
     @Environment(CommandStore.self) private var store
     @Environment(ProxyManager.self) private var proxy
+    @Environment(AppModel.self) private var appModel
 
     /// Draft of the host-side config; saved explicitly so a half-typed port never restarts gost.
     @State private var draft: ProxyShare
@@ -24,6 +25,19 @@ struct ProxyShareEditorView: View {
     @State private var remoteDestination = ""
     @State private var remoteLocalPort = 18888
     @State private var remoteSocksPort = 1080
+    /// The "Edit remote proxy" sheet: which proxy (nil ⇒ closed) and its draft fields.
+    @State private var editingRemote: RemoteProxy?
+    @State private var editName = ""
+    @State private var editDestination = ""
+    @State private var editLocalPort = 18888
+    @State private var editSocksPort = 1080
+    /// The destination parsed out of the tunnel command when the sheet opened. nil means parsing
+    /// already failed at that point — the command didn't match the generated shape even before
+    /// this edit, so there is no "previous values" to reconstruct and the tunnel is left alone.
+    @State private var editOriginalDestination: String?
+    /// Confirmation before deleting a remote proxy — "also its tunnel command" stays a distinct,
+    /// deliberate choice inside the dialog rather than a checkbox nobody notices.
+    @State private var deletingRemote: RemoteProxy?
     /// Shown when the browser launch finds no Chrome.
     @State private var browserError = false
 
@@ -48,8 +62,26 @@ struct ProxyShareEditorView: View {
         }
         .onChange(of: proxy.activeProxy?.name) { _, _ in loadClientCredentials() }
         .sheet(isPresented: $addingRemote) { addRemoteSheet }
+        .sheet(item: $editingRemote) { _ in editRemoteSheet }
         .alert(L10n.proxyBrowserChromeMissing, isPresented: $browserError) {
             Button(L10n.cancel, role: .cancel) {}
+        }
+        .confirmationDialog(
+            deletingRemote.map { L10n.proxyRemoteDeleteConfirmTitle($0.name) } ?? "",
+            isPresented: Binding(get: { deletingRemote != nil }, set: { if !$0 { deletingRemote = nil } }),
+            presenting: deletingRemote
+        ) { remote in
+            Button(L10n.proxyRemoteDeleteProxyOnly, role: .destructive) {
+                proxy.deleteRemoteProxy(remote, alsoTunnelCommand: false)
+                deletingRemote = nil
+            }
+            Button(L10n.proxyRemoteDeleteTunnelToo, role: .destructive) {
+                proxy.deleteRemoteProxy(remote, alsoTunnelCommand: true)
+                deletingRemote = nil
+            }
+            Button(L10n.cancel, role: .cancel) { deletingRemote = nil }
+        } message: { _ in
+            Text(L10n.proxyRemoteDeleteConfirmMessage)
         }
     }
 
@@ -81,28 +113,47 @@ struct ProxyShareEditorView: View {
         let isActive = store.config.settings.activeRemoteProxyID == remote.id
         let missing = remote.tunnelCommandID.flatMap { store.commandsByID[$0] } == nil
         return VStack(alignment: .leading, spacing: 2) {
-            Button {
-                proxy.setActiveRemoteProxy(isActive ? nil : remote)
-            } label: {
-                HStack(spacing: 8) {
-                    Image(systemName: isActive ? "largecircle.fill.circle" : "circle")
-                        .foregroundStyle(isActive ? Color.accentColor : Color.secondary)
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(remote.name)
-                        Text("127.0.0.1:\(String(remote.localPort)) · \(L10n.proxyRemoteVia)")
-                            .font(.caption).foregroundStyle(.secondary).monospacedDigit()
+            HStack(spacing: 8) {
+                Button {
+                    proxy.setActiveRemoteProxy(isActive ? nil : remote)
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: isActive ? "largecircle.fill.circle" : "circle")
+                            .foregroundStyle(isActive ? Color.accentColor : Color.secondary)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(remote.name)
+                            Text("127.0.0.1:\(String(remote.localPort)) · \(L10n.proxyRemoteVia)")
+                                .font(.caption).foregroundStyle(.secondary).monospacedDigit()
+                        }
+                        if isActive { Text(L10n.proxyActive).font(.caption).foregroundStyle(.secondary) }
                     }
-                    Spacer()
-                    if isActive { Text(L10n.proxyActive).font(.caption).foregroundStyle(.secondary) }
+                    .contentShape(Rectangle())
                 }
-                .contentShape(Rectangle())
+                .buttonStyle(.plain)
+                .disabled(missing)
+
+                Spacer()
+
+                // Edit/delete used to live ONLY in the context menu below — undiscoverable, per the
+                // user report. Visible buttons here, same idiom as the env-row minus button in the
+                // command editor; the context menu stays too, for whoever already knows it.
+                Button { beginEditingRemote(remote) } label: {
+                    Image(systemName: "pencil")
+                }
+                .buttonStyle(.borderless)
+                .help(L10n.proxyRemoteEditHelp)
+
+                Button(role: .destructive) { deletingRemote = remote } label: {
+                    Image(systemName: "trash")
+                }
+                .buttonStyle(.borderless)
+                .help(L10n.proxyRemoteDeleteHelp)
             }
-            .buttonStyle(.plain)
-            .disabled(missing)
 
             if missing { warning(L10n.proxyRemoteTunnelMissing) }
         }
         .contextMenu {
+            Button(L10n.proxyRemoteEdit) { beginEditingRemote(remote) }
             Button(L10n.proxyRemoteDelete, role: .destructive) {
                 proxy.deleteRemoteProxy(remote, alsoTunnelCommand: false)
             }
@@ -110,6 +161,93 @@ struct ProxyShareEditorView: View {
                 proxy.deleteRemoteProxy(remote, alsoTunnelCommand: true)
             }
         }
+    }
+
+    // MARK: - Editing a remote proxy
+
+    /// The tunnel command currently linked to the proxy being edited, read live from the store —
+    /// so a concurrent edit made elsewhere (another window's command editor) is never missed.
+    private var editTunnelCommand: Command? {
+        guard let id = editingRemote?.tunnelCommandID else { return nil }
+        return store.commandsByID[id]
+    }
+
+    /// What would happen to the tunnel command if "Save" were pressed right now. `.handEdited`
+    /// covers every case where the destination can't be safely written back: the sheet isn't open,
+    /// the tunnel command is gone, parsing failed when the sheet opened, or (the pure check itself)
+    /// the stored command no longer matches what the proxy's previous values would have generated.
+    private var editTunnelPlan: TunnelCommandUpdate {
+        guard let remote = editingRemote, let tunnel = editTunnelCommand,
+              let oldDestination = editOriginalDestination else { return .handEdited }
+        let expected = RemoteProxy.tunnelCommandString(destination: oldDestination, socksPort: remote.socksPort)
+        return TunnelCommandUpdate.plan(current: tunnel.command, expectedForOldValues: expected,
+                                        newDestination: editDestination.trimmingCharacters(in: .whitespaces),
+                                        newSocksPort: editSocksPort)
+    }
+
+    private func beginEditingRemote(_ remote: RemoteProxy) {
+        editName = remote.name
+        editLocalPort = remote.localPort
+        editSocksPort = remote.socksPort
+        let tunnelText = remote.tunnelCommandID.flatMap { store.commandsByID[$0] }?.command
+        let parsed = tunnelText.flatMap {
+            RemoteProxy.parsedDestination(fromTunnelCommand: $0, socksPort: remote.socksPort)
+        }
+        editOriginalDestination = parsed
+        editDestination = parsed ?? ""
+        editingRemote = remote   // last: the sheet's `.sheet(item:)` opens off this
+    }
+
+    private var editRemoteSheet: some View {
+        let handEdited = editTunnelPlan == .handEdited
+        return Form {
+            TextField(L10n.proxyRemoteName, text: $editName)
+
+            if editTunnelCommand == nil {
+                warning(L10n.proxyRemoteTunnelMissing)
+            } else if handEdited {
+                warning(L10n.proxyRemoteTunnelHandEdited)
+                Button(L10n.proxyRemoteOpenTunnelCommand) { openEditingTunnelCommandInEditor() }
+            } else {
+                TextField(L10n.proxyRemoteDestination, text: $editDestination)
+                Text(L10n.proxyRemoteDestinationHint).font(.caption).foregroundStyle(.secondary)
+            }
+
+            TextField(L10n.proxyRemoteLocalPort, value: $editLocalPort, format: .number.grouping(.never))
+            TextField(L10n.proxyRemoteSocksPort, value: $editSocksPort, format: .number.grouping(.never))
+            if handEdited && editTunnelCommand != nil {
+                Text(L10n.proxyRemoteSocksPortHandEditedHint).font(.caption).foregroundStyle(.secondary)
+            }
+
+            HStack {
+                Button(L10n.cancel) { editingRemote = nil }
+                Spacer()
+                Button(L10n.save) { saveRemoteEdit() }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(editName.trimmingCharacters(in: .whitespaces).isEmpty
+                              || (!handEdited && editDestination.trimmingCharacters(in: .whitespaces).isEmpty))
+            }
+        }
+        .formStyle(.grouped)
+        .frame(width: 380)
+        .padding()
+    }
+
+    private func saveRemoteEdit() {
+        guard var updated = editingRemote else { return }
+        updated.name = editName.trimmingCharacters(in: .whitespaces)
+        updated.localPort = editLocalPort
+        updated.socksPort = editSocksPort
+        proxy.applyRemoteProxyEdit(updated, tunnelCommandUpdate: editTunnelPlan)
+        editingRemote = nil
+    }
+
+    /// The escape hatch the hand-edited warning promises: jump straight to the tunnel command in
+    /// the regular command editor, exactly like any other daemon.
+    private func openEditingTunnelCommandInEditor() {
+        guard let id = editingRemote?.tunnelCommandID else { return }
+        editingRemote = nil
+        appModel.selection = .command(id)
     }
 
     private var addRemoteSheet: some View {

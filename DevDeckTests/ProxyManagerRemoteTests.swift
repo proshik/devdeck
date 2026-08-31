@@ -210,6 +210,61 @@ final class ProxyManagerRemoteTests: XCTestCase {
         XCTAssertEqual(rig.store.config.settings.activeProxyName, "colleague-mac")
     }
 
+    // MARK: - Editing (the edit sheet reaches `applyRemoteProxyEdit`)
+
+    func testApplyRemoteProxyEditRewritesTheTunnelWhenSafe() {
+        let rig = makeRig()
+        rig.manager.addRemoteProxy(name: "vds", destination: "user@old-vds",
+                                   localPort: 18888, socksPort: 1080)
+        var updated = rig.remote
+        updated.name = "renamed"
+        updated.socksPort = 2080
+        let newCommand = RemoteProxy.tunnelCommandString(destination: "user@new-vds", socksPort: 2080)
+
+        rig.manager.applyRemoteProxyEdit(updated, tunnelCommandUpdate: .rewrite(newCommand))
+
+        XCTAssertEqual(rig.store.config.remoteProxies.first?.name, "renamed")
+        XCTAssertEqual(rig.store.config.remoteProxies.first?.socksPort, 2080)
+        XCTAssertEqual(rig.store.commandsByID[updated.tunnelCommandID!]?.command, newCommand)
+    }
+
+    func testApplyRemoteProxyEditLeavesAHandEditedTunnelCommandUntouched() {
+        let rig = makeRig()
+        rig.manager.addRemoteProxy(name: "vds", destination: "user@vds",
+                                   localPort: 18888, socksPort: 1080)
+        var tunnel = rig.store.commandsByID[rig.remote.tunnelCommandID!]!
+        tunnel.command += " -o ServerAliveInterval=30"
+        rig.store.upsert(tunnel)
+        var updated = rig.remote
+        updated.name = "renamed"
+
+        rig.manager.applyRemoteProxyEdit(updated, tunnelCommandUpdate: .handEdited)
+
+        XCTAssertEqual(rig.store.config.remoteProxies.first?.name, "renamed",
+                       "name/ports are saved regardless of the tunnel command's fate")
+        XCTAssertEqual(rig.store.commandsByID[rig.remote.tunnelCommandID!]?.command, tunnel.command,
+                       "a hand-edited tunnel command must never be silently overwritten")
+    }
+
+    func testApplyRemoteProxyEditOnAnActiveProxyRestartsWithTheNewCommandAlreadyPersisted() async {
+        let rig = makeRig()
+        addAndSelect(rig)
+        await rig.bringBothUp()
+        var updated = rig.remote
+        updated.socksPort = 2080
+        let newCommand = RemoteProxy.tunnelCommandString(destination: "user@vds", socksPort: 2080)
+
+        rig.manager.applyRemoteProxyEdit(updated, tunnelCommandUpdate: .rewrite(newCommand))
+
+        // Both the proxy and the tunnel command must be on disk before the relaunch, and the
+        // relaunch itself must actually happen — a restart that reads stale state and never
+        // re-runs would silently leave the tunnel dead.
+        await sleepUntil({ rig.tunnelController?.command.command == newCommand },
+                         message: "expected the tunnel to be relaunched with the edited command")
+        XCTAssertEqual(rig.store.commandsByID[updated.tunnelCommandID!]?.command, newCommand)
+        XCTAssertEqual(rig.store.config.remoteProxies.first?.socksPort, 2080)
+    }
+
     func testStartBringsASelectedRemoteProxyUpOnLaunch() async {
         let rig = makeRig()
         addAndSelect(rig)

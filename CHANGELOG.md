@@ -7,6 +7,17 @@ versioning follows [SemVer](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- **A remote proxy could not be edited, only deleted and recreated.** `ProxyManager` already had
+  `saveRemoteProxy`, but no screen called it — a typo'd SSH destination meant starting over. The
+  edit sheet described under Added below reuses it; saving a live pair used to silently never
+  relaunch (a stale `states[]` read right after `stopRemote()` made the restart skip the relaunch
+  entirely), which is now fixed alongside it.
+- **Deleting a remote proxy lived only in a right-click menu.** The action existed
+  (`deleteRemoteProxy`, with or without its tunnel command) but nothing on the row hinted at it —
+  exactly the kind of invisible affordance that gets reported as a missing feature. Each row now
+  also carries visible pencil/trash buttons; the context menu stays for whoever already used it.
+  Deleting the linked tunnel command remains a separate, explicit choice in the confirmation
+  dialog, never a side effect of deleting the proxy.
 - **"VM minikube" was blank almost always.** The node probe only runs while a command is
   building, but the 1 s sampler also runs for as long as any daemon is alive — and it wrote an
   empty value into the line on every tick, so with a port-forward up the figure never showed.
@@ -19,6 +30,14 @@ versioning follows [SemVer](https://semver.org/).
   keeps its own divider above the pinned Proxy/Settings buttons).
 
 ### Added
+- **Editing a remote proxy.** The Proxy page's remote (SSH) proxies gained an edit sheet — name,
+  local/SOCKS ports, and the SSH destination, prefilled by parsing it back out of the tunnel
+  command. The destination lives inside that command, and the command is a normal, user-editable
+  deck command, so an edit is only written back into it when the command is still exactly what the
+  generator would have produced for the proxy's previous values (`TunnelCommandUpdate.plan`, a
+  pure decision with its own tests); if the user has hand-edited the command since — a jump host,
+  `-o ServerAliveInterval`, an identity file — the sheet leaves it untouched, says so, and offers a
+  button straight into the command editor instead of guessing.
 - **Claude Code tabs restored after a reboot.** With "Restore tabs after a restart" enabled in
   Settings, DevDeck watches Ghostty's open tabs and, on a timer, captures each one's working
   directory and — by matching the tab title against the project's transcript files — the Claude
