@@ -334,6 +334,45 @@ final class SessionCatalogTests: XCTestCase {
         XCTAssertEqual(result, ["newer"])
     }
 
+    /// The false positive a reviewer found in the descendant widening: two DIFFERENT sessions
+    /// share a normalized title — one recorded at a parent directory with the LATER
+    /// `lastActivity`, one recorded at a child directory with the EARLIER `lastActivity` — and a
+    /// live tab is genuinely the child, open at the child directory. The parent's directory is
+    /// only an ancestor of the live directory, never accepted by `DirectoryMatch`; the child's is
+    /// an exact match. Exact specificity must beat recency here, or this returns the parent's id —
+    /// which both hides the parent (not open) from history AND leaves the child's snapshot row
+    /// offering to reopen a tab that already exists.
+    ///
+    /// Against the old `.max { $0.lastActivity < $1.lastActivity }` tie-break (recency only, both
+    /// candidates already pass the directory filter) this fails: the parent's `lastActivity: 200`
+    /// beats the child's `100` and `"parent"` comes back instead of `"child"`.
+    func testLiveOpenSessionIDsPrefersAnExactDirectoryMatchOverAMoreRecentDescendantMatch() {
+        let parent = entry(sessionID: "parent", title: "foo", directory: "/tmp/proj",
+                           lastActivity: Date(timeIntervalSince1970: 200))
+        let child = entry(sessionID: "child", title: "foo", directory: "/tmp/proj/sub",
+                          lastActivity: Date(timeIntervalSince1970: 100))
+        let result = SessionCatalog.liveOpenSessionIDs(
+            tabs: [tab(title: "foo", directory: "/tmp/proj/sub")], catalog: [parent, child], providers: realProviders)
+        XCTAssertEqual(result, ["child"],
+                       "an exact directory match must win over a more recent descendant match")
+    }
+
+    /// Recency still decides, but only WITHIN a tier: two candidates that are both merely
+    /// descendants of the live directory's ancestry (neither is an exact match) still fall back to
+    /// "most recently active wins", same as two exact matches already do above.
+    func testLiveOpenSessionIDsPicksTheMostRecentCandidateWithinTheDescendantTier() {
+        let outer = entry(sessionID: "outer", title: "foo", directory: "/tmp/proj",
+                          lastActivity: Date(timeIntervalSince1970: 100))
+        let inner = entry(sessionID: "inner", title: "foo", directory: "/tmp/proj/mid",
+                          lastActivity: Date(timeIntervalSince1970: 200))
+        // The live tab sits below BOTH catalogue directories, so both are descendant (not exact)
+        // matches — the tie-break within the tier must still be recency.
+        let result = SessionCatalog.liveOpenSessionIDs(
+            tabs: [tab(title: "foo", directory: "/tmp/proj/mid/leaf")], catalog: [outer, inner],
+            providers: realProviders)
+        XCTAssertEqual(result, ["inner"])
+    }
+
     // MARK: - DirectoryMatch (Important review finding — resilient directory comparison)
 
     /// A real temp directory plus a real symlink pointing at it — `DirectoryMatch` canonicalizes
@@ -400,6 +439,25 @@ final class SessionCatalogTests: XCTestCase {
     func testDirectoryMatchIgnoresATrailingSlashOnEitherSide() {
         XCTAssertTrue(DirectoryMatch.matches(liveDirectory: "/tmp/project/", catalogDirectory: "/tmp/project"))
         XCTAssertTrue(DirectoryMatch.matches(liveDirectory: "/tmp/project", catalogDirectory: "/tmp/project/"))
+    }
+
+    // MARK: - DirectoryMatch.match (reports WHICH kind of match, for the exact-beats-descendant tie-break)
+
+    /// `matches` above stays a bare Bool for every existing call site's convenience; `match` is the
+    /// richer form `liveOpenSessionIDs` needs to make an exact match outrank a descendant one.
+    func testDirectoryMatchKindIsExactForTheSameDirectory() {
+        XCTAssertEqual(DirectoryMatch.match(liveDirectory: "/tmp/project", catalogDirectory: "/tmp/project"), .exact)
+    }
+
+    func testDirectoryMatchKindIsDescendantForANestedLiveDirectory() {
+        XCTAssertEqual(DirectoryMatch.match(liveDirectory: "/tmp/project/sub", catalogDirectory: "/tmp/project"),
+                       .descendant)
+    }
+
+    func testDirectoryMatchKindIsNilWhenNothingMatches() {
+        XCTAssertNil(DirectoryMatch.match(liveDirectory: "/tmp/a", catalogDirectory: "/tmp/other-project"))
+        XCTAssertNil(DirectoryMatch.match(liveDirectory: "/tmp/project", catalogDirectory: "/tmp/project/sub"))
+        XCTAssertNil(DirectoryMatch.match(liveDirectory: "/tmp/project-other", catalogDirectory: "/tmp/project"))
     }
 
     // MARK: - liveOpenSessionIDs — the same two MISS cases, through the whole function
