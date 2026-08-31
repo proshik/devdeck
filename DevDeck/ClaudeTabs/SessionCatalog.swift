@@ -19,7 +19,7 @@ enum SessionHistoryWindow {
 /// transcript is opened only to learn its title, and the title changes far less often than the
 /// file does not. Both are `nil` for opencode: its listing is cheap enough to trust fresh on every
 /// build (see the plan's decision #4), so it has no file of its own to compare mtimes against.
-struct CatalogEntry: Codable, Equatable {
+struct CatalogEntry: Codable, Equatable, Sendable {
     var provider: String
     var sessionID: String
     var title: String
@@ -29,10 +29,16 @@ struct CatalogEntry: Codable, Equatable {
     var sourceModifiedAt: Date?
 }
 
+extension CatalogEntry: Identifiable {
+    /// (provider, sessionID) together — the same compound key `merge` keys entries by, so two
+    /// providers reusing the same raw session id never collide as one row in the history table.
+    var id: String { "\(provider)-\(sessionID)" }
+}
+
 /// Reads and writes `~/Library/Application Support/DevDeck/agent-sessions.json` — every session
 /// each agent remembers within the window, built on demand (page open, refresh button) rather
 /// than on a timer, per the plan's decision #3.
-struct SessionCatalog {
+struct SessionCatalog: Sendable {
     let url: URL
 
     init(url: URL = PrivateFile.applicationSupportDirectory
@@ -45,7 +51,7 @@ struct SessionCatalog {
     func load() -> [CatalogEntry] {
         guard let data = try? Data(contentsOf: url) else { return [] }
         let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
+        decoder.dateDecodingStrategy = .deferredToDate
         return (try? decoder.decode([CatalogEntry].self, from: data)) ?? []
     }
 
@@ -53,11 +59,26 @@ struct SessionCatalog {
     /// this file names every project directory the user works in, together with titles describing
     /// what they were doing in each, same reasoning `ClaudeTabsStore.save` documents.
     ///
+    /// Dates are `.deferredToDate`, not `.iso8601` or `.secondsSince1970`: `sourceModifiedAt` exists
+    /// to be compared for EXACT equality against a transcript's live `stat()` result (see
+    /// `LiveTranscriptIndex.recentTranscripts(since:known:)`), and neither of the other two survives
+    /// that round trip intact. `.iso8601` drops sub-second precision outright — a real mtime almost
+    /// always carries some. `.secondsSince1970` looks safe (it is a plain `Double`) but is not: it
+    /// round-trips through `date.timeIntervalSince1970`, which ADDS the ~978 million second offset
+    /// to `Date`'s native `timeIntervalSinceReferenceDate` on the way out and SUBTRACTS it on the
+    /// way back in, and that add-then-subtract of a large constant rounds differently often enough
+    /// to change the result — measured at roughly half of the Dates tried in a 500k-sample sweep
+    /// built the way a real mtime is (from `timeIntervalSinceReferenceDate`, not from a
+    /// `timeIntervalSince1970` literal). Either failure mode would make a save/load round trip look
+    /// like a changed file and quietly reopen every known transcript on the next rebuild.
+    /// `.deferredToDate` has no such arithmetic: it serializes `timeIntervalSinceReferenceDate`
+    /// directly, and the same sweep found zero mismatches.
+    ///
     /// `.atomic` lands a fresh inode at the default 0644, so the mode is reapplied after the write.
     func save(_ entries: [CatalogEntry]) throws {
         try PrivateFile.makeDirectory(at: url.deletingLastPathComponent())
         let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
+        encoder.dateEncodingStrategy = .deferredToDate
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         try encoder.encode(entries).write(to: url, options: .atomic)
         PrivateFile.restrict(url)
@@ -97,7 +118,7 @@ extension SessionCatalog {
     /// next build hands `ClaudeSessionProvider(knownTranscripts:)`.
     ///
     /// A cached claude entry missing either `sourcePath` or `sourceModifiedAt` is dropped rather
-    /// than guessed at: those two fields are written together by `rebuildingClaudeEntries` below,
+    /// than guessed at: those two fields are written together by `claudeCatalogEntry(for:)` below,
     /// so a claude entry without them can only be a hand-edited or otherwise foreign file, and
     /// `LiveTranscriptIndex.recentTranscripts` already treats an absent hint as "read it".
     static func knownClaudeTranscripts(in cached: [CatalogEntry]) -> [String: KnownTranscript] {
@@ -147,5 +168,30 @@ extension SessionCatalog {
         CatalogEntry(provider: AgentProviderID.opencode, sessionID: session.id, title: session.title,
                     directory: session.directory, lastActivity: session.lastActivity,
                     sourcePath: nil, sourceModifiedAt: nil)
+    }
+}
+
+extension SessionCatalog {
+    /// What the history section of `ClaudeTabsView` actually lists: the catalogue, freshest
+    /// activity first, with every entry whose session is already an open tab removed — matched on
+    /// `sessionID` alone, per the plan's decision #5, since a session open right now is already
+    /// visible in the table above it and repeating it below would just be noise.
+    ///
+    /// Pure so the exclusion is testable on its own, without a model, a snapshot, or a fake
+    /// provider anywhere in sight.
+    static func historyEntries(from catalog: [CatalogEntry], excludingOpenSessionIDs openSessionIDs: Set<String>) -> [CatalogEntry] {
+        catalog
+            .filter { !openSessionIDs.contains($0.sessionID) }
+            .sorted { $0.lastActivity > $1.lastActivity }
+    }
+
+    /// The history section's search box: title OR directory, case- and diacritic-insensitive. An
+    /// empty (or whitespace-only) query is "show everything" rather than "match nothing".
+    static func matching(_ entries: [CatalogEntry], query: String) -> [CatalogEntry] {
+        let needle = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !needle.isEmpty else { return entries }
+        return entries.filter {
+            $0.title.localizedCaseInsensitiveContains(needle) || $0.directory.localizedCaseInsensitiveContains(needle)
+        }
     }
 }
