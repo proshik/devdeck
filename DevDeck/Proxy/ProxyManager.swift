@@ -346,8 +346,20 @@ final class ProxyManager {
            let tunnelID = updated.tunnelCommandID,
            var tunnel = store?.commandsByID[tunnelID] {
             tunnel.command = newCommand
+            // `command.port` is not decorative: `ProcessManager.run()`'s occupied-port precheck and
+            // the watchdog's post-crash recheck both key off it, and the command editor displays
+            // it — but its auto-detect only fires on edits made INSIDE that editor, so it never
+            // self-heals after a write from here. Without this, a safe SOCKS-port change would
+            // rewrite the `-D` argument in `command` but leave `.port` at the old value forever.
+            tunnel.port = updated.socksPort
             store?.upsert(tunnel)
         }
+        // A hand-edited command (the `.handEdited` branch, handled by `saveRemoteProxy` below via
+        // `updated` alone) never touches `tunnel.port` here. If we are not allowed to rewrite the
+        // command's text because we don't know it still matches the generated shape, we equally
+        // don't know what port that hand-edited command actually uses — a jump host or reordered
+        // flags could put the real `-D` port anywhere. Writing a port we merely assume would be
+        // worse than leaving the user's own value in place.
         saveRemoteProxy(updated)
     }
 
