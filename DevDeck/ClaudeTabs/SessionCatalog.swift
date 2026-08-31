@@ -222,9 +222,21 @@ extension SessionCatalog {
     /// The check exists to break ties between two unrelated sessions that merely share an
     /// AI-generated title (not a rare accident — "fix the login bug" is a plausible title twice
     /// over): without it a live tab could claim the wrong catalogue entry and hide a session from
-    /// history that was never actually reopened. When more than one catalogue entry still matches
-    /// after that, the most recently active one wins — the same "newest wins a tie" rule
-    /// `SessionResolver` follows by construction.
+    /// history that was never actually reopened.
+    ///
+    /// When more than one catalogue entry still matches after that, directory SPECIFICITY is the
+    /// tie-break, not recency: an `.exact` match always outranks a `.descendant` one, and recency
+    /// only decides between two candidates in the same tier. Recency alone is not enough, because
+    /// the descendant widening (accepting a live directory nested inside the catalogue directory,
+    /// for a session started from a subdirectory) can put a genuinely unrelated PARENT-directory
+    /// session in the running alongside the true CHILD-directory one whenever both happen to share
+    /// a normalized title — a live tab open in the child is, by construction, a descendant of the
+    /// parent's recorded directory too. Left to recency alone, an older-but-more-specific child
+    /// session could lose to a newer-but-only-ancestor parent session, which both hides the parent
+    /// (not actually open) from history and leaves the child's own row still offering to reopen a
+    /// tab that already exists. Specificity first — exact beats descendant regardless of
+    /// `lastActivity` — closes that; recency remains the tie-break `SessionResolver` itself uses
+    /// once specificity no longer distinguishes two candidates.
     static func liveOpenSessionIDs(tabs: [GhosttyTab], catalog: [CatalogEntry],
                                    providers: [AgentSessionProvider]) -> Set<String> {
         let ordered = providers.filter { !$0.isFallback } + providers.filter(\.isFallback)
@@ -233,12 +245,20 @@ extension SessionCatalog {
             guard let provider = ordered.first(where: { $0.mayOwn(tabTitle: tab.title) }) else { continue }
             let wanted = provider.normalize(tabTitle: tab.title)
             guard !wanted.isEmpty else { continue }
-            let match = catalog
-                .filter { $0.provider == provider.id
-                    && DirectoryMatch.matches(liveDirectory: tab.workingDirectory, catalogDirectory: $0.directory)
-                    && provider.normalize(tabTitle: $0.title) == wanted }
-                .max { $0.lastActivity < $1.lastActivity }
-            if let match { result.insert(match.sessionID) }
+            let candidates: [(entry: CatalogEntry, kind: DirectoryMatch.Kind)] = catalog.compactMap { candidate in
+                guard candidate.provider == provider.id,
+                      provider.normalize(tabTitle: candidate.title) == wanted,
+                      let kind = DirectoryMatch.match(liveDirectory: tab.workingDirectory,
+                                                      catalogDirectory: candidate.directory)
+                else { return nil }
+                return (candidate, kind)
+            }
+            let match = candidates.max { lhs, rhs in
+                lhs.kind == rhs.kind
+                    ? lhs.entry.lastActivity < rhs.entry.lastActivity
+                    : lhs.kind == .descendant && rhs.kind == .exact
+            }
+            if let match { result.insert(match.entry.sessionID) }
         }
         return result
     }
@@ -256,16 +276,37 @@ extension SessionCatalog {
 /// feeds: a miss reopens a duplicate tab, and lists the same session in both the snapshot and
 /// history at once.
 enum DirectoryMatch {
-    /// True when `liveDirectory` names `catalogDirectory` itself, or a directory nested inside it.
-    /// Only that one direction: a live directory that is merely an ANCESTOR of the catalogue
-    /// directory is not accepted, since that would let an unrelated parent-directory tab (a plain
-    /// shell in `~`, say) claim a session that was actually started further down. The title
-    /// condition this exists alongside is the real tie-breaker; this check only widens what counts
-    /// as "the same place on disk", it never substitutes for the title matching.
+    /// Which of the two accepted shapes a match took — `.exact` when the live directory names the
+    /// catalogue directory itself, `.descendant` when it is merely nested inside it. The two are
+    /// not equally trustworthy: an `.exact` match can only be the same physical directory, while a
+    /// `.descendant` match also accepts a live tab that happens to sit below a recorded directory
+    /// for an entirely different, unrelated session (see `liveOpenSessionIDs`, which uses this to
+    /// make specificity — not recency — the first tie-break between two candidates).
+    enum Kind {
+        case exact
+        case descendant
+    }
+
+    /// `match(...) != nil`. Kept as a plain Bool for every call site that only needs "did this
+    /// count as the same place on disk" and has no tie to break — `liveOpenSessionIDs` is the one
+    /// caller that needs `match`'s richer answer instead.
     static func matches(liveDirectory: String, catalogDirectory: String) -> Bool {
+        match(liveDirectory: liveDirectory, catalogDirectory: catalogDirectory) != nil
+    }
+
+    /// `.exact` when `liveDirectory` names `catalogDirectory` itself, `.descendant` when it is a
+    /// directory nested inside it, `nil` otherwise. Only that one direction accepts nesting: a live
+    /// directory that is merely an ANCESTOR of the catalogue directory is not accepted, since that
+    /// would let an unrelated parent-directory tab (a plain shell in `~`, say) claim a session that
+    /// was actually started further down. The title condition this exists alongside is the real
+    /// tie-breaker; this check only widens what counts as "the same place on disk", it never
+    /// substitutes for the title matching.
+    static func match(liveDirectory: String, catalogDirectory: String) -> Kind? {
         let live = standardized(liveDirectory)
         let catalog = standardized(catalogDirectory)
-        return live == catalog || live.hasPrefix(catalog + "/")
+        if live == catalog { return .exact }
+        if live.hasPrefix(catalog + "/") { return .descendant }
+        return nil
     }
 
     /// Canonicalizes via the C `realpath()`, not `URL.resolvingSymlinksInPath()`: the latter
