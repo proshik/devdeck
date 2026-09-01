@@ -26,10 +26,38 @@ struct DockerUsage: Equatable, Sendable {
     var containers: DockerUsageRow?
     var volumes: DockerUsageRow?
     var buildCache: DockerUsageRow?
+    /// Anonymous volumes no *running* container holds, by size — what `docker volume prune` frees
+    /// once `docker container prune` has removed the stopped containers still linking them. docker's
+    /// own `Local Volumes` reclaimable figure answers a different question (what is unreferenced
+    /// *right now*, named volumes included), so it is both blind to a testcontainers backlog and
+    /// generous about named volumes the button never deletes. nil when the listing was absent or
+    /// unreadable → the estimate falls back to docker's figure.
+    var pruneableVolumeBytes: UInt64?
+    /// Size of the volume that carries the *other* daemon: minikube keeps its node's entire docker
+    /// inside one volume on the colima disk, so colima counts the whole cluster as one of its own
+    /// volumes. Named apart, or the page's two boxes look like they double-count the same bytes.
+    /// nil when the listing was absent, 0 when there is no such volume (inside the node itself).
+    var nestedDaemonVolumeBytes: UInt64?
 
-    /// Parse `docker system df --format '{{json .}}'` — one JSON object per line, keyed by `Type`.
-    /// nil when not a single known row parses (daemon down, error text).
+    /// Separates the probe script's three outputs. Not a string docker itself can print.
+    static let sectionMarker = "---devdeck---"
+
+    /// Parse the probe output: the `docker system df --format '{{json .}}'` rows, and — when the
+    /// script also carried them — the volume listing and the volumes running containers hold.
+    /// nil when not a single known summary row parses (daemon down, error text).
     static func parse(_ output: String) -> DockerUsage? {
+        let sections = output.components(separatedBy: sectionMarker)
+        guard var usage = parseSummary(sections[0]) else { return nil }
+        if sections.count >= 3,
+           let detail = parseVolumeDetail(sections[1], heldByRunning: volumeNames(sections[2])) {
+            usage.pruneableVolumeBytes = detail.pruneableBytes
+            usage.nestedDaemonVolumeBytes = detail.nestedDaemonBytes
+        }
+        return usage
+    }
+
+    /// The `{{json .}}` summary rows — one JSON object per line, keyed by `Type`.
+    static func parseSummary(_ output: String) -> DockerUsage? {
         var usage = DockerUsage()
         var any = false
         for line in output.split(whereSeparator: \.isNewline) {
@@ -54,6 +82,51 @@ struct DockerUsage: Equatable, Sendable {
         return any ? usage : nil
     }
 
+    /// What the volume listing yields, decoded in one pass.
+    struct VolumeDetail: Equatable, Sendable {
+        let pruneableBytes: UInt64
+        let nestedDaemonBytes: UInt64
+    }
+
+    /// Read `docker system df -v --format '{{json .Volumes}}'`: the anonymous volumes `docker volume
+    /// prune` will take once the stopped containers are gone (everything carrying docker's anonymous
+    /// label that none of `heldByRunning` holds), and the size of the nested daemon's own volume.
+    /// nil when the listing didn't decode — a fallback is honest, a zero would read as "nothing here".
+    static func parseVolumeDetail(_ json: String, heldByRunning: Set<String>) -> VolumeDetail? {
+        let trimmed = json.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let data = trimmed.data(using: .utf8),
+              let list = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]]
+        else { return nil }
+        var pruneable: UInt64 = 0
+        var nested: UInt64 = 0
+        for volume in list {
+            guard let name = volume["Name"] as? String,
+                  let labels = volume["Labels"] as? String,
+                  let size = (volume["Size"] as? String).flatMap(parseSize)
+            else { continue }
+            let keys = labelKeys(labels)
+            if keys.contains("created_by.minikube.sigs.k8s.io") { nested += size }
+            if keys.contains("com.docker.volume.anonymous"), !heldByRunning.contains(name) {
+                pruneable += size
+            }
+        }
+        return VolumeDetail(pruneableBytes: pruneable, nestedDaemonBytes: nested)
+    }
+
+    /// The label keys of a `k=v,k=v` listing. docker labels every volume it created for a container
+    /// itself — `docker volume prune` without `-a` removes only those, so a named volume (a
+    /// database, a module cache) is never counted as free space.
+    static func labelKeys(_ labels: String) -> [Substring] {
+        labels.split(separator: ",").compactMap { $0.split(separator: "=", maxSplits: 1).first }
+    }
+
+    /// One volume name per line, blank lines dropped — `docker inspect` prints a gap per container.
+    static func volumeNames(_ text: String) -> Set<String> {
+        Set(text.split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty })
+    }
+
     /// docker's go-units sizes are decimal ("9.617GB (57%)", "177.4MB", "0B"); the parenthesised
     /// percentage is ignored. nil for anything else — including a bare number without a unit.
     static func parseSize(_ text: String) -> UInt64? {
@@ -66,12 +139,15 @@ struct DockerUsage: Equatable, Sendable {
         return nil
     }
 
-    /// What a cleanup action can free, from docker's own reclaimable figures. A lower bound for
-    /// dead containers: the anonymous volumes they hold only become reclaimable once they're gone.
+    /// What a cleanup action can free. Build cache and images take docker's own reclaimable figure;
+    /// dead containers take their writable layers plus the volumes only they still hold, since the
+    /// action prunes the containers first and docker's figure cannot see past that.
     func estimate(for action: CleanupAction) -> UInt64? {
         switch action {
         case .deadContainers:
-            guard let containers, let volumes else { return nil }
+            guard let containers else { return nil }
+            if let pruneableVolumeBytes { return containers.reclaimableBytes + pruneableVolumeBytes }
+            guard let volumes else { return nil }
             return containers.reclaimableBytes + volumes.reclaimableBytes
         case .buildCache:
             return buildCache?.reclaimableBytes
@@ -97,10 +173,20 @@ protocol DockerUsageProbing: Sendable {
 }
 
 /// The real probe: `docker system df` run inside the daemon's own VM over ssh, so it never
-/// depends on the host docker CLI or its current context. Blocking (~0.3 s colima, ~0.6 s
-/// minikube) → call off-main. Daemon down → nil.
+/// depends on the host docker CLI or its current context. Blocking and not cheap — the verbose
+/// pass walks every volume, seconds rather than milliseconds on a full disk → call off-main.
+/// Daemon down → nil.
 struct LiveDockerUsageProbe: DockerUsageProbing {
-    private static let script = "docker system df --format '{{json .}}'"
+    /// Three outputs behind `DockerUsage.sectionMarker`: the summary rows, the per-volume listing
+    /// (only `-v` carries sizes), and the volumes running containers hold — the last two are what
+    /// separate a volume a stopped container merely links from one still in use. Kept on a single
+    /// line: minikube hands the script to its remote shell as one word.
+    private static let script = """
+    docker system df --format '{{json .}}'; echo '\(DockerUsage.sectionMarker)'; \
+    docker system df -v --format '{{json .Volumes}}'; echo '\(DockerUsage.sectionMarker)'; \
+    docker ps -q | xargs -r docker inspect \
+    -f '{{range .Mounts}}{{if eq .Type "volume"}}{{println .Name}}{{end}}{{end}}'
+    """
 
     func sample(_ host: DockerHost) -> DockerUsage? {
         let (binary, args) = Self.invocation(host)
