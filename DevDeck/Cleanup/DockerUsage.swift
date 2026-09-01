@@ -38,6 +38,12 @@ struct DockerUsage: Equatable, Sendable {
     /// volumes. Named apart, or the page's two boxes look like they double-count the same bytes.
     /// nil when the listing was absent, 0 when there is no such volume (inside the node itself).
     var nestedDaemonVolumeBytes: UInt64?
+    /// The unique layers of the images no container references — what `docker image prune -a`
+    /// actually frees. docker's own `Images` reclaimable figure counts layers shared with images
+    /// that *are* in use, and inside the minikube node (docker 29.2.1) it reports 100% reclaimable
+    /// while every image is held by a container: the button then promised gigabytes and freed
+    /// nothing. nil when the listing was absent → the estimate falls back to docker's figure.
+    var pruneableImageBytes: UInt64?
 
     /// Separates the probe script's three outputs. Not a string docker itself can print.
     static let sectionMarker = "---devdeck---"
@@ -49,9 +55,10 @@ struct DockerUsage: Equatable, Sendable {
         let sections = output.components(separatedBy: sectionMarker)
         guard var usage = parseSummary(sections[0]) else { return nil }
         if sections.count >= 3,
-           let detail = parseVolumeDetail(sections[1], heldByRunning: volumeNames(sections[2])) {
-            usage.pruneableVolumeBytes = detail.pruneableBytes
+           let detail = parseDetail(sections[1], heldByRunning: volumeNames(sections[2])) {
+            usage.pruneableVolumeBytes = detail.pruneableVolumeBytes
             usage.nestedDaemonVolumeBytes = detail.nestedDaemonBytes
+            usage.pruneableImageBytes = detail.pruneableImageBytes
         }
         return usage
     }
@@ -82,24 +89,29 @@ struct DockerUsage: Equatable, Sendable {
         return any ? usage : nil
     }
 
-    /// What the volume listing yields, decoded in one pass.
-    struct VolumeDetail: Equatable, Sendable {
-        let pruneableBytes: UInt64
+    /// What the verbose listing yields, decoded in one pass.
+    struct Detail: Equatable, Sendable {
+        let pruneableVolumeBytes: UInt64
         let nestedDaemonBytes: UInt64
+        let pruneableImageBytes: UInt64
     }
 
-    /// Read `docker system df -v --format '{{json .Volumes}}'`: the anonymous volumes `docker volume
-    /// prune` will take once the stopped containers are gone (everything carrying docker's anonymous
-    /// label that none of `heldByRunning` holds), and the size of the nested daemon's own volume.
-    /// nil when the listing didn't decode — a fallback is honest, a zero would read as "nothing here".
-    static func parseVolumeDetail(_ json: String, heldByRunning: Set<String>) -> VolumeDetail? {
+    /// Read `docker system df -v --format '{{json .}}'` — the one call that carries per-item sizes:
+    /// the anonymous volumes `docker volume prune` will take once the stopped containers are gone
+    /// (everything with docker's anonymous label that none of `heldByRunning` holds), the nested
+    /// daemon's own volume, and the unique layers of the images no container references. nil when
+    /// the listing didn't decode — a fallback is honest, a zero would read as "nothing here".
+    static func parseDetail(_ json: String, heldByRunning: Set<String>) -> Detail? {
         let trimmed = json.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let data = trimmed.data(using: .utf8),
-              let list = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]]
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let volumes = root["Volumes"] as? [[String: Any]],
+              let images = root["Images"] as? [[String: Any]]
         else { return nil }
-        var pruneable: UInt64 = 0
+
+        var pruneableVolumes: UInt64 = 0
         var nested: UInt64 = 0
-        for volume in list {
+        for volume in volumes {
             guard let name = volume["Name"] as? String,
                   let labels = volume["Labels"] as? String,
                   let size = (volume["Size"] as? String).flatMap(parseSize)
@@ -107,10 +119,22 @@ struct DockerUsage: Equatable, Sendable {
             let keys = labelKeys(labels)
             if keys.contains("created_by.minikube.sigs.k8s.io") { nested += size }
             if keys.contains("com.docker.volume.anonymous"), !heldByRunning.contains(name) {
-                pruneable += size
+                pruneableVolumes += size
             }
         }
-        return VolumeDetail(pruneableBytes: pruneable, nestedDaemonBytes: nested)
+
+        // Only the layers that image alone owns: an unused image sharing its base with one that is
+        // still in use frees just its own bytes. A layer two removable images share is left out of
+        // both, so the figure is a floor — a cleanup button may under-promise, never over-promise.
+        var pruneableImages: UInt64 = 0
+        for image in images where image["Containers"] as? String == "0" {
+            guard let unique = (image["UniqueSize"] as? String).flatMap(parseSize) else { continue }
+            pruneableImages += unique
+        }
+
+        return Detail(pruneableVolumeBytes: pruneableVolumes,
+                      nestedDaemonBytes: nested,
+                      pruneableImageBytes: pruneableImages)
     }
 
     /// The label keys of a `k=v,k=v` listing. docker labels every volume it created for a container
@@ -152,7 +176,7 @@ struct DockerUsage: Equatable, Sendable {
         case .buildCache:
             return buildCache?.reclaimableBytes
         case .unusedImages:
-            return images?.reclaimableBytes
+            return pruneableImageBytes ?? images?.reclaimableBytes
         }
     }
 
@@ -177,13 +201,14 @@ protocol DockerUsageProbing: Sendable {
 /// pass walks every volume, seconds rather than milliseconds on a full disk → call off-main.
 /// Daemon down → nil.
 struct LiveDockerUsageProbe: DockerUsageProbing {
-    /// Three outputs behind `DockerUsage.sectionMarker`: the summary rows, the per-volume listing
-    /// (only `-v` carries sizes), and the volumes running containers hold — the last two are what
-    /// separate a volume a stopped container merely links from one still in use. Kept on a single
-    /// line: minikube hands the script to its remote shell as one word.
+    /// Three outputs behind `DockerUsage.sectionMarker`: the summary rows, the verbose listing
+    /// (the only one carrying per-item sizes, hence one `-v` pass for both volumes and images), and
+    /// the volumes running containers hold — the last two are what separate a volume a stopped
+    /// container merely links from one still in use. Kept on a single line: minikube hands the
+    /// script to its remote shell as one word.
     private static let script = """
     docker system df --format '{{json .}}'; echo '\(DockerUsage.sectionMarker)'; \
-    docker system df -v --format '{{json .Volumes}}'; echo '\(DockerUsage.sectionMarker)'; \
+    docker system df -v --format '{{json .}}'; echo '\(DockerUsage.sectionMarker)'; \
     docker ps -q | xargs -r docker inspect \
     -f '{{range .Mounts}}{{if eq .Type "volume"}}{{println .Name}}{{end}}{{end}}'
     """
