@@ -197,9 +197,36 @@ enum L10n {
     static var usageContainers: String { t("Containers", "Контейнеры") }
     static var usageVolumes: String { t("Volumes", "Volumes") }
     static var usageBuildCache: String { t("Build cache", "Build cache") }
-    static func usageRow(_ size: String, active: Int, total: Int, reclaimable: String) -> String {
-        t("\(size) · \(active) of \(total) in use · \(reclaimable) reclaimable",
-          "\(size) · в работе \(active) из \(total) · можно освободить \(reclaimable)")
+    /// Occupancy only. What a button will free is docker's answer to a different question, so it
+    /// is shown on the button itself — side by side the two numbers only ever looked contradictory.
+    static func usageRow(_ size: String, active: Int, total: Int) -> String {
+        t("\(size) · \(active) of \(total) in use",
+          "\(size) · в работе \(active) из \(total)")
+    }
+    static func usageAbandonedVolumes(_ size: String) -> String {
+        t("and \(size) is anonymous volumes stopped containers still hold",
+          "и \(size) — анонимные volumes, которые держат остановленные контейнеры")
+    }
+    static func usageNestedVolume(_ size: String) -> String {
+        t("of which \(size) is the minikube node's own disk — broken down below",
+          "из них \(size) — диск ноды minikube, он разобран ниже")
+    }
+    /// Only minikube has one: its whole docker lives inside a single volume colima already counted.
+    static func dockerHostNote(_ host: DockerHost) -> String? {
+        switch host {
+        case .colima: return nil
+        case .minikube:
+            return t("All of it sits inside that one minikube volume on the colima disk — freeing anything here frees the colima disk too.",
+                     "Всё это лежит внутри того самого тома minikube на диске colima — освобождая здесь, вы освобождаете и диск colima.")
+        }
+    }
+    static func cleanupFrees(_ size: String) -> String {
+        t("frees ≈ \(size)", "освободит ≈ \(size)")
+    }
+    /// Shown under the disk bar once it crosses the same line that turns the popover cell red.
+    static var cleanupDiskPressureNote: String {
+        t("At this level BuildKit starts pruning its cache in the middle of a build, which is what makes builds crawl; minikube's kubelet reacts to nothing at all — image GC and eviction are disabled in it. Free something up before the next build.",
+          "На этом уровне BuildKit начинает чистить кэш прямо посреди сборки — именно от этого сборки становятся очень долгими; kubelet minikube не реагирует вообще, GC образов и eviction у него отключены. Освободите место до следующей сборки.")
     }
     static func cleanupActionTitle(_ action: CleanupAction) -> String {
         switch action {
@@ -218,8 +245,8 @@ enum L10n {
             return t("Removes stopped containers and the anonymous volumes nobody references any more (testcontainers leftovers). Named volumes stay.",
                      "Удалит остановленные контейнеры и анонимные volumes, на которые больше никто не ссылается (остатки testcontainers). Именованные volumes останутся.")
         case .buildCache:
-            return t("Removes the whole BuildKit cache. Nothing breaks; the next build is a cold one.",
-                     "Удалит весь кэш BuildKit. Ничего не сломается, но следующая сборка будет холодной.")
+            return t("Removes the whole BuildKit cache. Nothing breaks; the next build is a cold one. The disk frees up less than the cache's size — the layers it shares with images stay behind them.",
+                     "Удалит весь кэш BuildKit. Ничего не сломается, но следующая сборка будет холодной. Диска освободится меньше, чем размер кэша: слои, общие с образами, останутся за ними.")
         case .unusedImages:
             return t("Removes every image no container uses right now — including locally built ones that a pod with imagePullPolicy: Never will need on its next restart. Pull or rebuild them afterwards.",
                      "Удалит все образы, которые сейчас не использует ни один контейнер — включая собранные локально, которые под с imagePullPolicy: Never потребует при следующем рестарте. Потом их придётся скачать или собрать заново.")
