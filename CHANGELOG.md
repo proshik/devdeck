@@ -21,6 +21,30 @@ versioning follows [SemVer](https://semver.org/).
   rather than at every launch.
 
 ### Fixed
+- **The Cleanup page promised 341 MB where 27 GB were waiting.** The estimate beside "dead
+  containers" was docker's own `Reclaimable` column, which answers a different question: what is
+  unreferenced *right now*. An anonymous volume is still linked by the exited container that
+  created it, so a backlog of testcontainers postgres leftovers counted as nothing — while the
+  named dangling volumes docker did count are exactly the ones `docker volume prune` spares
+  without `-a`. The probe now also reads the per-volume listing and the volumes running containers
+  hold, and the estimate sums the anonymous volumes only stopped containers keep alive: the action
+  prunes those containers first, so the volumes are free by the time it reaches them. The figure
+  moves both ways — on the machine this was measured on it went from 341 MB to 26.7 GB on colima,
+  and from 1.4 GB down to 177 MB inside minikube, where the gigabyte docker had been counting sits
+  in a named cache the button never deletes. A daemon whose listing doesn't parse falls back to
+  docker's figure rather than reporting zero. The verbose pass costs a second disk walk, so a
+  refresh is now seconds rather than milliseconds on a full disk.
+
+  The page around it was rearranged to answer one question — where the disk actually went. Each
+  daemon's categories are listed biggest first; a row states what it occupies and nothing else,
+  since the number beside the button now says what that button frees and the two used to
+  contradict each other in plain sight. The colima volumes row breaks itself down into the two
+  things that fill it: the `minikube` volume (the node's entire disk, the box below — the two
+  boxes were silently counting the same 42 GB twice) and the anonymous volumes stopped containers
+  still hold. Above 85% the disk bar now says what that costs — BuildKit pruning its cache
+  mid-build, minikube's kubelet reacting to nothing because image GC and eviction are off in it —
+  and the build-cache confirmation admits the disk frees up less than the cache's size, the
+  layers shared with images staying behind them.
 - **A remote proxy could not be edited, only deleted and recreated.** `ProxyManager` already had
   `saveRemoteProxy`, but no screen called it — a typo'd SSH destination meant starting over. The
   edit sheet described under Added below reuses it; saving a live pair used to silently never

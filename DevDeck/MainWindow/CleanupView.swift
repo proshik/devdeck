@@ -1,7 +1,8 @@
 import SwiftUI
 
-/// The Cleanup page: `docker system df` for each daemon with one button per reclaimable category,
-/// the VM-memory explainer with a colima restart, and the log of the last action. Every button
+/// The Cleanup page: what the colima disk is actually made of — the fill bar first, then each
+/// daemon's own footprint biggest-first, with one button per category saying what it will free —
+/// plus the VM-memory explainer with a colima restart and the log of the last action. Every button
 /// confirms first and runs through the normal runner, so nothing here has its own process code.
 struct CleanupView: View {
     @Environment(CleanupModel.self) private var model
@@ -91,6 +92,11 @@ struct CleanupView: View {
                     Text(disk.format()).monospacedDigit().foregroundStyle(pressureColor(disk.fraction))
                 }
                 .font(.callout)
+                if disk.fraction >= VMDiskInfo.cleanupHintFraction {
+                    Text(L10n.cleanupDiskPressureNote)
+                        .font(.caption)
+                        .foregroundStyle(pressureColor(disk.fraction))
+                }
             }
         }
     }
@@ -101,10 +107,24 @@ struct CleanupView: View {
         GroupBox(L10n.dockerHostTitle(host)) {
             VStack(alignment: .leading, spacing: 6) {
                 if let usage = model.usage[host] {
-                    usageRow(L10n.usageImages, usage.images)
-                    usageRow(L10n.usageContainers, usage.containers)
-                    usageRow(L10n.usageVolumes, usage.volumes)
-                    usageRow(L10n.usageBuildCache, usage.buildCache)
+                    if let note = L10n.dockerHostNote(host) {
+                        Text(note).font(.caption).foregroundStyle(.secondary)
+                    }
+                    ForEach(usageEntries(usage)) { entry in
+                        usageRow(entry.label, entry.row)
+                        // The node's disk is one of colima's volumes; say so, or the two boxes read
+                        // as 45 GB counted twice.
+                        if entry.isVolumes {
+                            if let nested = usage.nestedDaemonVolumeBytes, nested > 0 {
+                                volumeDetailLine(L10n.usageNestedVolume(DockerUsage.formatBytes(nested)))
+                            }
+                            // The two lines add up to most of the row above — which is the whole
+                            // point: the volumes are where the disk went, and this says where to.
+                            if let abandoned = usage.pruneableVolumeBytes, abandoned > 0 {
+                                volumeDetailLine(L10n.usageAbandonedVolumes(DockerUsage.formatBytes(abandoned)))
+                            }
+                        }
+                    }
                     Divider().padding(.vertical, 2)
                     ForEach(CleanupAction.allCases, id: \.self) { action in
                         actionRow(action, host)
@@ -120,12 +140,34 @@ struct CleanupView: View {
         }
     }
 
+    /// One line per category, biggest first: the page exists to answer "where did the disk go".
+    private struct UsageEntry: Identifiable {
+        let label: String
+        let row: DockerUsageRow?
+        let isVolumes: Bool
+        var id: String { label }
+    }
+
+    private func usageEntries(_ usage: DockerUsage) -> [UsageEntry] {
+        [UsageEntry(label: L10n.usageVolumes, row: usage.volumes, isVolumes: true),
+         UsageEntry(label: L10n.usageImages, row: usage.images, isVolumes: false),
+         UsageEntry(label: L10n.usageBuildCache, row: usage.buildCache, isVolumes: false),
+         UsageEntry(label: L10n.usageContainers, row: usage.containers, isVolumes: false)]
+            .sorted { ($0.row?.sizeBytes ?? 0) > ($1.row?.sizeBytes ?? 0) }
+    }
+
+    private func volumeDetailLine(_ text: String) -> some View {
+        Text(text)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .padding(.leading, 104)
+    }
+
     private func usageRow(_ label: String, _ row: DockerUsageRow?) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             Text(label).frame(width: 96, alignment: .leading)
             if let row {
-                Text(L10n.usageRow(DockerUsage.formatBytes(row.sizeBytes), active: row.active, total: row.total,
-                                   reclaimable: DockerUsage.formatBytes(row.reclaimableBytes)))
+                Text(L10n.usageRow(DockerUsage.formatBytes(row.sizeBytes), active: row.active, total: row.total))
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
             } else {
@@ -144,7 +186,7 @@ struct CleanupView: View {
             }
             Spacer()
             if let estimate = model.estimate(action, on: host) {
-                Text("≈ " + DockerUsage.formatBytes(estimate))
+                Text(L10n.cleanupFrees(DockerUsage.formatBytes(estimate)))
                     .monospacedDigit()
                     .foregroundStyle(estimate > 0 ? .primary : .secondary)
             }

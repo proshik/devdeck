@@ -19,6 +19,23 @@ final class DockerUsageTests: XCTestCase {
     {"Active":"14","Reclaimable":"11.97GB","Size":"15.9GB","TotalCount":"251","Type":"Build Cache"}
     """
 
+    // The combined probe output: the summary lines, then the volume listing, then the volumes held
+    // by *running* containers. docker prints the array without a trailing newline, so the marker
+    // lands on the same line — the parser splits on the substring, not line by line.
+    private let combined = """
+    {"Active":"4","Reclaimable":"507.9kB (5%)","Size":"8.614MB","TotalCount":"35","Type":"Containers"}
+    {"Active":"34","Reclaimable":"340.9MB (0%)","Size":"72.38GB","TotalCount":"48","Type":"Local Volumes"}
+    ---devdeck---
+    [{"Labels":"com.docker.volume.anonymous=","Links":"1","Name":"aaa","Size":"2.692GB"},\
+    {"Labels":"com.docker.volume.anonymous=","Links":"0","Name":"bbb","Size":"253.7kB"},\
+    {"Labels":"com.docker.volume.anonymous=","Links":"1","Name":"ccc","Size":"1.78GB"},\
+    {"Labels":"com.docker.compose.project=krill","Links":"0","Name":"krill_pgdata","Size":"50.17MB"},\
+    {"Labels":"created_by.minikube.sigs.k8s.io=true","Links":"1","Name":"minikube","Size":"45.12GB"}]---devdeck---
+    ccc
+
+    minikube
+    """
+
     func testParseSizeDecimalUnits() {
         XCTAssertEqual(DockerUsage.parseSize("9.617GB (57%)"), 9_617_000_000)
         XCTAssertEqual(DockerUsage.parseSize("11.97GB"), 11_970_000_000)
@@ -85,5 +102,69 @@ final class DockerUsageTests: XCTestCase {
         XCTAssertEqual(DockerUsage.formatBytes(340_100_000), "324 MB")
         XCTAssertEqual(DockerUsage.formatBytes(11_970_000_000), "11.1 GB")
         XCTAssertEqual(DockerUsage.formatBytes(1_073_741_824), "1.0 GB")
+    }
+
+    // MARK: - volumes the dead containers still hold
+
+    func testPruneableVolumesSkipNamedOnesAndThoseHeldByRunningContainers() throws {
+        let u = try XCTUnwrap(DockerUsage.parse(combined))
+        // aaa (held by a stopped container) + bbb (already dangling). ccc is held by a running
+        // container; krill_pgdata and minikube are named — `volume prune` without -a spares them.
+        XCTAssertEqual(u.pruneableVolumeBytes, 2_692_000_000 + 253_700)
+    }
+
+    func testDeadContainerEstimateCountsVolumesStoppedContainersStillHold() throws {
+        let u = try XCTUnwrap(DockerUsage.parse(combined))
+        // Not docker's 340.9MB: that figure both misses the volumes stopped containers still link
+        // and counts named dangling ones the button will not delete.
+        XCTAssertEqual(u.estimate(for: .deadContainers), 507_900 + 2_692_000_000 + 253_700)
+    }
+
+    func testDeadContainerEstimateFallsBackToDockerReclaimableWithoutDetail() throws {
+        let u = try XCTUnwrap(DockerUsage.parse(colima))
+        XCTAssertNil(u.pruneableVolumeBytes)
+        XCTAssertEqual(u.estimate(for: .deadContainers), 0 + 340_100_000)
+    }
+
+    func testGarbledVolumeListingFallsBackInsteadOfReportingZero() throws {
+        let garbled = combined.replacingOccurrences(of: "[{\"Labels\"", with: "not json {\"Labels\"")
+        let u = try XCTUnwrap(DockerUsage.parse(garbled))
+        XCTAssertNil(u.pruneableVolumeBytes)
+        XCTAssertEqual(u.estimate(for: .deadContainers), 507_900 + 340_900_000)
+    }
+
+    func testNoRunningContainersLeavesEveryAnonymousVolumePruneable() throws {
+        let idle = combined.components(separatedBy: "---devdeck---")[0...1]
+            .joined(separator: "---devdeck---") + "---devdeck---\n"
+        let u = try XCTUnwrap(DockerUsage.parse(idle))
+        XCTAssertEqual(u.pruneableVolumeBytes, 2_692_000_000 + 253_700 + 1_780_000_000)
+    }
+
+    func testProbeScriptReachesMinikubeAsASingleArgument() {
+        let colima = LiveDockerUsageProbe.invocation(.colima)
+        XCTAssertEqual(colima.binary, "colima")
+        XCTAssertEqual(Array(colima.args.prefix(4)), ["ssh", "--", "sh", "-c"])
+        let minikube = LiveDockerUsageProbe.invocation(.minikube)
+        XCTAssertEqual(minikube.binary, "minikube")
+        XCTAssertEqual(minikube.args.count, 3, "minikube joins argv verbatim — the script must stay one word")
+        XCTAssertTrue(minikube.args[2].contains(DockerUsage.sectionMarker))
+    }
+
+    func testNestedDaemonVolumeSizeIsPickedOutOfTheListing() throws {
+        let u = try XCTUnwrap(DockerUsage.parse(combined))
+        // The `minikube` volume is the node's whole disk — colima counts it among its volumes, so
+        // the page has to name it or the two daemons look like they double-count the same bytes.
+        XCTAssertEqual(u.nestedDaemonVolumeBytes, 45_120_000_000)
+    }
+
+    func testNestedDaemonVolumeIsZeroWhenNothingCarriesTheLabel() throws {
+        let noNode = combined.replacingOccurrences(of: "created_by.minikube.sigs.k8s.io=true",
+                                                   with: "com.docker.compose.project=guild")
+        let u = try XCTUnwrap(DockerUsage.parse(noNode))
+        XCTAssertEqual(u.nestedDaemonVolumeBytes, 0)
+    }
+
+    func testNestedDaemonVolumeIsUnknownWithoutTheDetailListing() throws {
+        XCTAssertNil(try XCTUnwrap(DockerUsage.parse(colima)).nestedDaemonVolumeBytes)
     }
 }
