@@ -21,6 +21,17 @@ versioning follows [SemVer](https://semver.org/).
   rather than at every launch.
 
 ### Fixed
+- **"Unused images" promised 7.5 GB and freed nothing.** Reported against 0.18.1: the button ran,
+  the log showed `docker image prune -a -f` starting, and the figure never moved. Inside the
+  minikube node every one of the 34 images is held by a container, so prune had nothing to remove —
+  but docker's own `Images` reclaimable column reported 100% anyway (docker 29.2.1 in the node;
+  29.5.2 on colima gets the same case right, so the page was honest on one daemon and not the
+  other). The estimate is now computed the same way the volume one already was: the unique layers
+  of the images no container references, read out of the verbose listing. An image sharing its base
+  with one still in use contributes only its own bytes, and a layer two removable images share is
+  left out of both — the number is a floor, so a button can under-promise but never over-promise
+  again. The verbose listing is now read whole (`{{json .}}`) rather than just its volumes, so this
+  costs no extra disk walk.
 - **The Cleanup page promised 341 MB where 27 GB were waiting.** The estimate beside "dead
   containers" was docker's own `Reclaimable` column, which answers a different question: what is
   unreferenced *right now*. An anonymous volume is still linked by the exited container that

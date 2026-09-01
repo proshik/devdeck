@@ -19,18 +19,23 @@ final class DockerUsageTests: XCTestCase {
     {"Active":"14","Reclaimable":"11.97GB","Size":"15.9GB","TotalCount":"251","Type":"Build Cache"}
     """
 
-    // The combined probe output: the summary lines, then the volume listing, then the volumes held
-    // by *running* containers. docker prints the array without a trailing newline, so the marker
-    // lands on the same line — the parser splits on the substring, not line by line.
+    // The combined probe output: the summary lines, then `docker system df -v` in full, then the
+    // volumes held by *running* containers. docker prints the object without a trailing newline, so
+    // the marker lands on the same line — the parser splits on the substring, not line by line.
     private let combined = """
     {"Active":"4","Reclaimable":"507.9kB (5%)","Size":"8.614MB","TotalCount":"35","Type":"Containers"}
     {"Active":"34","Reclaimable":"340.9MB (0%)","Size":"72.38GB","TotalCount":"48","Type":"Local Volumes"}
+    {"Active":"34","Reclaimable":"8.035GB (100%)","Size":"8.035GB","TotalCount":"3","Type":"Images"}
     ---devdeck---
-    [{"Labels":"com.docker.volume.anonymous=","Links":"1","Name":"aaa","Size":"2.692GB"},\
+    {"Images":[\
+    {"Containers":"3","Repository":"postgres","SharedSize":"13.49MB","Size":"411MB","UniqueSize":"397.8MB"},\
+    {"Containers":"0","Repository":"kicbase/stable","SharedSize":"1.877GB","Size":"1.88GB","UniqueSize":"430B"},\
+    {"Containers":"0","Repository":"<none>","SharedSize":"0B","Size":"76.8MB","UniqueSize":"76.79MB"}],\
+    "Volumes":[{"Labels":"com.docker.volume.anonymous=","Links":"1","Name":"aaa","Size":"2.692GB"},\
     {"Labels":"com.docker.volume.anonymous=","Links":"0","Name":"bbb","Size":"253.7kB"},\
     {"Labels":"com.docker.volume.anonymous=","Links":"1","Name":"ccc","Size":"1.78GB"},\
     {"Labels":"com.docker.compose.project=krill","Links":"0","Name":"krill_pgdata","Size":"50.17MB"},\
-    {"Labels":"created_by.minikube.sigs.k8s.io=true","Links":"1","Name":"minikube","Size":"45.12GB"}]---devdeck---
+    {"Labels":"created_by.minikube.sigs.k8s.io=true","Links":"1","Name":"minikube","Size":"45.12GB"}]}---devdeck---
     ccc
 
     minikube
@@ -166,5 +171,30 @@ final class DockerUsageTests: XCTestCase {
 
     func testNestedDaemonVolumeIsUnknownWithoutTheDetailListing() throws {
         XCTAssertNil(try XCTUnwrap(DockerUsage.parse(colima)).nestedDaemonVolumeBytes)
+    }
+
+    // MARK: - images no container uses
+
+    func testUnusedImageEstimateCountsOnlyWhatPruneCanActuallyRemove() throws {
+        let u = try XCTUnwrap(DockerUsage.parse(combined))
+        // Only the two images no container references, and only their unique layers: kicbase shares
+        // 1.877 GB with the image still in use, so removing it frees the 430 B that are its own.
+        XCTAssertEqual(u.pruneableImageBytes, 430 + 76_790_000)
+        XCTAssertEqual(u.estimate(for: .unusedImages), 430 + 76_790_000)
+    }
+
+    func testUnusedImageEstimateIsZeroWhenEveryImageIsInUse() throws {
+        // docker 29.2.1 inside the minikube node reports 100% reclaimable with every image held by
+        // a container — pressing the button then frees nothing, which is what it must now promise.
+        let allInUse = combined.replacingOccurrences(of: "\"Containers\":\"0\"", with: "\"Containers\":\"2\"")
+        let u = try XCTUnwrap(DockerUsage.parse(allInUse))
+        XCTAssertEqual(u.images?.reclaimableBytes, 8_035_000_000, "docker's own figure is unchanged")
+        XCTAssertEqual(u.estimate(for: .unusedImages), 0)
+    }
+
+    func testUnusedImageEstimateFallsBackToDockerWithoutTheDetailListing() throws {
+        let u = try XCTUnwrap(DockerUsage.parse(minikube))
+        XCTAssertNil(u.pruneableImageBytes)
+        XCTAssertEqual(u.estimate(for: .unusedImages), 9_617_000_000)
     }
 }
