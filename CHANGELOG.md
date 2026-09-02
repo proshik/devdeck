@@ -21,6 +21,20 @@ versioning follows [SemVer](https://semver.org/).
   rather than at every launch.
 
 ### Fixed
+- **"Memory" read 5.9 GB lighter than Activity Monitor and htop.** The cell's own comment claimed
+  Activity Monitor's "Memory Used", but it computed `active + wired + compressed`. `active` is an
+  LRU list, not a statement about ownership: it counts file-backed pages the system can drop for
+  free, and it misses anonymous pages that merely went cold — which nothing can reclaim without
+  compressing or swapping them. On a 48 GiB Mac the cell showed 35/48 while Activity Monitor and
+  htop both showed 40/48, the whole gap being inactive anonymous pages. It is now App Memory +
+  Wired + Compressed (anonymous pages minus purgeable), the definition it always claimed, pulled
+  out as a pure function so the definition itself is under test rather than buried behind a
+  syscall. Only the popover's memory bar reads this figure — the daemon-memory notifications key
+  off the colima and minikube probes, so nothing about when they fire has changed.
+
+  Swap was never wrong: DevDeck's "8.0 GB" and htop's "7.9G" are the same 7.97 GiB, rounded versus
+  truncated. The "/9" htop puts beside it is macOS's current swap-file allocation, which grows on
+  demand rather than capping anything — which is why this cell shows what is used and no total.
 - **"Unused images" promised 7.5 GB and freed nothing.** Reported against 0.18.1: the button ran,
   the log showed `docker image prune -a -f` starting, and the figure never moved. Inside the
   minikube node every one of the 34 images is held by a container, so prune had nothing to remove —
