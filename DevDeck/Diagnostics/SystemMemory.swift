@@ -20,7 +20,7 @@ struct SystemMemory: Equatable {
         totalBytes > 0 ? Double(usedBytes) / Double(totalBytes) : 0
     }
 
-    /// "Used" = (active + wired + compressed) × pageSize; total = physical RAM; + swap.
+    /// "Used" as Activity Monitor labels it (see `used`); total = physical RAM; + swap.
     /// On a syscall failure returns used = 0 (the UI shows 0 instead of crashing).
     static func current() -> SystemMemory {
         let total = ProcessInfo.processInfo.physicalMemory
@@ -35,9 +35,26 @@ struct SystemMemory: Equatable {
         }
         guard result == KERN_SUCCESS else { return SystemMemory(usedBytes: 0, totalBytes: total) }
 
-        let pageSize = UInt64(vm_page_size)
-        let used = (UInt64(stats.active_count) + UInt64(stats.wire_count) + UInt64(stats.compressor_page_count)) * pageSize
-        return SystemMemory(usedBytes: min(used, total), totalBytes: total, swapUsedBytes: swapUsedBytes())
+        let usedBytes = used(internalPages: UInt64(stats.internal_page_count),
+                             purgeablePages: UInt64(stats.purgeable_count),
+                             wiredPages: UInt64(stats.wire_count),
+                             compressorPages: UInt64(stats.compressor_page_count),
+                             pageSize: UInt64(vm_page_size))
+        return SystemMemory(usedBytes: min(usedBytes, total), totalBytes: total,
+                            swapUsedBytes: swapUsedBytes())
+    }
+
+    /// "Memory Used" the way Activity Monitor and htop define it: App Memory + Wired + Compressed,
+    /// where App Memory is the anonymous (internal) pages that are not purgeable — the bytes
+    /// nothing can reclaim for free. The active/inactive split is deliberately not consulted:
+    /// `active` mixes in file-backed pages the system can simply drop, and leaves out anonymous
+    /// pages that merely went cold, which is how this cell used to read 5.9 GB lighter than both.
+    /// A pure function over the counters, so the definition is testable without a syscall.
+    static func used(internalPages: UInt64, purgeablePages: UInt64, wiredPages: UInt64,
+                     compressorPages: UInt64, pageSize: UInt64) -> UInt64 {
+        // Counters are sampled a moment apart and can disagree; unsigned wraparound would peg the bar.
+        let appMemory = internalPages > purgeablePages ? internalPages - purgeablePages : 0
+        return (appMemory + wiredPages + compressorPages) * pageSize
     }
 
     /// Swap used (bytes). 0 if swap is unused or unavailable.
