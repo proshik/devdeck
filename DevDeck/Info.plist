@@ -39,7 +39,7 @@
 	<key>SUFeedURL</key>
 	<string>https://raw.githubusercontent.com/proshik/devdeck/main/appcast.xml</string>
 	<key>SUPublicEDKey</key>
-	<string>qHU8wN0ceWOkx+lWlIdjc7qHmgW/SsjbpaQH5VdDGok=</string>
+	<string>PsECCAc06+mv4jDdGzT37pJpnAv8NpMFpdXxExzk+ps=</string>
 	<key>SUEnableAutomaticChecks</key>
 	<true/>
 	<key>SUScheduledCheckInterval</key>
