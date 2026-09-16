@@ -7,6 +7,15 @@ versioning follows [SemVer](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Battery charge and who drains it, in the popover.** On a MacBook the header now shows the
+  charge with macOS' time-left estimate, and — once the Mac is unplugged — the five processes that
+  used the most energy since that moment, with their share and average watts. The figures are the
+  kernel's per-process energy counters (`proc_pid_rusage`, Apple Silicon), not a CPU-time guess;
+  the baseline is taken at the unplug even with the popover closed, snapshots every minute keep
+  processes that exit, and on AC the last discharge stays on screen until the next one. The colima
+  hypervisor shows up as "VM colima" — on this setup it is the top consumer. Root processes
+  (WindowServer) are out of reach, and processes living less than a minute may be missed.
+  Switchable in Settings.
 - **Session history on the Agent tabs page, and reopening one tab at a time.** The page used to
   mirror only what was open, so a tab closed an hour ago was gone from it. It now also lists the
   sessions both agents remember from the last 7 days — across every project, newest first, with a
@@ -19,6 +28,12 @@ versioning follows [SemVer](https://semver.org/).
   is read is remembered in `agent-sessions.json` (owner-only, beside the other files this app
   writes), keyed by file and modification time, so the seconds a first build costs are paid once
   rather than at every launch.
+
+### Changed
+- **The popover header shows four metrics, the rest fold under "More".** Memory, VM colima, VM disk
+  and CPU load stay on screen; cluster, swap, VM minikube, pressure, swap rate and battery sit
+  behind a "More" toggle whose state is remembered. Folded, the toggle turns orange or red when a
+  hidden metric does, so collapsing never hides trouble.
 
 ### Fixed
 - **"Memory" read 5.9 GB lighter than Activity Monitor and htop.** The cell's own comment claimed

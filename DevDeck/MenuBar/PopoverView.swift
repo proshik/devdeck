@@ -7,12 +7,15 @@ struct PopoverView: View {
     @Environment(ProcessManager.self) private var manager
     @Environment(AppModel.self) private var appModel
     @Environment(UpdateController.self) private var updates
+    @Environment(EnergyModel.self) private var energy
     @Environment(\.openWindow) private var openWindow
 
     // Section collapse state is remembered across popover opens and app restarts.
     @AppStorage("popover.section.commands.collapsed") private var commandsCollapsed = false
     @AppStorage("popover.section.daemons.collapsed") private var daemonsCollapsed = false
     @AppStorage("popover.section.chains.collapsed") private var chainsCollapsed = false
+    /// Only the everyday metrics show by default; the rest (and the battery) fold under "More".
+    @AppStorage("popover.section.metrics.collapsed") private var metricsCollapsed = true
     /// Metric whose explanation is unfolded under the grid (click a cell; click again to fold).
     /// Tooltips exist too, but the header redraws every second and macOS never gets the still
     /// second of hovering it wants before showing one.
@@ -95,6 +98,7 @@ struct PopoverView: View {
             while !Task.isCancelled {
                 await manager.refreshVMSample()
                 await manager.refreshHostSample()
+                await energy.refresh()   // battery every tick; a process snapshot at most every 10 s
                 try? await Task.sleep(for: .seconds(2))
             }
         }
@@ -108,12 +112,21 @@ struct PopoverView: View {
     /// Colour for a metric cell with no data (value is left blank).
     private static let placeholderColor = Color.secondary.opacity(0.45)
 
-    /// Header: system memory bar plus a fixed 2-per-row grid of every metric. Every metric label is
-    /// always present — the value is simply left blank when there's no data — so the block has a
-    /// constant height and the divider and command list below never jump as metrics come and go.
+    /// Header: system memory bar, the metrics looked at every day, and the rest behind "More".
+    /// Every label in a visible grid is always present — the value is simply left blank when there's
+    /// no data — so the block keeps its height and the command list below never jumps.
     private var memoryHeader: some View {
         TimelineView(.periodic(from: .now, by: 1)) { _ in
             let memory = SystemMemory.current()
+            let swapRate = swapRateText()
+            let alarm = HeaderMetric.hiddenAlarm(
+                cluster: manager.cachedClusterHealth?.level,
+                swap: memory.swapUsedBytes > 0
+                    ? SystemMemory.swapSeverity(swapUsedBytes: memory.swapUsedBytes, totalRAMBytes: memory.totalBytes)
+                    : nil,
+                pressure: manager.cachedHostSample?.pressure,
+                swapRateActive: !swapRate.isEmpty,
+                battery: energy.battery)
             VStack(alignment: .leading, spacing: 7) {
                 HStack {
                     Text(L10n.memory).foregroundStyle(.secondary)
@@ -135,65 +148,21 @@ struct PopoverView: View {
                 .frame(height: 4)
 
                 LazyVGrid(columns: Self.metricColumns, alignment: .leading, spacing: 5) {
-                    let health = manager.cachedClusterHealth
-                    metricCell(.cluster,
-                               health.map { L10n.clusterHealthValue($0.level) } ?? "",
-                               color: health.map { clusterColor($0.level) } ?? Self.placeholderColor)
-
-                    let hasSwap = memory.swapUsedBytes > 0
-                    let swapColor: Color = switch SystemMemory.swapSeverity(
-                        swapUsedBytes: memory.swapUsedBytes, totalRAMBytes: memory.totalBytes) {
-                    case .normal: .secondary
-                    case .elevated: .orange
-                    case .high: .red
+                    ForEach(HeaderMetric.pinned, id: \.self) { metric in
+                        metricCell(metric, memory: memory, swapRate: swapRate)
                     }
-                    metricCell(.swap,
-                               hasSwap ? SystemMemory.formatGiB(memory.swapUsedBytes) : "",
-                               color: hasSwap ? swapColor : Self.placeholderColor)
+                    metricsToggle(alarm: alarm)
+                }
 
-                    let vm = manager.vmMemorySample()
-                    metricCell(.vmColima,
-                               vm?.format() ?? "",
-                               color: vm.map { pressureColor($0.fraction) } ?? Self.placeholderColor)
-
-                    // minikube memory from inside the VM: 1 s sampler during a run, 15 s refresh otherwise.
-                    let mk = manager.minikubeSample()
-                    metricCell(.vmMinikube,
-                               mk.map { $0.format() + ($0.rustcCount > 0 ? " · rustc \($0.rustcCount)" : "") } ?? "",
-                               color: mk.map { pressureColor($0.fraction) } ?? Self.placeholderColor)
-
-                    let host = manager.cachedHostSample
-                    metricCell(.pressure,
-                               host.map { L10n.pressureValue($0.pressure) } ?? "",
-                               color: host.map { pressureLevelColor($0.pressure) } ?? Self.placeholderColor)
-
-                    let disk = manager.cachedVMDisk
-                    metricCell(.diskVM,
-                               disk.map { $0.format() } ?? "",
-                               color: disk.map { pressureColor($0.fraction) } ?? Self.placeholderColor)
-
-                    // Live swap rate (↑ out to disk, ↓ in from disk): distinguishes "full but stable"
-                    // from "actively thrashing". Gate at ~0.1 MB/s so sub-rounding noise doesn't show.
-                    let outRate = manager.cachedSwapOutRatePages ?? 0
-                    let inRate = manager.cachedSwapInRatePages ?? 0
-                    let gate = 100_000.0
-                    let outActive = outRate * Double(hostPageSize) >= gate
-                    let inActive = inRate * Double(hostPageSize) >= gate
-                    let swapRateText = [
-                        outActive ? "↑" + HostMetricsSample.formatRate(pagesPerSec: outRate, pageSize: hostPageSize) : nil,
-                        inActive ? "↓" + HostMetricsSample.formatRate(pagesPerSec: inRate, pageSize: hostPageSize) : nil,
-                    ].compactMap { $0 }.joined(separator: " ")
-                    metricCell(.swapRate,
-                               swapRateText.isEmpty ? "" : swapRateText,
-                               color: swapRateText.isEmpty ? Self.placeholderColor : .orange)
-
-                    // 1-minute load average, coloured by load-per-core (thrashing during builds).
-                    var loads = [Double](repeating: 0, count: 3)
-                    let gotLoad = getloadavg(&loads, 3) >= 1
-                    let cores = Double(max(1, ProcessInfo.processInfo.activeProcessorCount))
-                    metricCell(.cpuLoad,
-                               gotLoad ? String(format: "%.2f", loads[0]) : "",
-                               color: gotLoad ? pressureColor(loads[0] / cores) : Self.placeholderColor)
+                if !metricsCollapsed {
+                    LazyVGrid(columns: Self.metricColumns, alignment: .leading, spacing: 5) {
+                        // No battery (a desktop Mac, or the setting is off) — no cell at all.
+                        ForEach(HeaderMetric.hidden.filter { $0 != .battery || energy.battery != nil },
+                                id: \.self) { metric in
+                            metricCell(metric, memory: memory, swapRate: swapRate)
+                        }
+                    }
+                    energyConsumers
                 }
 
                 if let explainedMetric {
@@ -222,6 +191,75 @@ struct PopoverView: View {
         }
     }
 
+    /// Live swap rate (↑ out to disk, ↓ in from disk): distinguishes "full but stable" from
+    /// "actively thrashing". Gate at ~0.1 MB/s so sub-rounding noise doesn't show. Empty when idle.
+    private func swapRateText() -> String {
+        let outRate = manager.cachedSwapOutRatePages ?? 0
+        let inRate = manager.cachedSwapInRatePages ?? 0
+        let gate = 100_000.0
+        let outActive = outRate * Double(hostPageSize) >= gate
+        let inActive = inRate * Double(hostPageSize) >= gate
+        return [
+            outActive ? "↑" + HostMetricsSample.formatRate(pagesPerSec: outRate, pageSize: hostPageSize) : nil,
+            inActive ? "↓" + HostMetricsSample.formatRate(pagesPerSec: inRate, pageSize: hostPageSize) : nil,
+        ].compactMap { $0 }.joined(separator: " ")
+    }
+
+    /// Value and colour of one grid cell; a blank value in the placeholder colour means no data.
+    private func cellValue(_ metric: HeaderMetric, memory: SystemMemory, swapRate: String) -> (String, Color) {
+        switch metric {
+        case .memory:
+            return ("", Self.placeholderColor)   // drawn as the bar above the grid
+        case .cluster:
+            let health = manager.cachedClusterHealth
+            return (health.map { L10n.clusterHealthValue($0.level) } ?? "",
+                    health.map { clusterColor($0.level) } ?? Self.placeholderColor)
+        case .swap:
+            guard memory.swapUsedBytes > 0 else { return ("", Self.placeholderColor) }
+            let color: Color = switch SystemMemory.swapSeverity(
+                swapUsedBytes: memory.swapUsedBytes, totalRAMBytes: memory.totalBytes) {
+            case .normal: .secondary
+            case .elevated: .orange
+            case .high: .red
+            }
+            return (SystemMemory.formatGiB(memory.swapUsedBytes), color)
+        case .vmColima:
+            let vm = manager.vmMemorySample()
+            return (vm?.format() ?? "", vm.map { pressureColor($0.fraction) } ?? Self.placeholderColor)
+        case .vmMinikube:
+            // minikube memory from inside the VM: 1 s sampler during a run, 15 s refresh otherwise.
+            let mk = manager.minikubeSample()
+            return (mk.map { $0.format() + ($0.rustcCount > 0 ? " · rustc \($0.rustcCount)" : "") } ?? "",
+                    mk.map { pressureColor($0.fraction) } ?? Self.placeholderColor)
+        case .pressure:
+            let host = manager.cachedHostSample
+            return (host.map { L10n.pressureValue($0.pressure) } ?? "",
+                    host.map { pressureLevelColor($0.pressure) } ?? Self.placeholderColor)
+        case .diskVM:
+            let disk = manager.cachedVMDisk
+            return (disk.map { $0.format() } ?? "", disk.map { pressureColor($0.fraction) } ?? Self.placeholderColor)
+        case .swapRate:
+            return swapRate.isEmpty ? ("", Self.placeholderColor) : (swapRate, .orange)
+        case .cpuLoad:
+            // 1-minute load average, coloured by load-per-core (thrashing during builds).
+            var loads = [Double](repeating: 0, count: 3)
+            guard getloadavg(&loads, 3) >= 1 else { return ("", Self.placeholderColor) }
+            let cores = Double(max(1, ProcessInfo.processInfo.activeProcessorCount))
+            return (String(format: "%.2f", loads[0]), pressureColor(loads[0] / cores))
+        case .battery:
+            guard let battery = energy.battery else { return ("", Self.placeholderColor) }
+            let color: Color = !battery.onBattery ? .secondary
+                : battery.percent <= HeaderMetric.lowBatteryCritical ? .red
+                : battery.percent <= HeaderMetric.lowBatteryWarning ? .orange : .green
+            return (battery.format(), color)
+        }
+    }
+
+    private func metricCell(_ metric: HeaderMetric, memory: SystemMemory, swapRate: String) -> some View {
+        let (value, color) = cellValue(metric, memory: memory, swapRate: swapRate)
+        return metricCell(metric, value, color: color)
+    }
+
     /// One label · value metric cell for the header grid; the tooltip explains the figure.
     private func metricCell(_ metric: HeaderMetric, _ value: String, color: Color) -> some View {
         HStack(spacing: 4) {
@@ -233,6 +271,73 @@ struct PopoverView: View {
         .contentShape(Rectangle())
         .onTapGesture { explainedMetric = explainedMetric == metric ? nil : metric }
         .help(metric.help)
+    }
+
+    /// "More ▸" in the last pinned cell. Collapsed, it takes the colour of the worst hidden metric,
+    /// so folding them away never hides trouble.
+    private func metricsToggle(alarm: HeaderMetric.Alarm) -> some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.18)) {
+                metricsCollapsed.toggle()
+                if metricsCollapsed, let explainedMetric, HeaderMetric.hidden.contains(explainedMetric) {
+                    self.explainedMetric = nil
+                }
+            }
+        } label: {
+            HStack(spacing: 3) {
+                Spacer(minLength: 4)
+                Text(L10n.moreMetrics)
+                Image(systemName: metricsCollapsed ? "chevron.right" : "chevron.down")
+                    .font(.system(size: 8, weight: .semibold))
+            }
+            .font(.system(size: 10))
+            .foregroundStyle(metricsCollapsed ? alarmColor(alarm) : .secondary)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func alarmColor(_ alarm: HeaderMetric.Alarm) -> Color {
+        switch alarm {
+        case .none: return .secondary
+        case .warning: return .orange
+        case .critical: return .red
+        }
+    }
+
+    /// Who used the battery: live while discharging, frozen as "last discharge" once back on AC.
+    @ViewBuilder
+    private var energyConsumers: some View {
+        if energy.battery != nil, let tally = energy.tally {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(energyTitle(tally)).foregroundStyle(.secondary)
+                if energy.consumers.isEmpty {
+                    Text(L10n.energyNoData).foregroundStyle(Self.placeholderColor)
+                }
+                ForEach(energy.consumers, id: \.name) { consumer in
+                    HStack(spacing: 6) {
+                        Text(consumer.name).lineLimit(1).truncationMode(.middle)
+                        Spacer(minLength: 4)
+                        Text("\(Int((consumer.share * 100).rounded()))%")
+                            .monospacedDigit().foregroundStyle(.secondary)
+                        Text(L10n.watts(consumer.averageWatts))
+                            .monospacedDigit()
+                            .frame(minWidth: 46, alignment: .trailing)
+                    }
+                    .padding(.leading, 8)
+                }
+            }
+            .font(.system(size: 10))
+            .padding(.top, 2)
+        }
+    }
+
+    private func energyTitle(_ tally: EnergyTally) -> String {
+        let since = tally.since.formatted(date: .omitted, time: .shortened)
+        if !energy.isDischarging {
+            return L10n.energyLastDischarge(since, tally.lastUpdate.formatted(date: .omitted, time: .shortened))
+        }
+        return tally.missedUnplug ? L10n.energySinceObserved(since) : L10n.energySince(since)
     }
 
     private func pressureLevelColor(_ level: MemoryPressureLevel) -> Color {

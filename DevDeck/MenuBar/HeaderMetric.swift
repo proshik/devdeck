@@ -1,9 +1,9 @@
 import Foundation
 
-/// The popover header's metrics, in display order. One place for their names and the one-line
-/// explanations shown as tooltips in the popover and as a reference list in Settings.
+/// The popover header's metrics. One place for their names and the one-line explanations shown
+/// as tooltips in the popover and as a reference list in Settings.
 enum HeaderMetric: CaseIterable {
-    case memory, swap, cluster, vmColima, vmMinikube, pressure, diskVM, swapRate, cpuLoad
+    case memory, swap, cluster, vmColima, vmMinikube, pressure, diskVM, swapRate, cpuLoad, battery
 
     var title: String {
         switch self {
@@ -16,8 +16,48 @@ enum HeaderMetric: CaseIterable {
         case .diskVM: return L10n.diskVM
         case .swapRate: return L10n.swapRate
         case .cpuLoad: return L10n.cpuLoad
+        case .battery: return L10n.battery
         }
     }
 
     var help: String { L10n.metricHelp(self) }
+
+    /// Grid cells always on screen, in order (the memory bar sits above the grid).
+    static let pinned: [HeaderMetric] = [.vmColima, .diskVM, .cpuLoad]
+    /// Grid cells behind the "More" disclosure, in order.
+    static let hidden: [HeaderMetric] = [.cluster, .swap, .vmMinikube, .pressure, .swapRate, .battery]
+
+    /// How loudly the collapsed "More" toggle should ask to be opened.
+    enum Alarm: Comparable { case none, warning, critical }
+
+    /// The worst state among the hidden metrics; nil inputs mean "no data" and never alarm.
+    static func hiddenAlarm(cluster: ClusterHealthLevel?, swap: SwapSeverity?,
+                            pressure: MemoryPressureLevel?, swapRateActive: Bool,
+                            battery: BatteryState?) -> Alarm {
+        var alarms: [Alarm] = []
+        switch cluster {
+        case .degraded: alarms.append(.warning)
+        case .down: alarms.append(.critical)
+        default: break
+        }
+        switch swap {
+        case .elevated: alarms.append(.warning)
+        case .high: alarms.append(.critical)
+        default: break
+        }
+        switch pressure {
+        case .warning: alarms.append(.warning)
+        case .critical: alarms.append(.critical)
+        default: break
+        }
+        if swapRateActive { alarms.append(.warning) }
+        if let battery, battery.onBattery {
+            if battery.percent <= lowBatteryCritical { alarms.append(.critical) }
+            else if battery.percent <= lowBatteryWarning { alarms.append(.warning) }
+        }
+        return alarms.max() ?? .none
+    }
+
+    static let lowBatteryWarning = 20
+    static let lowBatteryCritical = 10
 }
