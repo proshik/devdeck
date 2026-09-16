@@ -179,6 +179,33 @@ enum L10n {
         }
     }
 
+    // MARK: - Battery
+
+    static var battery: String { t("Battery", "Батарея") }
+    static var moreMetrics: String { t("More", "Ещё") }
+    static var batteryCharging: String { t("charging", "заряжается") }
+    static var batteryOnAC: String { t("on AC", "от сети") }
+    static func batteryTimeLeft(hours: Int, minutes: Int) -> String {
+        hours > 0 ? t("\(hours) h \(minutes) min", "\(hours) ч \(minutes) мин") : t("\(minutes) min", "\(minutes) мин")
+    }
+    static func energySince(_ time: String) -> String {
+        t("On battery since \(time)", "Расход от батареи с \(time)")
+    }
+    static func energySinceObserved(_ time: String) -> String {
+        t("Since \(time) (watching started already on battery)", "С \(time) (наблюдение началось уже от батареи)")
+    }
+    static func energyLastDischarge(_ from: String, _ to: String) -> String {
+        t("Last discharge \(from)–\(to)", "Последняя разрядка \(from)–\(to)")
+    }
+    static var energyNoData: String { t("No data yet", "Пока нет данных") }
+    static func watts(_ value: Double) -> String {
+        t(String(format: "%.1f W", value), String(format: "%.1f Вт", value))
+    }
+    static var batteryMonitoringToggle: String {
+        t("Battery: charge and top energy consumers on battery",
+          "Батарея: заряд и кто больше всего тратит энергию от батареи")
+    }
+
     // MARK: - Cleanup (VM disk & memory)
 
     static var cleanup: String { t("Cleanup", "Очистка") }

@@ -233,6 +233,13 @@ final class CommandStore {
         persist(updated)
     }
 
+    func setBatteryMonitoring(_ on: Bool) {
+        guard config.settings.batteryMonitoring != on else { return }
+        var updated = config
+        updated.settings.batteryMonitoring = on
+        persist(updated)
+    }
+
     func setGlobalHotkey(_ on: Bool) {
         guard config.settings.globalHotkeyEnabled != on else { return }
         var updated = config

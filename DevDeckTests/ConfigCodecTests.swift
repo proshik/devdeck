@@ -116,14 +116,17 @@ final class ConfigCodecTests: XCTestCase {
         let json = Data(#"{"commands":[],"chains":[]}"#.utf8)
         XCTAssertTrue(try ConfigCodec.decode(json).settings.vmMemoryMonitoring)
         XCTAssertTrue(try ConfigCodec.decode(json).settings.minikubeMemoryMonitoring)
+        XCTAssertTrue(try ConfigCodec.decode(json).settings.batteryMonitoring)
 
         // explicit false round-trips correctly
         var cfg = Config.empty
         cfg.settings.vmMemoryMonitoring = false
         cfg.settings.minikubeMemoryMonitoring = false
+        cfg.settings.batteryMonitoring = false
         let data = try ConfigCodec.encode(cfg)
         XCTAssertFalse(try ConfigCodec.decode(data).settings.vmMemoryMonitoring)
         XCTAssertFalse(try ConfigCodec.decode(data).settings.minikubeMemoryMonitoring)
+        XCTAssertFalse(try ConfigCodec.decode(data).settings.batteryMonitoring)
     }
 
     func testCommandWatchdogAndPortRoundTripAndResilience() throws {
