@@ -8,6 +8,8 @@ struct Settings: Codable, Equatable {
     var hostMemoryMonitoring: Bool
     var globalHotkeyEnabled: Bool
     var clusterHealthMonitoring: Bool
+    /// Battery charge and the energy each process used since the Mac went on battery.
+    var batteryMonitoring: Bool
     var autoUpdateEnabled: Bool
     /// Restore the Claude Code tabs of a previous boot when Ghostty starts.
     var claudeTabsRestore: Bool
@@ -47,12 +49,13 @@ struct Settings: Codable, Equatable {
          activeProxyHost: String? = nil, activeProxyPort: Int? = nil,
          activeProxyAuthRequired: Bool = false, activeProxyLANPrefix: String? = nil,
          activeRemoteProxyID: UUID? = nil, claudeTabsRestore: Bool = false,
-         claudeTabsCaptureSeconds: Int = 15) {
+         claudeTabsCaptureSeconds: Int = 15, batteryMonitoring: Bool = true) {
         self.vmMemoryMonitoring = vmMemoryMonitoring
         self.minikubeMemoryMonitoring = minikubeMemoryMonitoring
         self.hostMemoryMonitoring = hostMemoryMonitoring
         self.globalHotkeyEnabled = globalHotkeyEnabled
         self.clusterHealthMonitoring = clusterHealthMonitoring
+        self.batteryMonitoring = batteryMonitoring
         self.autoUpdateEnabled = autoUpdateEnabled
         self.proxyShareEnabled = proxyShareEnabled
         self.proxyDiscoveryEnabled = proxyDiscoveryEnabled
@@ -72,7 +75,7 @@ struct Settings: Codable, Equatable {
              clusterHealthMonitoring, autoUpdateEnabled, proxyShareEnabled, proxyDiscoveryEnabled,
              activeProxyName, activeProxyUsername, activeProxyHost, activeProxyPort,
              activeProxyAuthRequired, activeProxyLANPrefix, activeRemoteProxyID, claudeTabsRestore,
-             claudeTabsCaptureSeconds
+             claudeTabsCaptureSeconds, batteryMonitoring
     }
 
     init(from decoder: Decoder) throws {
@@ -82,6 +85,7 @@ struct Settings: Codable, Equatable {
         hostMemoryMonitoring = try c.decodeIfPresent(Bool.self, forKey: .hostMemoryMonitoring) ?? true
         globalHotkeyEnabled = try c.decodeIfPresent(Bool.self, forKey: .globalHotkeyEnabled) ?? false
         clusterHealthMonitoring = try c.decodeIfPresent(Bool.self, forKey: .clusterHealthMonitoring) ?? true
+        batteryMonitoring = try c.decodeIfPresent(Bool.self, forKey: .batteryMonitoring) ?? true
         autoUpdateEnabled = try c.decodeIfPresent(Bool.self, forKey: .autoUpdateEnabled) ?? true
         proxyShareEnabled = try c.decodeIfPresent(Bool.self, forKey: .proxyShareEnabled) ?? false
         proxyDiscoveryEnabled = try c.decodeIfPresent(Bool.self, forKey: .proxyDiscoveryEnabled) ?? false

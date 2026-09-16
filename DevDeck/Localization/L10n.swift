@@ -176,7 +176,37 @@ enum L10n {
         case .cpuLoad:
             return t("1-minute load average; coloured relative to this Mac's core count (1.0 per core = every core busy).",
                      "Load average за минуту; цвет — относительно числа ядер Mac (1.0 на ядро = все ядра заняты).")
+        case .battery:
+            return t("Charge and macOS' time-left estimate. On battery, the list below shows which processes used the most energy since the unplug (Apple Silicon per-process energy counters). Root processes such as WindowServer are not visible; builds inside colima count towards “VM colima”; very short processes between the once-a-minute samples may be missed.",
+                     "Заряд и оценка оставшегося времени от macOS. От батареи список ниже показывает, какие процессы потратили больше всего энергии с момента отключения от сети (счётчики энергии процессов Apple Silicon). Процессы root вроде WindowServer не видны; сборки внутри colima учитываются в «VM colima»; очень короткие процессы между ежеминутными замерами могут не попасть.")
         }
+    }
+
+    // MARK: - Battery
+
+    static var battery: String { t("Battery", "Батарея") }
+    static var moreMetrics: String { t("More", "Ещё") }
+    static var batteryCharging: String { t("charging", "заряжается") }
+    static var batteryOnAC: String { t("on AC", "от сети") }
+    static func batteryTimeLeft(hours: Int, minutes: Int) -> String {
+        hours > 0 ? t("\(hours) h \(minutes) min", "\(hours) ч \(minutes) мин") : t("\(minutes) min", "\(minutes) мин")
+    }
+    static func energySince(_ time: String) -> String {
+        t("On battery since \(time)", "Расход от батареи с \(time)")
+    }
+    static func energySinceObserved(_ time: String) -> String {
+        t("Since \(time) (watching started already on battery)", "С \(time) (наблюдение началось уже от батареи)")
+    }
+    static func energyLastDischarge(_ from: String, _ to: String) -> String {
+        t("Last discharge \(from)–\(to)", "Последняя разрядка \(from)–\(to)")
+    }
+    static var energyNoData: String { t("No data yet", "Пока нет данных") }
+    static func watts(_ value: Double) -> String {
+        t(String(format: "%.1f W", value), String(format: "%.1f Вт", value))
+    }
+    static var batteryMonitoringToggle: String {
+        t("Battery: charge and top energy consumers on battery",
+          "Батарея: заряд и кто больше всего тратит энергию от батареи")
     }
 
     // MARK: - Cleanup (VM disk & memory)

@@ -59,6 +59,10 @@ struct SettingsView: View {
                     get: { store.config.settings.clusterHealthMonitoring },
                     set: { store.setClusterHealth($0) }
                 ))
+                Toggle(L10n.batteryMonitoringToggle, isOn: Binding(
+                    get: { store.config.settings.batteryMonitoring },
+                    set: { store.setBatteryMonitoring($0) }
+                ))
                 // The same texts as the popover tooltips — findable without knowing to hover.
                 DisclosureGroup(L10n.metricsHelpTitle) {
                     ForEach(HeaderMetric.allCases, id: \.self) { metric in

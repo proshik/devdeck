@@ -21,7 +21,8 @@ final class MenuBarController: NSObject {
     }()
 
     init(store: CommandStore, manager: ProcessManager, appModel: AppModel,
-         updateController: UpdateController, proxyManager: ProxyManager, claudeTabs: ClaudeTabsModel) {
+         updateController: UpdateController, proxyManager: ProxyManager, claudeTabs: ClaudeTabsModel,
+         energy: EnergyModel) {
         self.manager = manager
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         popover = NSPopover()
@@ -36,6 +37,7 @@ final class MenuBarController: NSObject {
                 .environment(updateController)
                 .environment(proxyManager)
                 .environment(claudeTabs)
+                .environment(energy)
         )
 
         if let button = statusItem.button {

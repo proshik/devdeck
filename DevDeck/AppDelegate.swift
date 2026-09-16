@@ -12,6 +12,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let proxyManager = ProxyManager()
     let cleanupModel: CleanupModel
     let claudeTabs = ClaudeTabsModel()
+    let energy = EnergyModel()
 
     private var menuBar: MenuBarController?
 
@@ -51,7 +52,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         updateController.configure(autoUpdateEnabled: store.config.settings.autoUpdateEnabled)
         menuBar = MenuBarController(store: store, manager: manager, appModel: appModel,
                                     updateController: updateController, proxyManager: proxyManager,
-                                    claudeTabs: claudeTabs)
+                                    claudeTabs: claudeTabs, energy: energy)
+        energy.isEnabled = { [weak store] in store?.config.settings.batteryMonitoring ?? false }
+        energy.start()
 
         // Global hotkey (⌃⌥D) toggles the popover; enabled per the persisted setting.
         HotKeyManager.shared.onTrigger = { [weak menuBar] in menuBar?.toggle() }
