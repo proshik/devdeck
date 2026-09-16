@@ -176,6 +176,9 @@ enum L10n {
         case .cpuLoad:
             return t("1-minute load average; coloured relative to this Mac's core count (1.0 per core = every core busy).",
                      "Load average за минуту; цвет — относительно числа ядер Mac (1.0 на ядро = все ядра заняты).")
+        case .battery:
+            return t("Charge and macOS' time-left estimate. On battery, the list below shows which processes used the most energy since the unplug (Apple Silicon per-process energy counters). Root processes such as WindowServer are not visible; builds inside colima count towards “VM colima”; very short processes between the once-a-minute samples may be missed.",
+                     "Заряд и оценка оставшегося времени от macOS. От батареи список ниже показывает, какие процессы потратили больше всего энергии с момента отключения от сети (счётчики энергии процессов Apple Silicon). Процессы root вроде WindowServer не видны; сборки внутри colima учитываются в «VM colima»; очень короткие процессы между ежеминутными замерами могут не попасть.")
         }
     }
 
