@@ -811,6 +811,15 @@ enum L10n {
         t("No sessions match your search.", "По запросу ничего не найдено.")
     }
 
+    // MARK: - Tray
+
+    static func trayAccessibility(engineName: String?, running: Bool) -> String {
+        guard let engineName else { return "DevDeck" }
+        return running
+            ? t("DevDeck — \(engineName) is running", "DevDeck — \(engineName) запущена")
+            : t("DevDeck — \(engineName) is stopped", "DevDeck — \(engineName) остановлена")
+    }
+
     // MARK: - Duplicate
 
     static var duplicate: String { t("Duplicate", "Дублировать") }

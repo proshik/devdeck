@@ -54,4 +54,9 @@ enum TrayIcon {
         }
     }
 
+    /// Colour of the bottom-left engine dot; nil (no dot) while the engine is stopped or unknown.
+    static func engineBadgeColor(running: Bool) -> NSColor? {
+        running ? .systemGreen : nil
+    }
+
 }

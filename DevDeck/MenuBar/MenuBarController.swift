@@ -7,6 +7,7 @@ final class MenuBarController: NSObject {
     private let statusItem: NSStatusItem
     private let popover: NSPopover
     private let manager: ProcessManager
+    private let engine: EngineModel
     private var iconTimer: Timer?
 
     /// Colored pressure dot drawn over the (always-template) tray glyph. Kept as a separate
@@ -20,10 +21,21 @@ final class MenuBarController: NSObject {
         return view
     }()
 
+    /// Green dot bottom-left while the container engine runs — the counterpart of the pressure dot.
+    private let engineBadgeView: NSView = {
+        let dot: CGFloat = 6
+        let view = NSView(frame: NSRect(x: 0, y: 0, width: dot, height: dot))
+        view.wantsLayer = true
+        view.layer?.cornerRadius = dot / 2
+        view.isHidden = true
+        return view
+    }()
+
     init(store: CommandStore, manager: ProcessManager, appModel: AppModel,
          updateController: UpdateController, proxyManager: ProxyManager, claudeTabs: ClaudeTabsModel,
-         energy: EnergyModel) {
+         energy: EnergyModel, engine: EngineModel) {
         self.manager = manager
+        self.engine = engine
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         popover = NSPopover()
         super.init()
@@ -38,6 +50,7 @@ final class MenuBarController: NSObject {
                 .environment(proxyManager)
                 .environment(claudeTabs)
                 .environment(energy)
+                .environment(engine)
         )
 
         if let button = statusItem.button {
@@ -60,6 +73,16 @@ final class MenuBarController: NSObject {
                 badgeView.trailingAnchor.constraint(equalTo: button.centerXAnchor, constant: half),
                 badgeView.topAnchor.constraint(equalTo: button.centerYAnchor, constant: -half),
             ])
+
+            // Engine dot: bottom-left, the counterpart of the pressure dot top-right.
+            engineBadgeView.translatesAutoresizingMaskIntoConstraints = false
+            button.addSubview(engineBadgeView)
+            NSLayoutConstraint.activate([
+                engineBadgeView.widthAnchor.constraint(equalToConstant: d),
+                engineBadgeView.heightAnchor.constraint(equalToConstant: d),
+                engineBadgeView.leadingAnchor.constraint(equalTo: button.centerXAnchor, constant: -half),
+                engineBadgeView.bottomAnchor.constraint(equalTo: button.centerYAnchor, constant: half),
+            ])
         }
 
         // The pressure badge is a system indicator: read the level directly (cheap sysctl) so it
@@ -74,6 +97,16 @@ final class MenuBarController: NSObject {
                 } else {
                     self.badgeView.isHidden = true
                 }
+
+                self.engine.refresh()
+                if let color = TrayIcon.engineBadgeColor(running: self.engine.isActiveRunning) {
+                    self.engineBadgeView.layer?.backgroundColor = color.cgColor
+                    self.engineBadgeView.isHidden = false
+                } else {
+                    self.engineBadgeView.isHidden = true
+                }
+                self.statusItem.button?.image?.accessibilityDescription =
+                    L10n.trayAccessibility(engineName: self.engine.activeName, running: self.engine.isActiveRunning)
             }
         }
     }

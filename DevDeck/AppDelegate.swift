@@ -13,6 +13,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let cleanupModel: CleanupModel
     let claudeTabs = ClaudeTabsModel()
     let energy = EnergyModel()
+    let engine = EngineModel()
 
     private var menuBar: MenuBarController?
 
@@ -28,6 +29,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         notifier.requestAuthorization()   // native notifications for daemons/command errors
         store.start()
         DiagnosticLog.shared.log("DevDeck launch: \(store.config.commands.count) commands, \(store.config.chains.count) chains")
+        // The engine is known before the first probe asks for it; the tray timer keeps it fresh.
+        engine.preference = { [weak store] in store?.config.settings.containerEngine ?? .auto }
+        engine.refresh()
         // Adopt daemons that survived a previous session (crash / "keep in background") → don't fight over the port.
         manager.adoptSurvivingDaemons(commands: store.commandsByID)
         // Read the memory-monitoring flags live from the config — no copy when they change.
@@ -52,7 +56,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         updateController.configure(autoUpdateEnabled: store.config.settings.autoUpdateEnabled)
         menuBar = MenuBarController(store: store, manager: manager, appModel: appModel,
                                     updateController: updateController, proxyManager: proxyManager,
-                                    claudeTabs: claudeTabs, energy: energy)
+                                    claudeTabs: claudeTabs, energy: energy, engine: engine)
         energy.isEnabled = { [weak store] in store?.config.settings.batteryMonitoring ?? false }
         energy.start()
 
