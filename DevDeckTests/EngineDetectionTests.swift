@@ -84,4 +84,73 @@ final class EngineDetectionTests: XCTestCase {
         XCTAssertEqual(engine.kind, .dockerDesktop)
         XCTAssertEqual(engine.displayName, "Docker Desktop")
     }
+
+    // MARK: selector
+
+    private func select(_ preference: EnginePreference, _ engines: FakeEngine...) -> EngineChoice? {
+        EngineSelector.select(preference, from: engines)
+    }
+
+    func testAutoPicksTheRunningEngine() {
+        let choice = select(.auto, FakeEngine(.colima), FakeEngine(.dockerDesktop, running: true))
+        XCTAssertEqual(choice?.engine.kind, .dockerDesktop)
+        XCTAssertEqual(choice?.running, true)
+    }
+
+    func testAutoPrefersColimaWhenBothRun() {
+        let choice = select(.auto, FakeEngine(.colima, running: true), FakeEngine(.dockerDesktop, running: true))
+        XCTAssertEqual(choice?.engine.kind, .colima)
+    }
+
+    func testAutoFallsBackToAnInstalledEngineWhenNothingRuns() {
+        XCTAssertEqual(select(.auto, FakeEngine(.colima), FakeEngine(.dockerDesktop))?.engine.kind, .colima,
+                       "both installed → colima first")
+        let onlyDesktop = select(.auto, FakeEngine(.colima, installed: false), FakeEngine(.dockerDesktop))
+        XCTAssertEqual(onlyDesktop?.engine.kind, .dockerDesktop)
+        XCTAssertEqual(onlyDesktop?.running, false)
+    }
+
+    func testAutoFindsNothingWhenNothingIsInstalled() {
+        XCTAssertNil(select(.auto, FakeEngine(.colima, installed: false), FakeEngine(.dockerDesktop, installed: false)))
+    }
+
+    func testExplicitPreferenceOverridesDetectionEvenWhenNotInstalled() {
+        let choice = select(.dockerDesktop, FakeEngine(.colima, running: true),
+                            FakeEngine(.dockerDesktop, installed: false))
+        XCTAssertEqual(choice?.engine.kind, .dockerDesktop)
+        XCTAssertEqual(choice?.running, false)
+    }
+
+    // MARK: model
+
+    @MainActor
+    func testModelFollowsThePreferenceAndTheRunningState() {
+        let colima = FakeEngine(.colima, running: true)
+        let desktop = FakeEngine(.dockerDesktop)
+        let model = EngineModel(candidates: [colima, desktop])
+        var preference = EnginePreference.auto
+        model.preference = { preference }
+
+        model.refresh()
+        XCTAssertEqual(model.activeKind, .colima)
+        XCTAssertEqual(model.activeName, "colima")
+        XCTAssertTrue(model.isActiveRunning)
+
+        colima.running = false
+        model.refresh()
+        XCTAssertEqual(model.activeKind, .colima, "still installed")
+        XCTAssertFalse(model.isActiveRunning)
+
+        preference = .dockerDesktop
+        model.refresh()
+        XCTAssertEqual(model.activeKind, .dockerDesktop)
+        XCTAssertEqual(model.activeName, "Docker Desktop")
+    }
+
+    @MainActor
+    func testModelStartsEmpty() {
+        let model = EngineModel(candidates: [FakeEngine(.colima, running: true)])
+        XCTAssertNil(model.activeKind, "nothing is known before the first refresh")
+        XCTAssertFalse(model.isActiveRunning)
+    }
 }
