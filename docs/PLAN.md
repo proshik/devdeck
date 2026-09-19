@@ -379,6 +379,29 @@ Design: `docs/superpowers/specs/2026-08-18-remote-proxy-design.md`.
 
 ---
 
+## Container Engine Abstraction — 📝 PLANNED 2026-09-18, not started
+
+DevDeck is hard-wired to colima (`colima ssh`, `colima list`, "VM colima", "Restart colima"). Goal:
+recognise the active engine (colima or Docker Desktop), show a green dot in the tray while it runs,
+and name metrics/buttons after it. Motivation: a tray indicator for colima, and Docker Desktop on
+other machines where half the popover is currently blank.
+
+- **Spec:** `docs/superpowers/specs/2026-09-18-container-engine-design.md` — read the
+  "Уточнения при планировании" section at the end, it supersedes a few details above it.
+- **Plan:** `docs/superpowers/plans/2026-09-18-container-engine.md` — 6 TDD tasks, 0/6 done.
+  Execute with `superpowers:subagent-driven-development` (recommended) or `executing-plans`.
+- **Hard constraint:** engine detection runs every 2 s and must spawn no process (pid file +
+  `kill(pid, 0)` for colima; `NSRunningApplication` + unix-socket `connect()` for Docker Desktop).
+- **Commits:** the plan's commit steps run only if the user allows commits for the session.
+
+This is chunk 1 of 3. Chunk 2 — Docker Desktop probes: disk (`Docker.raw` allocated size +
+`/system/df` over the socket), limits (`docker info`), cleanup (`docker … prune` from the host),
+restart (`docker desktop restart`), and VM memory **on demand only** — a timed `docker run` wakes
+the VM out of Resource Saver. Moves `wrap`/`invocation` into the engine. Chunk 3 — OrbStack, only
+if switching engines.
+
+---
+
 ## Possible Extensions (NOT in MVP)
 
 - [x] ~~Adopting daemons by PID after restart~~ — done (command-string matching, not `state.json`). pre-squash
@@ -389,7 +412,9 @@ Design: `docs/superpowers/specs/2026-08-18-remote-proxy-design.md`.
 
 ## Open Items
 
-Nothing else is planned. What remains is the backlog recorded in the security review above — the
+**Next up:** the Container Engine Abstraction above — planned, not started.
+
+Beyond that, what remains is the backlog recorded in the security review above — the
 endpoint pinning (~30 lines) is the one worth doing first, and the client-side TLS forwarder got
 substantially cheaper now that the remote-proxy bridge already IS a local forwarder on
 `127.0.0.1:PORT` (it would need to speak TLS with a pinned key to the peer instead of SOCKS to a
