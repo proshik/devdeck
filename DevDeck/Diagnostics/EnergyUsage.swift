@@ -118,14 +118,19 @@ struct EnergyTally {
             }
     }
 
+    /// Row name of the Virtualization.framework VM. Rendered as "VM <engine>" by the popover:
+    /// which engine owns the VM process can't be told from the path, the active engine can.
+    static let vmName = "VM"
+
     /// Human name for an executable path.
-    /// - The Virtualization.framework VM process → "VM colima". Its parent is launchd, so the owner
-    ///   can't be told cheaply; on this setup colima is the VM, and any other one is lumped in.
+    /// - The Virtualization.framework VM process → `vmName`. Its parent is launchd, so the owner
+    ///   can't be told cheaply; any engine's VM is lumped into one "VM" row and the popover names
+    ///   it after the active engine.
     /// - Claude Code installs its binary under a version-number name → "Claude Code".
     /// - Anything inside an `.app` bundle → the outermost app's name, so helpers join their app.
     /// - Otherwise the executable's file name.
     static func displayName(path: String) -> String {
-        if path.contains("Virtualization.framework"), path.hasSuffix("VirtualMachine") { return "VM colima" }
+        if path.contains("Virtualization.framework"), path.hasSuffix("VirtualMachine") { return vmName }
         if path.contains("/claude/versions/") { return "Claude Code" }
         let components = path.split(separator: "/")
         if let app = components.first(where: { $0.hasSuffix(".app") }) {

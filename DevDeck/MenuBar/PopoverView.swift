@@ -8,6 +8,7 @@ struct PopoverView: View {
     @Environment(AppModel.self) private var appModel
     @Environment(UpdateController.self) private var updates
     @Environment(EnergyModel.self) private var energy
+    @Environment(EngineModel.self) private var engine
     @Environment(\.openWindow) private var openWindow
 
     // Section collapse state is remembered across popover opens and app restarts.
@@ -148,7 +149,8 @@ struct PopoverView: View {
                 .frame(height: 4)
 
                 LazyVGrid(columns: Self.metricColumns, alignment: .leading, spacing: 5) {
-                    ForEach(HeaderMetric.pinned, id: \.self) { metric in
+                    ForEach(HeaderMetric.pinned.filter { $0.isAvailable(engineKind: engine.activeKind) },
+                            id: \.self) { metric in
                         metricCell(metric, memory: memory, swapRate: swapRate)
                     }
                     metricsToggle(alarm: alarm)
@@ -157,8 +159,9 @@ struct PopoverView: View {
                 if !metricsCollapsed {
                     LazyVGrid(columns: Self.metricColumns, alignment: .leading, spacing: 5) {
                         // No battery (a desktop Mac, or the setting is off) — no cell at all.
-                        ForEach(HeaderMetric.hidden.filter { $0 != .battery || energy.battery != nil },
-                                id: \.self) { metric in
+                        ForEach(HeaderMetric.hidden.filter {
+                                    ($0 != .battery || energy.battery != nil) && $0.isAvailable(engineKind: engine.activeKind)
+                                }, id: \.self) { metric in
                             metricCell(metric, memory: memory, swapRate: swapRate)
                         }
                     }
@@ -166,7 +169,7 @@ struct PopoverView: View {
                 }
 
                 if let explainedMetric {
-                    (Text(explainedMetric.title + ": ").fontWeight(.semibold) + Text(explainedMetric.help))
+                    (Text(explainedMetric.title(engineName: engine.activeName) + ": ").fontWeight(.semibold) + Text(explainedMetric.help))
                         .font(.system(size: 10))
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -223,7 +226,7 @@ struct PopoverView: View {
             case .high: .red
             }
             return (SystemMemory.formatGiB(memory.swapUsedBytes), color)
-        case .vmColima:
+        case .vmEngine:
             let vm = manager.vmMemorySample()
             return (vm?.format() ?? "", vm.map { pressureColor($0.fraction) } ?? Self.placeholderColor)
         case .vmMinikube:
@@ -263,7 +266,7 @@ struct PopoverView: View {
     /// One label · value metric cell for the header grid; the tooltip explains the figure.
     private func metricCell(_ metric: HeaderMetric, _ value: String, color: Color) -> some View {
         HStack(spacing: 4) {
-            Text(metric.title).foregroundStyle(.secondary)
+            Text(metric.title(engineName: engine.activeName)).foregroundStyle(.secondary)
             Spacer(minLength: 4)
             Text(value).monospacedDigit().foregroundStyle(color).lineLimit(1)
         }
@@ -316,7 +319,9 @@ struct PopoverView: View {
                 }
                 ForEach(energy.consumers, id: \.name) { consumer in
                     HStack(spacing: 6) {
-                        Text(consumer.name).lineLimit(1).truncationMode(.middle)
+                        Text(consumer.name == EnergyTally.vmName
+                             ? HeaderMetric.vmEngine.title(engineName: engine.activeName)
+                             : consumer.name).lineLimit(1).truncationMode(.middle)
                         Spacer(minLength: 4)
                         Text("\(Int((consumer.share * 100).rounded()))%")
                             .monospacedDigit().foregroundStyle(.secondary)

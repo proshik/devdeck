@@ -158,7 +158,7 @@ enum L10n {
         case .cluster:
             return t("colima list + minikube status. Healthy — the VM runs and the node is Running; Degraded — the VM is up but minikube is not fully Running; Down — colima is stopped.",
                      "colima list + minikube status. В норме — VM запущена и нода Running; Деградация — VM есть, minikube не полностью Running; Не работает — colima остановлена.")
-        case .vmColima:
+        case .vmEngine:
             return t("Memory really used inside the colima VM (MemTotal − MemAvailable) against its limit; Linux page cache is not counted. Above 90% during a run — a notification.",
                      "Память, реально занятая внутри VM colima (MemTotal − MemAvailable), против её лимита; page cache Linux не считается. Выше 90 % во время прогона — уведомление.")
         case .vmMinikube:
