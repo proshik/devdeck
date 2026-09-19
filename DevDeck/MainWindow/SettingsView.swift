@@ -44,7 +44,15 @@ struct SettingsView: View {
             }
 
             Section(L10n.memoryMonitoringSection) {
-                Toggle(L10n.vmMonitoringToggle, isOn: Binding(
+                Picker(L10n.containerEnginePicker, selection: Binding(
+                    get: { store.config.settings.containerEngine },
+                    set: { store.setContainerEngine($0) }
+                )) {
+                    ForEach(EnginePreference.allCases, id: \.self) { preference in
+                        Text(L10n.containerEngineOption(preference)).tag(preference)
+                    }
+                }
+                Toggle(L10n.vmMonitoringToggle(engineName: engine.activeName), isOn: Binding(
                     get: { store.config.settings.vmMemoryMonitoring },
                     set: { store.setVMMonitoring($0) }
                 ))
@@ -56,7 +64,7 @@ struct SettingsView: View {
                     get: { store.config.settings.hostMemoryMonitoring },
                     set: { store.setHostMonitoring($0) }
                 ))
-                Toggle(L10n.clusterHealthToggle, isOn: Binding(
+                Toggle(L10n.clusterHealthToggle(engineName: engine.activeName), isOn: Binding(
                     get: { store.config.settings.clusterHealthMonitoring },
                     set: { store.setClusterHealth($0) }
                 ))

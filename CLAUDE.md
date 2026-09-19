@@ -84,6 +84,9 @@ devdeck/
 │   ├── MainWindow/      # MainWindowView, editors, LogView, SettingsView, WindowAccessor
 │   ├── Localization/    # LocalizationManager (live EN/RU switch) + L10n catalog
 │   ├── Diagnostics/     # DiagnosticLog, memory/disk/cluster metrics, notifications
+│   ├── Engine/          # ContainerEngine (colima / Docker Desktop): installed/running without
+│   │                    # spawning processes, EngineSelector, EngineModel — tray dot, VM labels,
+│   │                    # gates for the colima-only probes
 │   ├── Cleanup/         # DockerUsage (docker system df + volume listing probe), CleanupCommands (synthetic prune
 │   │                    # commands per daemon), CleanupModel — behind the main window's Cleanup page
 │   ├── ClaudeTabs/      # Snapshots the coding-agent tabs open in Ghostty (Claude Code, opencode)

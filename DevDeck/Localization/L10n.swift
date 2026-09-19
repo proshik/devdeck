@@ -320,8 +320,17 @@ enum L10n {
     // MARK: - Settings
 
     static var memoryMonitoringSection: String { t("Memory monitoring", "Мониторинг памяти") }
-    static var vmMonitoringToggle: String {
-        t("Show VM memory (colima) and per-run peak", "Показывать память VM (colima) и пик за прогон")
+    static func vmMonitoringToggle(engineName: String?) -> String {
+        let name = engineName ?? "VM"
+        return t("Show VM memory (\(name)) and per-run peak", "Показывать память VM (\(name)) и пик за прогон")
+    }
+    static var containerEnginePicker: String { t("Container engine", "Движок контейнеров") }
+    static func containerEngineOption(_ preference: EnginePreference) -> String {
+        switch preference {
+        case .auto: return t("Detect automatically", "Определять автоматически")
+        case .colima: return "colima"
+        case .dockerDesktop: return "Docker Desktop"
+        }
     }
     static var minikubeMonitoringToggle: String {
         t("minikube memory from inside the VM (ssh probe) and OOM detection",
@@ -493,9 +502,10 @@ enum L10n {
     static var swapRate: String { t("Swap rate", "Swap-rate") }
     static var cpuLoad: String { t("CPU load", "Загрузка CPU") }
     static var diskVM: String { t("VM disk", "Диск VM") }
-    static var clusterHealthToggle: String {
-        t("Cluster health (colima + minikube status in the deck)",
-          "Здоровье кластера (статус colima + minikube в деке)")
+    static func clusterHealthToggle(engineName: String?) -> String {
+        let name = engineName ?? "VM"
+        return t("Cluster health (\(name) + minikube status in the deck)",
+                 "Здоровье кластера (статус \(name) + minikube в деке)")
     }
     static var cluster: String { t("Cluster", "Кластер") }
     static func clusterHealthValue(_ level: ClusterHealthLevel) -> String {
