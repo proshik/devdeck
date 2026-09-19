@@ -7,6 +7,7 @@ import SwiftUI
 struct CleanupView: View {
     @Environment(CleanupModel.self) private var model
     @Environment(ProcessManager.self) private var manager
+    @Environment(EngineModel.self) private var engine
 
     @State private var pending: Pending?
 
@@ -26,8 +27,8 @@ struct CleanupView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
                 header
-                ForEach(DockerHost.allCases, id: \.self) { hostBox($0) }
-                memoryBox
+                ForEach(model.visibleHosts, id: \.self) { hostBox($0) }
+                if engine.activeKind == .colima { memoryBox }
                 if let id = model.lastRunID {
                     GroupBox(L10n.cleanupLastRun) {
                         LogView(id: id).frame(height: 220)
@@ -77,7 +78,7 @@ struct CleanupView: View {
                 }
                 .disabled(model.isRefreshing)
             }
-            Text(L10n.cleanupIntro).font(.caption).foregroundStyle(.secondary)
+            Text(L10n.cleanupIntro(engineName: engine.activeName)).font(.caption).foregroundStyle(.secondary)
             if let disk = manager.cachedVMDisk {
                 HStack(spacing: 8) {
                     Text(L10n.diskVM).foregroundStyle(.secondary)
@@ -104,10 +105,10 @@ struct CleanupView: View {
     // MARK: per-daemon box
 
     private func hostBox(_ host: DockerHost) -> some View {
-        GroupBox(L10n.dockerHostTitle(host)) {
+        GroupBox(L10n.dockerHostTitle(host, engineName: engine.activeName)) {
             VStack(alignment: .leading, spacing: 6) {
                 if let usage = model.usage[host] {
-                    if let note = L10n.dockerHostNote(host) {
+                    if let note = L10n.dockerHostNote(host, engineName: engine.activeName) {
                         Text(note).font(.caption).foregroundStyle(.secondary)
                     }
                     ForEach(usageEntries(usage)) { entry in
@@ -201,14 +202,14 @@ struct CleanupView: View {
             VStack(alignment: .leading, spacing: 6) {
                 if let vm = manager.vmMemorySample() {
                     HStack(spacing: 8) {
-                        Text("VM colima").foregroundStyle(.secondary)
+                        Text(HeaderMetric.vmEngine.title(engineName: engine.activeName)).foregroundStyle(.secondary)
                         Text(vm.format()).monospacedDigit().foregroundStyle(pressureColor(vm.fraction))
                     }
                     .font(.callout)
                 }
                 Text(L10n.cleanupMemoryNote).font(.caption).foregroundStyle(.secondary)
                 HStack(spacing: 8) {
-                    Button(L10n.restartColima) { pending = .restart }
+                    Button(L10n.restartEngine(engine.activeName ?? "colima")) { pending = .restart }
                         .disabled(model.isBusy)
                     if model.restartState == .running { ProgressView().controlSize(.small) }
                 }
@@ -223,8 +224,8 @@ struct CleanupView: View {
 
     private var pendingTitle: String {
         switch pending {
-        case .action(let a, let h): return L10n.cleanupConfirmTitle(a, h)
-        case .restart: return L10n.restartColimaConfirmTitle
+        case .action(let a, let h): return L10n.cleanupConfirmTitle(a, h, engineName: engine.activeName)
+        case .restart: return L10n.restartEngineConfirmTitle(engine.activeName ?? "colima")
         case nil: return ""
         }
     }
@@ -232,21 +233,21 @@ struct CleanupView: View {
     private func confirmMessage(_ p: Pending) -> String {
         switch p {
         case .action(let a, _): return L10n.cleanupConfirmMessage(a)
-        case .restart: return L10n.restartColimaConfirmMessage
+        case .restart: return L10n.restartEngineConfirmMessage
         }
     }
 
     private func confirmButton(_ p: Pending) -> String {
         switch p {
         case .action: return L10n.cleanupConfirmButton
-        case .restart: return L10n.restartColimaConfirmButton
+        case .restart: return L10n.restartEngineConfirmButton
         }
     }
 
     private func execute(_ p: Pending) {
         switch p {
         case .action(let a, let h): model.run(a, on: h)
-        case .restart: model.restartColima()
+        case .restart: model.restartEngine()
         }
     }
 

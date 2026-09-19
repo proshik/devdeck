@@ -32,6 +32,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // The engine is known before the first probe asks for it; the tray timer keeps it fresh.
         engine.preference = { [weak store] in store?.config.settings.containerEngine ?? .auto }
         engine.refresh()
+        cleanupModel.engineKind = { [weak engine] in engine?.activeKind }
+        cleanupModel.engineName = { [weak engine] in engine?.activeName }
         // Adopt daemons that survived a previous session (crash / "keep in background") → don't fight over the port.
         manager.adoptSurvivingDaemons(commands: store.commandsByID)
         // Read the memory-monitoring flags live from the config — no copy when they change.
