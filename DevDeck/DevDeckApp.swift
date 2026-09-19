@@ -17,6 +17,7 @@ struct DevDeckApp: App {
                 .environment(appDelegate.proxyManager)
                 .environment(appDelegate.cleanupModel)
                 .environment(appDelegate.claudeTabs)
+                .environment(appDelegate.engine)
         }
         .windowResizability(.contentMinSize)
         .defaultLaunchBehavior(.suppressed)
