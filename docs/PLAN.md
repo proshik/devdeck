@@ -379,20 +379,22 @@ Design: `docs/superpowers/specs/2026-08-18-remote-proxy-design.md`.
 
 ---
 
-## Container Engine Abstraction — 📝 PLANNED 2026-09-18, not started
+## Container Engine Abstraction — ✅ DONE 2026-09-19 (branch `feat/container-engine`)
 
-DevDeck is hard-wired to colima (`colima ssh`, `colima list`, "VM colima", "Restart colima"). Goal:
-recognise the active engine (colima or Docker Desktop), show a green dot in the tray while it runs,
-and name metrics/buttons after it. Motivation: a tray indicator for colima, and Docker Desktop on
-other machines where half the popover is currently blank.
+DevDeck was hard-wired to colima (`colima ssh`, `colima list`, "VM colima", "Restart colima").
+Now it recognises the active engine (colima or Docker Desktop), shows a green dot in the tray while
+it runs, and names metrics/buttons after it. Executed subagent-driven, one task at a time, with an
+independent review on each; 6/6 tasks, full suite green (817 tests).
 
-- **Spec:** `docs/superpowers/specs/2026-09-18-container-engine-design.md` — read the
-  "Уточнения при планировании" section at the end, it supersedes a few details above it.
-- **Plan:** `docs/superpowers/plans/2026-09-18-container-engine.md` — 6 TDD tasks, 0/6 done.
-  Execute with `superpowers:subagent-driven-development` (recommended) or `executing-plans`.
-- **Hard constraint:** engine detection runs every 2 s and must spawn no process (pid file +
-  `kill(pid, 0)` for colima; `NSRunningApplication` + unix-socket `connect()` for Docker Desktop).
-- **Commits:** the plan's commit steps run only if the user allows commits for the session.
+- Engine detection runs every 2 s and spawns **no** process (pid file + `kill(pid, 0)` for colima;
+  `NSRunningApplication` + unix-socket `connect()` for Docker Desktop) — probe pattern, `isRunning()`
+  stays subprocess-free.
+- `ContainerEngine` protocol + two implementations (`DevDeck/Engine/`), `EnginePreference`
+  (`auto` default) in config, `EngineSelector` + `EngineModel`, green tray dot (bottom-left), VM cell
+  named after the engine, colima-only probes gated and their cells hidden under other engines,
+  `DockerHost.engineVM`, cleanup/restart labelled with the engine, engine picker in Settings.
+  Commits `21d038c`(docs) · `df6408c` · `a54fe89` · `f4c0b0d` · `c89e4a9` · `5e79ad4` · `d83d643`.
+- Manual GUI verification on this machine (colima, no Docker Desktop) is still TBD — see below.
 
 This is chunk 1 of 3. Chunk 2 — Docker Desktop probes: disk (`Docker.raw` allocated size +
 `/system/df` over the socket), limits (`docker info`), cleanup (`docker … prune` from the host),
@@ -412,7 +414,11 @@ if switching engines.
 
 ## Open Items
 
-**Next up:** the Container Engine Abstraction above — planned, not started.
+**Next up:** manual GUI verification of the Container Engine Abstraction (chunk 1) on this machine
+(colima, no Docker Desktop): green tray dot follows `colima start/stop`; popover says «VM colima»;
+settings picker «Движок контейнеров» defaults to auto; cleanup shows «colima — docker в VM» +
+restart button; switching the picker to Docker Desktop hides the VM/disk/cluster cells and leaves the
+cleanup page with only minikube. Only after that — a merge request from `feat/container-engine`.
 
 Beyond that, what remains is the backlog recorded in the security review above — the
 endpoint pinning (~30 lines) is the one worth doing first, and the client-side TLS forwarder got
