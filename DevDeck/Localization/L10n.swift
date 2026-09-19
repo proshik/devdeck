@@ -212,13 +212,23 @@ enum L10n {
     // MARK: - Cleanup (VM disk & memory)
 
     static var cleanup: String { t("Cleanup", "Очистка") }
-    static var cleanupIntro: String {
-        t("Where the colima disk goes and what can be freed. Named volumes (databases, module caches) and running containers are never touched.",
-          "Куда уходит диск colima и что можно освободить. Именованные volumes (базы, кэши модулей) и работающие контейнеры не трогаются.")
+    static func cleanupIntro(engineName: String?) -> String {
+        let name = engineName ?? "VM"
+        return t("Where the \(name) disk goes and what can be freed. Named volumes (databases, module caches) and running containers are never touched.",
+                 "Куда уходит диск \(name) и что можно освободить. Именованные volumes (базы, кэши модулей) и работающие контейнеры не трогаются.")
     }
-    static func dockerHostTitle(_ host: DockerHost) -> String {
+    /// How a docker host is named in the UI: the engine's own daemon by the engine's name.
+    static func dockerHostLabel(_ host: DockerHost, engineName: String?) -> String {
         switch host {
-        case .colima: return t("colima — the docker VM", "colima — docker в VM")
+        case .engineVM: return engineName ?? "VM"
+        case .minikube: return "minikube"
+        }
+    }
+    static func dockerHostTitle(_ host: DockerHost, engineName: String?) -> String {
+        switch host {
+        case .engineVM:
+            let name = dockerHostLabel(host, engineName: engineName)
+            return t("\(name) — the docker VM", "\(name) — docker в VM")
         case .minikube: return t("minikube — inside the cluster node", "minikube — внутри ноды кластера")
         }
     }
@@ -242,12 +252,13 @@ enum L10n {
           "из них \(size) — диск ноды minikube, он разобран ниже")
     }
     /// Only minikube has one: its whole docker lives inside a single volume colima already counted.
-    static func dockerHostNote(_ host: DockerHost) -> String? {
+    static func dockerHostNote(_ host: DockerHost, engineName: String?) -> String? {
         switch host {
-        case .colima: return nil
+        case .engineVM: return nil
         case .minikube:
-            return t("All of it sits inside that one minikube volume on the colima disk — freeing anything here frees the colima disk too.",
-                     "Всё это лежит внутри того самого тома minikube на диске colima — освобождая здесь, вы освобождаете и диск colima.")
+            let name = engineName ?? "VM"
+            return t("All of it sits inside that one minikube volume on the \(name) disk — freeing anything here frees the \(name) disk too.",
+                     "Всё это лежит внутри того самого тома minikube на диске \(name) — освобождая здесь, вы освобождаете и диск \(name).")
         }
     }
     static func cleanupFrees(_ size: String) -> String {
@@ -265,9 +276,10 @@ enum L10n {
         case .unusedImages: return t("Unused images", "Неиспользуемые образы")
         }
     }
-    static func cleanupConfirmTitle(_ action: CleanupAction, _ host: DockerHost) -> String {
-        t("Free “\(cleanupActionTitle(action))” in \(host.rawValue)?",
-          "Освободить «\(cleanupActionTitle(action))» в \(host.rawValue)?")
+    static func cleanupConfirmTitle(_ action: CleanupAction, _ host: DockerHost, engineName: String?) -> String {
+        let name = dockerHostLabel(host, engineName: engineName)
+        return t("Free “\(cleanupActionTitle(action))” in \(name)?",
+                 "Освободить «\(cleanupActionTitle(action))» в \(name)?")
     }
     static func cleanupConfirmMessage(_ action: CleanupAction) -> String {
         switch action {
@@ -289,19 +301,20 @@ enum L10n {
         t("The hypervisor keeps every page the guest ever touched — mostly Linux page cache — so its footprint on the Mac only grows until colima restarts. Inside the VM the figure above is what matters; restart only when the Mac itself is under pressure.",
           "Гипервизор держит все страницы, которых гость хоть раз коснулся, — в основном это page cache Linux, — поэтому его след на Mac только растёт до перезапуска colima. Внутри VM важна цифра выше; перезапускайте, только если давит сам Mac.")
     }
-    static var restartColima: String { t("Restart colima", "Перезапустить colima") }
-    static var restartColimaConfirmTitle: String { t("Restart colima?", "Перезапустить colima?") }
-    static var restartColimaConfirmMessage: String {
+    static func restartEngine(_ name: String) -> String { t("Restart \(name)", "Перезапустить \(name)") }
+    static func restartEngineConfirmTitle(_ name: String) -> String { t("Restart \(name)?", "Перезапустить \(name)?") }
+    static var restartEngineConfirmMessage: String {
         t("Every container stops — the minikube node, port-forwards and running builds included. minikube is started again afterwards; the whole thing takes a minute or two.",
           "Остановятся все контейнеры — включая ноду minikube, port-forward’ы и идущие сборки. Потом minikube запустится заново; всё вместе занимает минуту-две.")
     }
-    static var restartColimaConfirmButton: String { t("Restart", "Перезапустить") }
+    static var restartEngineConfirmButton: String { t("Restart", "Перезапустить") }
     static var cleanupLastRun: String { t("Last action", "Последнее действие") }
     static var cleanupHelp: String { t("Cleanup: VM disk & memory", "Очистка: диск и память VM") }
     static var cleanupDiskHint: String { t("VM disk is almost full — free up space…", "Диск VM почти заполнен — освободить…") }
-    static func cleanupCommandName(_ action: CleanupAction, _ host: DockerHost) -> String {
-        t("Cleanup: \(cleanupActionTitle(action).lowercased()) (\(host.rawValue))",
-          "Очистка: \(cleanupActionTitle(action).lowercased()) (\(host.rawValue))")
+    static func cleanupCommandName(_ action: CleanupAction, _ host: DockerHost, engineName: String?) -> String {
+        let name = dockerHostLabel(host, engineName: engineName)
+        return t("Cleanup: \(cleanupActionTitle(action).lowercased()) (\(name))",
+                 "Очистка: \(cleanupActionTitle(action).lowercased()) (\(name))")
     }
 
     // MARK: - Settings

@@ -146,7 +146,7 @@ final class DockerUsageTests: XCTestCase {
     }
 
     func testProbeScriptReachesMinikubeAsASingleArgument() {
-        let colima = LiveDockerUsageProbe.invocation(.colima)
+        let colima = LiveDockerUsageProbe.invocation(.engineVM)
         XCTAssertEqual(colima.binary, "colima")
         XCTAssertEqual(Array(colima.args.prefix(4)), ["ssh", "--", "sh", "-c"])
         let minikube = LiveDockerUsageProbe.invocation(.minikube)

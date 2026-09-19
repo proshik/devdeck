@@ -2,11 +2,13 @@ import Foundation
 
 // MARK: - DockerHost
 
-/// Which docker daemon a figure or a cleanup refers to: the colima VM's own, or the one inside
-/// the minikube node container — where `minikube docker-env` builds and the cluster's images live,
-/// all of it inside the single `minikube` volume on the colima disk.
+/// Which docker daemon a figure or a cleanup refers to: the container engine's own (the VM's
+/// daemon), or the one inside the minikube node container — where `minikube docker-env` builds
+/// and the cluster's images live, all of it inside the single `minikube` volume on the VM's disk.
+///
+/// Order matters: `CleanupCommands.id(_:on:)` derives ids from the position in `allCases`.
 enum DockerHost: String, CaseIterable, Hashable, Sendable {
-    case colima, minikube
+    case engineVM, minikube
 }
 
 // MARK: - DockerUsage
@@ -222,9 +224,10 @@ struct LiveDockerUsageProbe: DockerUsageProbing {
 
     /// colima (lima) shell-escapes each argument → `sh -c <script>` is safe; minikube joins its
     /// arguments verbatim → the script must already be one argument.
+    /// engineVM is reached through colima only for now — Docker Desktop is the next spec's job.
     static func invocation(_ host: DockerHost) -> (binary: String, args: [String]) {
         switch host {
-        case .colima: return ("colima", ["ssh", "--", "sh", "-c", script])
+        case .engineVM: return ("colima", ["ssh", "--", "sh", "-c", script])
         case .minikube: return ("minikube", ["ssh", "--", script])
         }
     }

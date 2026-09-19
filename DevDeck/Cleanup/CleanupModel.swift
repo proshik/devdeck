@@ -16,6 +16,16 @@ final class CleanupModel {
     @ObservationIgnored private let probe: any DockerUsageProbing
     @ObservationIgnored private let manager: ProcessManager
 
+    /// Injected by `AppDelegate`; the defaults keep a bare model (tests) on colima.
+    @ObservationIgnored var engineKind: () -> ContainerEngineKind? = { .colima }
+    @ObservationIgnored var engineName: () -> String? = { "colima" }
+
+    /// The engine's own daemon is reached through `colima ssh` — under any other engine its box
+    /// and its probe are skipped. minikube is reached through `minikube ssh` and always shown.
+    var visibleHosts: [DockerHost] {
+        DockerHost.allCases.filter { $0 != .engineVM || engineKind() == .colima }
+    }
+
     init(manager: ProcessManager, probe: any DockerUsageProbing = LiveDockerUsageProbe()) {
         self.manager = manager
         self.probe = probe
@@ -27,9 +37,10 @@ final class CleanupModel {
         isRefreshing = true
         defer { isRefreshing = false }
         let probe = self.probe
+        let hosts = visibleHosts
         usage = await Task.detached(priority: .utility) {
             var out: [DockerHost: DockerUsage] = [:]
-            for host in DockerHost.allCases {
+            for host in hosts {
                 if let u = probe.sample(host) { out[host] = u }
             }
             return out
@@ -37,11 +48,11 @@ final class CleanupModel {
     }
 
     func run(_ action: CleanupAction, on host: DockerHost) {
-        start(CleanupCommands.command(action, on: host))
+        start(CleanupCommands.command(action, on: host, engineName: engineName()))
     }
 
-    func restartColima() {
-        start(CleanupCommands.restartColima)
+    func restartEngine() {
+        start(CleanupCommands.restartEngine(engineName: engineName() ?? "colima"))
     }
 
     private func start(_ command: Command) {
@@ -54,7 +65,7 @@ final class CleanupModel {
         manager.states[CleanupCommands.id(action, on: host)]
     }
 
-    var restartState: ProcessManager.RunState? { manager.states[CleanupCommands.restartColimaID] }
+    var restartState: ProcessManager.RunState? { manager.states[CleanupCommands.restartEngineID] }
 
     /// Any cleanup or restart in flight — the buttons lock together, they all compete for one disk.
     var isBusy: Bool {
