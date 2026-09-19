@@ -178,4 +178,19 @@ final class ConfigCodecTests: XCTestCase {
         XCTAssertEqual(config.commands.count, 2)
         XCTAssertNotEqual(config.commands[0].id, config.commands[1].id, "id is generated and unique")
     }
+
+    func testContainerEngineDefaultsToAutoAndRoundTrips() throws {
+        let decoded = try JSONDecoder().decode(Settings.self, from: Data("{}".utf8))
+        XCTAssertEqual(decoded.containerEngine, .auto)
+
+        var settings = Settings()
+        settings.containerEngine = .dockerDesktop
+        let data = try JSONEncoder().encode(settings)
+        XCTAssertEqual(try JSONDecoder().decode(Settings.self, from: data).containerEngine, .dockerDesktop)
+    }
+
+    func testUnknownContainerEngineValueFallsBackToAuto() throws {
+        let decoded = try JSONDecoder().decode(Settings.self, from: Data(#"{"containerEngine":"podman"}"#.utf8))
+        XCTAssertEqual(decoded.containerEngine, .auto)
+    }
 }

@@ -261,6 +261,13 @@ final class CommandStore {
         persist(updated)
     }
 
+    func setContainerEngine(_ preference: EnginePreference) {
+        guard config.settings.containerEngine != preference else { return }
+        var updated = config
+        updated.settings.containerEngine = preference
+        persist(updated)
+    }
+
     // MARK: proxy manager
 
     /// Host side: share this machine's proxy on the LAN.

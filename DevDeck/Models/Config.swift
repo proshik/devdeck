@@ -1,5 +1,19 @@
 import Foundation
 
+/// Which container engine DevDeck watches. `auto` picks the running one (see `EngineSelector`).
+enum EnginePreference: String, Codable, CaseIterable, Sendable {
+    case auto, colima, dockerDesktop
+
+    /// nil for `auto`.
+    var kind: ContainerEngineKind? {
+        switch self {
+        case .auto: return nil
+        case .colima: return .colima
+        case .dockerDesktop: return .dockerDesktop
+        }
+    }
+}
+
 /// Application settings stored in config.json under the `settings` key.
 /// Decoding is resilient: missing keys fall back to default values.
 struct Settings: Codable, Equatable {
@@ -40,6 +54,8 @@ struct Settings: Codable, Equatable {
     /// The remote (SSH) proxy chosen as active. Mutually exclusive with `activeProxyName`:
     /// exactly one of the two selection kinds is ever set (`CommandStore` enforces it).
     var activeRemoteProxyID: UUID?
+    /// The container engine to watch; `auto` detects it. A hand-edited unknown value reads as `auto`.
+    var containerEngine: EnginePreference
 
     init(vmMemoryMonitoring: Bool = true, minikubeMemoryMonitoring: Bool = true,
          hostMemoryMonitoring: Bool = true, globalHotkeyEnabled: Bool = false,
@@ -49,7 +65,7 @@ struct Settings: Codable, Equatable {
          activeProxyHost: String? = nil, activeProxyPort: Int? = nil,
          activeProxyAuthRequired: Bool = false, activeProxyLANPrefix: String? = nil,
          activeRemoteProxyID: UUID? = nil, claudeTabsRestore: Bool = false,
-         claudeTabsCaptureSeconds: Int = 15, batteryMonitoring: Bool = true) {
+         claudeTabsCaptureSeconds: Int = 15, batteryMonitoring: Bool = true, containerEngine: EnginePreference = .auto) {
         self.vmMemoryMonitoring = vmMemoryMonitoring
         self.minikubeMemoryMonitoring = minikubeMemoryMonitoring
         self.hostMemoryMonitoring = hostMemoryMonitoring
@@ -68,6 +84,7 @@ struct Settings: Codable, Equatable {
         self.activeRemoteProxyID = activeRemoteProxyID
         self.claudeTabsRestore = claudeTabsRestore
         self.claudeTabsCaptureSeconds = claudeTabsCaptureSeconds
+        self.containerEngine = containerEngine
     }
 
     enum CodingKeys: String, CodingKey {
@@ -75,7 +92,7 @@ struct Settings: Codable, Equatable {
              clusterHealthMonitoring, autoUpdateEnabled, proxyShareEnabled, proxyDiscoveryEnabled,
              activeProxyName, activeProxyUsername, activeProxyHost, activeProxyPort,
              activeProxyAuthRequired, activeProxyLANPrefix, activeRemoteProxyID, claudeTabsRestore,
-             claudeTabsCaptureSeconds, batteryMonitoring
+             claudeTabsCaptureSeconds, batteryMonitoring, containerEngine
     }
 
     init(from decoder: Decoder) throws {
@@ -98,6 +115,8 @@ struct Settings: Codable, Equatable {
         activeRemoteProxyID = try c.decodeIfPresent(UUID.self, forKey: .activeRemoteProxyID)
         claudeTabsRestore = try c.decodeIfPresent(Bool.self, forKey: .claudeTabsRestore) ?? false
         claudeTabsCaptureSeconds = try c.decodeIfPresent(Int.self, forKey: .claudeTabsCaptureSeconds) ?? 15
+        // `try?`: an unknown string (a future engine, a typo) must not fail the whole config.
+        containerEngine = (try? c.decodeIfPresent(EnginePreference.self, forKey: .containerEngine)) ?? .auto
     }
 }
 
