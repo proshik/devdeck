@@ -51,7 +51,7 @@ final class EnergyTallyTests: XCTestCase {
             proc(4, "/bin/tiny", 1),
         ], at: t0.addingTimeInterval(100))
         let top = tally.top(2)
-        XCTAssertEqual(top.map(\.name), ["Google Chrome", "VM colima"])
+        XCTAssertEqual(top.map(\.name), ["Google Chrome", "VM"])
         XCTAssertEqual(top[0].joules, 35, accuracy: 0.001)
         XCTAssertEqual(top[0].share, 35.0 / 66.0, accuracy: 0.001)
     }
@@ -71,7 +71,7 @@ final class EnergyTallyTests: XCTestCase {
     }
 
     func testDisplayNames() {
-        XCTAssertEqual(EnergyTally.displayName(path: vmPath), "VM colima")
+        XCTAssertEqual(EnergyTally.displayName(path: vmPath), "VM")
         XCTAssertEqual(EnergyTally.displayName(path: "/Users/me/.local/share/claude/versions/2.1.273"), "Claude Code")
         XCTAssertEqual(EnergyTally.displayName(path: "/Applications/super.engineering.app/Contents/MacOS/superconductor"),
                        "super.engineering")

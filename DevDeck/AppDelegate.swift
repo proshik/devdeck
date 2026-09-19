@@ -35,10 +35,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Adopt daemons that survived a previous session (crash / "keep in background") → don't fight over the port.
         manager.adoptSurvivingDaemons(commands: store.commandsByID)
         // Read the memory-monitoring flags live from the config — no copy when they change.
-        manager.isVMMonitoringEnabled = { [weak store] in store?.config.settings.vmMemoryMonitoring ?? false }
+        // The VM memory/disk and cluster probes speak `colima ssh`/`colima list`: under another
+        // engine they stay off (caches cleared) instead of reporting a stopped colima.
+        manager.isVMMonitoringEnabled = { [weak store, weak engine] in
+            (store?.config.settings.vmMemoryMonitoring ?? false) && engine?.activeKind == .colima
+        }
         manager.isMinikubeMonitoringEnabled = { [weak store] in store?.config.settings.minikubeMemoryMonitoring ?? false }
         manager.isHostMonitoringEnabled = { [weak store] in store?.config.settings.hostMemoryMonitoring ?? false }
-        manager.isClusterHealthEnabled = { [weak store] in store?.config.settings.clusterHealthMonitoring ?? false }
+        manager.isClusterHealthEnabled = { [weak store, weak engine] in
+            (store?.config.settings.clusterHealthMonitoring ?? false) && engine?.activeKind == .colima
+        }
         // Proxy Manager: shares this machine's VPN egress and routes flagged commands through a peer's.
         // The routing hook is a closure so ProcessManager keeps no dependency on ProxyManager.
         let proxyManager = self.proxyManager

@@ -3,14 +3,16 @@ import Foundation
 /// The popover header's metrics. One place for their names and the one-line explanations shown
 /// as tooltips in the popover and as a reference list in Settings.
 enum HeaderMetric: CaseIterable {
-    case memory, swap, cluster, vmColima, vmMinikube, pressure, diskVM, swapRate, cpuLoad, battery
+    case memory, swap, cluster, vmEngine, vmMinikube, pressure, diskVM, swapRate, cpuLoad, battery
 
-    var title: String {
+    /// The VM cell is named after the engine it measures ("VM colima", "VM Docker Desktop");
+    /// plain "VM" when no engine is known.
+    func title(engineName: String?) -> String {
         switch self {
         case .memory: return L10n.memory
         case .swap: return L10n.swap
         case .cluster: return L10n.cluster
-        case .vmColima: return "VM colima"
+        case .vmEngine: return engineName.map { "VM \($0)" } ?? "VM"
         case .vmMinikube: return "VM minikube"
         case .pressure: return L10n.pressure
         case .diskVM: return L10n.diskVM
@@ -20,10 +22,20 @@ enum HeaderMetric: CaseIterable {
         }
     }
 
+    /// The VM memory, VM disk and cluster cells come from colima-only probes (`colima ssh`,
+    /// `colima list`). Under any other engine — or none — they have nothing to say and are hidden
+    /// rather than left blank.
+    func isAvailable(engineKind: ContainerEngineKind?) -> Bool {
+        switch self {
+        case .vmEngine, .diskVM, .cluster: return engineKind == .colima
+        default: return true
+        }
+    }
+
     var help: String { L10n.metricHelp(self) }
 
     /// Grid cells always on screen, in order (the memory bar sits above the grid).
-    static let pinned: [HeaderMetric] = [.vmColima, .diskVM, .cpuLoad]
+    static let pinned: [HeaderMetric] = [.vmEngine, .diskVM, .cpuLoad]
     /// Grid cells behind the "More" disclosure, in order.
     static let hidden: [HeaderMetric] = [.cluster, .swap, .vmMinikube, .pressure, .swapRate, .battery]
 

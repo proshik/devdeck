@@ -5,7 +5,7 @@ final class HeaderMetricTests: XCTestCase {
     func testEveryMetricHasATitleAndADistinctExplanation() {
         var helps: Set<String> = []
         for metric in HeaderMetric.allCases {
-            XCTAssertFalse(metric.title.isEmpty, "\(metric) has no title")
+            XCTAssertFalse(metric.title(engineName: "colima").isEmpty, "\(metric) has no title")
             XCTAssertGreaterThan(metric.help.count, 40, "\(metric) explanation is too thin to help")
             XCTAssertTrue(helps.insert(metric.help).inserted, "\(metric) shares its explanation with another metric")
         }
@@ -16,7 +16,27 @@ final class HeaderMetricTests: XCTestCase {
         let grid = HeaderMetric.pinned + HeaderMetric.hidden
         XCTAssertEqual(grid.count, Set(grid).count, "a metric appears twice")
         XCTAssertEqual(Set(grid), Set(HeaderMetric.allCases).subtracting([.memory]))
-        XCTAssertEqual(HeaderMetric.pinned, [.vmColima, .diskVM, .cpuLoad])
+        XCTAssertEqual(HeaderMetric.pinned, [.vmEngine, .diskVM, .cpuLoad])
+    }
+
+    func testVMTitleCarriesTheEngineName() {
+        XCTAssertEqual(HeaderMetric.vmEngine.title(engineName: "colima"), "VM colima")
+        XCTAssertEqual(HeaderMetric.vmEngine.title(engineName: "Docker Desktop"), "VM Docker Desktop")
+        XCTAssertEqual(HeaderMetric.vmEngine.title(engineName: nil), "VM")
+        XCTAssertEqual(HeaderMetric.cpuLoad.title(engineName: "colima"), HeaderMetric.cpuLoad.title(engineName: nil),
+                       "only the VM cell depends on the engine")
+    }
+
+    func testColimaProbedMetricsAreHiddenForOtherEngines() {
+        for metric in [HeaderMetric.vmEngine, .diskVM, .cluster] {
+            XCTAssertTrue(metric.isAvailable(engineKind: .colima), "\(metric)")
+            XCTAssertFalse(metric.isAvailable(engineKind: .dockerDesktop), "\(metric)")
+            XCTAssertFalse(metric.isAvailable(engineKind: nil), "\(metric)")
+        }
+        for metric in [HeaderMetric.memory, .swap, .vmMinikube, .pressure, .swapRate, .cpuLoad, .battery] {
+            XCTAssertTrue(metric.isAvailable(engineKind: .dockerDesktop), "\(metric)")
+            XCTAssertTrue(metric.isAvailable(engineKind: nil), "\(metric)")
+        }
     }
 
     private func alarm(cluster: ClusterHealthLevel? = nil, swap: SwapSeverity? = nil,

@@ -6,6 +6,7 @@ struct SettingsView: View {
     @Environment(CommandStore.self) private var store
     @Environment(UpdateController.self) private var updates
     @Environment(ProxyManager.self) private var proxy
+    @Environment(EngineModel.self) private var engine
     @State private var localization = LocalizationManager.shared
     @State private var appearance = AppearanceManager.shared
 
@@ -67,7 +68,7 @@ struct SettingsView: View {
                 DisclosureGroup(L10n.metricsHelpTitle) {
                     ForEach(HeaderMetric.allCases, id: \.self) { metric in
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(metric.title).font(.callout).fontWeight(.semibold)
+                            Text(metric.title(engineName: engine.activeName)).font(.callout).fontWeight(.semibold)
                             Text(metric.help).font(.caption).foregroundStyle(.secondary)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
