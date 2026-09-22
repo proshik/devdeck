@@ -7,6 +7,16 @@ versioning follows [SemVer](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Container engine: colima or Docker Desktop, and a green dot in the tray while it runs.** The
+  menu bar icon now shows whether the engine is up without opening the popover. Detection spawns
+  no processes — colima by its `ha.pid` files, Docker Desktop by the running app plus a
+  `connect()` to its socket — so the 2-second tray tick costs nothing. Settings gain an engine
+  picker (`settings.containerEngine`: `auto` / `colima` / `dockerDesktop`); `auto` prefers a
+  running engine, then colima when both run or both are merely installed. Labels follow the active
+  engine: "VM colima" / "VM Docker Desktop", the restart button, the monitoring toggles and the
+  Cleanup page. Under Docker Desktop the colima-only probes (VM memory and disk, cluster health)
+  and the VM block on the Cleanup page are hidden rather than shown empty; Docker Desktop's own
+  metrics come later. An unknown `containerEngine` value in config.json reads as `auto`.
 - **Battery charge and who drains it, in the popover.** On a MacBook the header now shows the
   charge with macOS' time-left estimate, and — once the Mac is unplugged — the five processes that
   used the most energy since that moment, with their share and average watts. The figures are the
