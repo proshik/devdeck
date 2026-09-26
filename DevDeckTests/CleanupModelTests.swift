@@ -89,4 +89,45 @@ final class CleanupModelTests: XCTestCase {
         XCTAssertNil(model.usage[.engineVM], "colima ssh must not run under Docker Desktop")
         XCTAssertNotNil(model.usage[.minikube])
     }
+
+    // MARK: - test containers left running
+
+    private func testContainer(_ id: String, startedHoursAgo hours: Double, now: Date) -> TestContainer {
+        TestContainer(id: id, name: id, image: "postgres:16-alpine",
+                      startedAt: now.addingTimeInterval(-hours * 3600), volumes: [])
+    }
+
+    func testRemovingTestContainersTakesOnlyTheAbandonedOnes() async throws {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        var u = DockerUsage()
+        u.testContainers = [testContainer("old", startedHoursAgo: 50, now: now),
+                            testContainer("young", startedHoursAgo: 0.2, now: now)]
+        let runner = FakeCommandRunner()
+        let model = CleanupModel(manager: ProcessManager(runner: runner), probe: FakeDockerUsageProbe([.engineVM: u]))
+        model.now = { now }
+        await model.refresh()
+
+        XCTAssertEqual(model.abandonedTestContainers(on: .engineVM).map(\.id), ["old"])
+        model.removeAbandonedTestContainers(on: .engineVM)
+
+        let id = CleanupCommands.testContainersID(on: .engineVM)
+        XCTAssertEqual(runner.startedCommandIDs, [id])
+        XCTAssertEqual(model.lastRunID, id)
+        let ctrl = try XCTUnwrap(runner.controller(for: id))
+        XCTAssertEqual(ctrl.command.command, "colima ssh -- sh -c 'docker rm -f -v old'")
+    }
+
+    func testNothingAbandonedStartsNothing() async {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        var u = DockerUsage()
+        u.testContainers = [testContainer("young", startedHoursAgo: 0.5, now: now)]
+        let runner = FakeCommandRunner()
+        let model = CleanupModel(manager: ProcessManager(runner: runner), probe: FakeDockerUsageProbe([.minikube: u]))
+        model.now = { now }
+        await model.refresh()
+
+        model.removeAbandonedTestContainers(on: .minikube)
+        XCTAssertTrue(runner.startedCommandIDs.isEmpty)
+        XCTAssertNil(model.lastRunID)
+    }
 }

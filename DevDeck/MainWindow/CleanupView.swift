@@ -13,11 +13,13 @@ struct CleanupView: View {
 
     private enum Pending: Identifiable {
         case action(CleanupAction, DockerHost)
+        case testContainers(DockerHost)
         case restart
 
         var id: String {
             switch self {
             case .action(let a, let h): return "\(h.rawValue).\(a.rawValue)"
+            case .testContainers(let h): return "\(h.rawValue).testContainers"
             case .restart: return "restart"
             }
         }
@@ -126,7 +128,19 @@ struct CleanupView: View {
                             }
                         }
                     }
+                    // Without it the rows add up to less than the box: minikube keeps its PVCs,
+                    // etcd and logs in the same volume, beside the docker it reports on.
+                    if let other = unaccounted(usage, host), other >= Self.unaccountedFloor {
+                        usageLine(L10n.usageUnaccounted,
+                                  L10n.usageUnaccountedRow(DockerUsage.formatBytes(other), host))
+                    }
+                    if let tests = usage.testContainers, !tests.isEmpty {
+                        testContainersRows(usage, tests, host)
+                    }
                     Divider().padding(.vertical, 2)
+                    if let tests = usage.testContainers, !tests.isEmpty {
+                        testContainersActionRow(host)
+                    }
                     ForEach(CleanupAction.allCases, id: \.self) { action in
                         actionRow(action, host)
                     }
@@ -157,6 +171,47 @@ struct CleanupView: View {
             .sorted { ($0.row?.sizeBytes ?? 0) > ($1.row?.sizeBytes ?? 0) }
     }
 
+    /// Below this "Other" is rounding and docker's own bookkeeping — not worth a row.
+    private static let unaccountedFloor: UInt64 = 256 * 1_048_576
+
+    /// The whole the rows should add up to: the VM disk for the engine's daemon, the node's volume
+    /// (as the engine's daemon measures it) for minikube.
+    private func unaccounted(_ usage: DockerUsage, _ host: DockerHost) -> UInt64? {
+        let total: UInt64?
+        switch host {
+        case .engineVM: total = manager.cachedVMDisk?.usedBytes
+        case .minikube: total = model.usage[.engineVM]?.nestedDaemonVolumeBytes
+        }
+        return total.flatMap { usage.unaccountedBytes(of: $0) }
+    }
+
+    /// The running test containers: how many, how many look abandoned, what their volumes hold —
+    /// then one line per image with the age range, so a leak reads as "postgres ×44 — 10 h to 3 d".
+    @ViewBuilder
+    private func testContainersRows(_ usage: DockerUsage, _ tests: [TestContainer], _ host: DockerHost) -> some View {
+        let now = model.now()
+        usageLine(L10n.usageTestContainers,
+                  L10n.usageTestContainersRow(running: tests.count,
+                                              abandoned: usage.abandonedTestContainers(now: now).count,
+                                              size: DockerUsage.formatBytes(usage.heldBytes(tests))))
+        let groups = Dictionary(grouping: tests, by: \.image)
+            .sorted { $0.value.count > $1.value.count }
+        ForEach(groups, id: \.key) { image, list in
+            let ages = list.map { now.timeIntervalSince($0.startedAt) }
+            volumeDetailLine(L10n.testContainersGroup(image: image, count: list.count,
+                                                      youngest: L10n.age(ages.min() ?? 0),
+                                                      oldest: L10n.age(ages.max() ?? 0)))
+        }
+    }
+
+    private func usageLine(_ label: String, _ value: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(label).frame(width: 96, alignment: .leading)
+            Text(value).monospacedDigit().foregroundStyle(.secondary)
+        }
+        .font(.callout)
+    }
+
     private func volumeDetailLine(_ text: String) -> some View {
         Text(text)
             .font(.caption)
@@ -179,20 +234,43 @@ struct CleanupView: View {
     }
 
     private func actionRow(_ action: CleanupAction, _ host: DockerHost) -> some View {
-        HStack(spacing: 8) {
-            Button(L10n.cleanupActionTitle(action)) { pending = .action(action, host) }
-                .disabled(model.isBusy)
-            if model.state(action, on: host) == .running {
-                ProgressView().controlSize(.small)
+        actionRow(title: L10n.cleanupActionTitle(action),
+                  effect: L10n.cleanupEffect(action, host, engineName: engine.activeName),
+                  running: model.state(action, on: host) == .running,
+                  estimate: model.estimate(action, on: host),
+                  enabled: true) { pending = .action(action, host) }
+    }
+
+    private func testContainersActionRow(_ host: DockerHost) -> some View {
+        actionRow(title: L10n.testContainersAction,
+                  effect: L10n.testContainersEffect,
+                  running: model.testContainersState(on: host) == .running,
+                  estimate: model.abandonedTestContainerBytes(on: host),
+                  enabled: !model.abandonedTestContainers(on: host).isEmpty) { pending = .testContainers(host) }
+    }
+
+    /// The button, what it will free, and — under it, always visible — what it costs afterwards.
+    private func actionRow(title: String, effect: String, running: Bool, estimate: UInt64?,
+                           enabled: Bool, action: @escaping () -> Void) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 8) {
+                Button(title, action: action)
+                    .disabled(model.isBusy || !enabled)
+                if running { ProgressView().controlSize(.small) }
+                Spacer()
+                if let estimate {
+                    Text(L10n.cleanupFrees(DockerUsage.formatBytes(estimate)))
+                        .monospacedDigit()
+                        .foregroundStyle(estimate > 0 ? .primary : .secondary)
+                }
             }
-            Spacer()
-            if let estimate = model.estimate(action, on: host) {
-                Text(L10n.cleanupFrees(DockerUsage.formatBytes(estimate)))
-                    .monospacedDigit()
-                    .foregroundStyle(estimate > 0 ? .primary : .secondary)
-            }
+            .font(.callout)
+            Text(effect)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
-        .font(.callout)
+        .padding(.bottom, 4)
     }
 
     // MARK: memory box
@@ -225,6 +303,9 @@ struct CleanupView: View {
     private var pendingTitle: String {
         switch pending {
         case .action(let a, let h): return L10n.cleanupConfirmTitle(a, h, engineName: engine.activeName)
+        case .testContainers(let h):
+            return L10n.testContainersConfirmTitle(h, engineName: engine.activeName,
+                                                   count: model.abandonedTestContainers(on: h).count)
         case .restart: return L10n.restartEngineConfirmTitle(engine.activeName ?? "colima")
         case nil: return ""
         }
@@ -233,13 +314,14 @@ struct CleanupView: View {
     private func confirmMessage(_ p: Pending) -> String {
         switch p {
         case .action(let a, _): return L10n.cleanupConfirmMessage(a)
+        case .testContainers: return L10n.testContainersConfirmMessage
         case .restart: return L10n.restartEngineConfirmMessage
         }
     }
 
     private func confirmButton(_ p: Pending) -> String {
         switch p {
-        case .action: return L10n.cleanupConfirmButton
+        case .action, .testContainers: return L10n.cleanupConfirmButton
         case .restart: return L10n.restartEngineConfirmButton
         }
     }
@@ -247,6 +329,7 @@ struct CleanupView: View {
     private func execute(_ p: Pending) {
         switch p {
         case .action(let a, let h): model.run(a, on: h)
+        case .testContainers(let h): model.removeAbandonedTestContainers(on: h)
         case .restart: model.restartEngine()
         }
     }

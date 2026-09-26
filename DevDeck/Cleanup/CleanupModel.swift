@@ -19,6 +19,8 @@ final class CleanupModel {
     /// Injected by `AppDelegate`; the defaults keep a bare model (tests) on colima.
     @ObservationIgnored var engineKind: () -> ContainerEngineKind? = { .colima }
     @ObservationIgnored var engineName: () -> String? = { "colima" }
+    /// The clock a test container's age is measured against — injected by tests.
+    @ObservationIgnored var now: () -> Date = Date.init
 
     /// The engine's own daemon is reached through `colima ssh` — under any other engine its box
     /// and its probe are skipped. minikube is reached through `minikube ssh` and always shown.
@@ -49,6 +51,25 @@ final class CleanupModel {
 
     func run(_ action: CleanupAction, on host: DockerHost) {
         start(CleanupCommands.command(action, on: host, engineName: engineName()))
+    }
+
+    func abandonedTestContainers(on host: DockerHost) -> [TestContainer] {
+        usage[host]?.abandonedTestContainers(now: now()) ?? []
+    }
+
+    func abandonedTestContainerBytes(on host: DockerHost) -> UInt64? {
+        usage[host]?.abandonedTestContainerBytes(now: now())
+    }
+
+    /// Removes what the page last showed as abandoned; nothing to remove → nothing starts.
+    func removeAbandonedTestContainers(on host: DockerHost) {
+        let ids = abandonedTestContainers(on: host).map(\.id)
+        guard !ids.isEmpty else { return }
+        start(CleanupCommands.removeTestContainers(ids: ids, on: host, engineName: engineName()))
+    }
+
+    func testContainersState(on host: DockerHost) -> ProcessManager.RunState? {
+        manager.states[CleanupCommands.testContainersID(on: host)]
     }
 
     func restartEngine() {

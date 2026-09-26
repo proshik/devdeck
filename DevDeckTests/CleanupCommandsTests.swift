@@ -54,6 +54,11 @@ final class CleanupCommandsTests: XCTestCase {
             }
         }
         XCTAssertTrue(seen.insert(CleanupCommands.restartEngine(engineName: "colima").id).inserted)
+        for host in DockerHost.allCases {
+            let t = CleanupCommands.removeTestContainers(ids: ["x"], on: host, engineName: "colima")
+            XCTAssertTrue(seen.insert(t.id).inserted, "test-container removal must not share an id")
+            XCTAssertFalse(t.isDaemon)
+        }
         XCTAssertEqual(CleanupCommands.allIDs.count, seen.count)
         XCTAssertEqual(Set(CleanupCommands.allIDs), seen)
     }
@@ -81,5 +86,24 @@ final class CleanupCommandsTests: XCTestCase {
         XCTAssertFalse(name.contains("engineVM"), name)
         XCTAssertTrue(CleanupCommands.command(.buildCache, on: .minikube, engineName: "colima").name.contains("minikube"))
         XCTAssertTrue(CleanupCommands.restartEngine(engineName: "colima").name.contains("colima"))
+    }
+
+    // MARK: - test containers
+
+    func testRemovingTestContainersNamesThemAndTakesTheirAnonymousVolumes() {
+        let colima = CleanupCommands.removeTestContainers(ids: ["aaa111", "bbb222"], on: .engineVM, engineName: "colima")
+        XCTAssertEqual(colima.command, "colima ssh -- sh -c 'docker rm -f -v aaa111 bbb222'")
+        XCTAssertEqual(colima.id, CleanupCommands.testContainersID(on: .engineVM))
+        let minikube = CleanupCommands.removeTestContainers(ids: ["aaa111"], on: .minikube, engineName: "colima")
+        XCTAssertEqual(minikube.command, "minikube ssh -- 'docker rm -f -v aaa111'")
+    }
+
+    func testTestContainerIDsArePinnedAndCountAsCleanup() {
+        XCTAssertEqual(CleanupCommands.testContainersID(on: .engineVM).uuidString, "C1EA0000-0000-4000-8000-000000000110")
+        XCTAssertEqual(CleanupCommands.testContainersID(on: .minikube).uuidString, "C1EA0000-0000-4000-8000-000000000120")
+        for host in DockerHost.allCases {
+            XCTAssertTrue(CleanupCommands.allIDs.contains(CleanupCommands.testContainersID(on: host)))
+        }
+        XCTAssertEqual(Set(CleanupCommands.allIDs).count, CleanupCommands.allIDs.count)
     }
 }
