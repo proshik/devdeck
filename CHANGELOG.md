@@ -19,7 +19,8 @@ versioning follows [SemVer](https://semver.org/).
   inside minikube that is the PVC data, etcd and container logs sitting in the node's volume
   (~2 GB here). Every cleanup button now says under it what it costs afterwards, per daemon — a
   cold build, lost `kubectl logs --previous`, a pod with `imagePullPolicy: Never` that won't come
-  back.
+  back. When the rows add up to more than the disk, the page says it is the layers images
+  share with the build cache, which docker lists in both rows.
 - **Container engine: colima or Docker Desktop, and a green dot in the tray while it runs.** The
   menu bar icon now shows whether the engine is up without opening the popover. Detection spawns
   no processes — colima by its `ha.pid` files, Docker Desktop by the running app plus a

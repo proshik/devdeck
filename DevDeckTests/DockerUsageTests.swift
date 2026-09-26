@@ -282,4 +282,13 @@ final class DockerUsageTests: XCTestCase {
         XCTAssertNil(DockerUsage(images: nil, containers: nil, volumes: nil, buildCache: nil)
                         .unaccountedBytes(of: 1))
     }
+
+    func testOvercountIsHowFarTheRowsExceedTheDisk() throws {
+        let u = try XCTUnwrap(DockerUsage.parse(minikube))
+        // Same 34.3189 GB of rows: on a 30 GB disk docker has counted 4.3189 GB twice.
+        XCTAssertEqual(u.overcountedBytes(of: 30_000_000_000), 4_318_900_000)
+        XCTAssertEqual(u.overcountedBytes(of: 36_000_000_000), 0, "rows that fit the disk overcount nothing")
+        XCTAssertNil(DockerUsage(images: nil, containers: nil, volumes: nil, buildCache: nil)
+                        .overcountedBytes(of: 1))
+    }
 }

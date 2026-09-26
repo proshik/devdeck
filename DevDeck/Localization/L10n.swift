@@ -385,6 +385,11 @@ enum L10n {
 
     // What docker does not account for
 
+    static func usageOvercounted(_ size: String) -> String {
+        t("The rows add up to \(size) more than the disk: docker lists the layers images share with the build cache in both rows.",
+          "Строки в сумме на \(size) больше диска: слои, общие у образов и build cache, docker показывает в обеих строках.")
+    }
+
     static var usageUnaccounted: String { t("Other", "Прочее") }
     static func usageUnaccountedRow(_ size: String, _ host: DockerHost) -> String {
         switch host {

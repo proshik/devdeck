@@ -230,10 +230,22 @@ struct DockerUsage: Equatable, Sendable {
     /// counts layers images share with the build cache twice, so the rows can exceed the disk: that
     /// reads as 0, never as a negative. nil without a single row to subtract.
     func unaccountedBytes(of total: UInt64) -> UInt64? {
+        guard let accounted = accountedBytes else { return nil }
+        return total > accounted ? total - accounted : 0
+    }
+
+    /// The other side of the same subtraction: how far the rows exceed `total` — the layers docker
+    /// lists under both an image and the build cache. Said out loud, or a box whose rows add up to
+    /// more than the disk reads as a wrong number. nil without a single row.
+    func overcountedBytes(of total: UInt64) -> UInt64? {
+        guard let accounted = accountedBytes else { return nil }
+        return accounted > total ? accounted - total : 0
+    }
+
+    private var accountedBytes: UInt64? {
         let rows = [images, containers, volumes, buildCache].compactMap { $0 }
         guard !rows.isEmpty else { return nil }
-        let accounted = rows.reduce(0) { $0 + $1.sizeBytes }
-        return total > accounted ? total - accounted : 0
+        return rows.reduce(0) { $0 + $1.sizeBytes }
     }
 
     /// What a cleanup action can free. Build cache and images take docker's own reclaimable figure;
