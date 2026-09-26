@@ -41,6 +41,20 @@ enum CleanupCommands {
 
     static let restartEngineID = UUID(uuidString: "C1EA0000-0000-4000-8000-0000000000FF")!
 
+    /// Stop and remove the given test containers with the anonymous volumes they hold (`-v` never
+    /// takes a named one). By id, not by label: the ids are the ones the page showed as abandoned,
+    /// so a test run that started since the last refresh is not caught in it.
+    static func removeTestContainers(ids: [String], on host: DockerHost, engineName: String?) -> Command {
+        Command(id: testContainersID(on: host),
+                name: L10n.testContainersCommandName(host, engineName: engineName),
+                command: host.wrap("docker rm -f -v " + ids.joined(separator: " ")))
+    }
+
+    static func testContainersID(on host: DockerHost) -> UUID {
+        let hostDigit = DockerHost.allCases.firstIndex(of: host)! + 1
+        return UUID(uuidString: "C1EA0000-0000-4000-8000-0000000001\(hostDigit)0")!
+    }
+
     static func id(_ action: CleanupAction, on host: DockerHost) -> UUID {
         let hostDigit = DockerHost.allCases.firstIndex(of: host)! + 1
         let actionDigit = CleanupAction.allCases.firstIndex(of: action)! + 1
@@ -49,7 +63,8 @@ enum CleanupCommands {
 
     /// Every id this namespace can produce — for "is any cleanup running" checks.
     static var allIDs: [UUID] {
-        DockerHost.allCases.flatMap { host in CleanupAction.allCases.map { id($0, on: host) } } + [restartEngineID]
+        DockerHost.allCases.flatMap { host in CleanupAction.allCases.map { id($0, on: host) } + [testContainersID(on: host)] }
+            + [restartEngineID]
     }
 }
 

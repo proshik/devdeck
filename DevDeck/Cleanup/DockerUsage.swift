@@ -46,8 +46,16 @@ struct DockerUsage: Equatable, Sendable {
     /// while every image is held by a container: the button then promised gigabytes and freed
     /// nothing. nil when the listing was absent → the estimate falls back to docker's figure.
     var pruneableImageBytes: UInt64?
+    /// Running containers a testcontainers library started — each one's anonymous volume is a
+    /// database nobody will connect to again once the test process that owned it is gone.
+    /// Stopped ones are the dead-containers button's business. nil when the probe carried no such
+    /// section (an older script, or a listing that didn't arrive).
+    var testContainers: [TestContainer]?
+    /// Every anonymous volume's size by name, from the verbose listing — what `docker rm -v` frees
+    /// for the containers it removes. Empty without the listing.
+    var anonymousVolumeSizes: [String: UInt64] = [:]
 
-    /// Separates the probe script's three outputs. Not a string docker itself can print.
+    /// Separates the probe script's four outputs. Not a string docker itself can print.
     static let sectionMarker = "---devdeck---"
 
     /// Parse the probe output: the `docker system df --format '{{json .}}'` rows, and — when the
@@ -61,6 +69,10 @@ struct DockerUsage: Equatable, Sendable {
             usage.pruneableVolumeBytes = detail.pruneableVolumeBytes
             usage.nestedDaemonVolumeBytes = detail.nestedDaemonBytes
             usage.pruneableImageBytes = detail.pruneableImageBytes
+            usage.anonymousVolumeSizes = detail.anonymousVolumeSizes
+        }
+        if sections.count >= 4 {
+            usage.testContainers = parseTestContainers(sections[3])
         }
         return usage
     }
@@ -96,6 +108,7 @@ struct DockerUsage: Equatable, Sendable {
         let pruneableVolumeBytes: UInt64
         let nestedDaemonBytes: UInt64
         let pruneableImageBytes: UInt64
+        var anonymousVolumeSizes: [String: UInt64] = [:]
     }
 
     /// Read `docker system df -v --format '{{json .}}'` — the one call that carries per-item sizes:
@@ -113,6 +126,7 @@ struct DockerUsage: Equatable, Sendable {
 
         var pruneableVolumes: UInt64 = 0
         var nested: UInt64 = 0
+        var anonymous: [String: UInt64] = [:]
         for volume in volumes {
             guard let name = volume["Name"] as? String,
                   let labels = volume["Labels"] as? String,
@@ -120,8 +134,9 @@ struct DockerUsage: Equatable, Sendable {
             else { continue }
             let keys = labelKeys(labels)
             if keys.contains("created_by.minikube.sigs.k8s.io") { nested += size }
-            if keys.contains("com.docker.volume.anonymous"), !heldByRunning.contains(name) {
-                pruneableVolumes += size
+            if keys.contains("com.docker.volume.anonymous") {
+                anonymous[name] = size
+                if !heldByRunning.contains(name) { pruneableVolumes += size }
             }
         }
 
@@ -136,7 +151,8 @@ struct DockerUsage: Equatable, Sendable {
 
         return Detail(pruneableVolumeBytes: pruneableVolumes,
                       nestedDaemonBytes: nested,
-                      pruneableImageBytes: pruneableImages)
+                      pruneableImageBytes: pruneableImages,
+                      anonymousVolumeSizes: anonymous)
     }
 
     /// The label keys of a `k=v,k=v` listing. docker labels every volume it created for a container
@@ -165,6 +181,61 @@ struct DockerUsage: Equatable, Sendable {
         return nil
     }
 
+    /// `id|startedAt|/name|image|flags|vol vol ` — one running testcontainers container per line,
+    /// as the probe's `docker inspect` template prints it. The reaper (`ryuk`) and reusable
+    /// containers (`reuse`) are meant to outlive a test and are dropped; unreadable lines are
+    /// skipped.
+    static func parseTestContainers(_ text: String) -> [TestContainer] {
+        text.split(whereSeparator: \.isNewline).compactMap { line in
+            let f = line.split(separator: "|", omittingEmptySubsequences: false).map(String.init)
+            guard f.count == 6, !f[0].isEmpty, f[4].isEmpty,
+                  let started = parseDockerDate(f[1]) else { return nil }
+            let name = f[2].hasPrefix("/") ? String(f[2].dropFirst()) : f[2]
+            return TestContainer(id: f[0], name: name, image: f[3], startedAt: started,
+                                 volumes: f[5].split(separator: " ").map(String.init))
+        }
+    }
+
+    /// docker's RFC 3339 timestamps carry nanoseconds, which `ISO8601DateFormatter` rejects —
+    /// the fraction is dropped, a second is precision enough for "running for days".
+    static func parseDockerDate(_ text: String) -> Date? {
+        var t = text.trimmingCharacters(in: .whitespaces)
+        if let dot = t.firstIndex(of: "."),
+           let end = t[dot...].firstIndex(where: { $0 == "Z" || $0 == "+" || $0 == "-" }) {
+            t.removeSubrange(dot..<end)
+        }
+        return ISO8601DateFormatter().date(from: t)
+    }
+
+    /// Test containers older than this are taken for abandoned: a unit-test run lives minutes, so
+    /// anything younger may still belong to one in progress and is left alone.
+    static let abandonedAfter: TimeInterval = 3600
+
+    func abandonedTestContainers(now: Date) -> [TestContainer] {
+        (testContainers ?? []).filter { now.timeIntervalSince($0.startedAt) >= Self.abandonedAfter }
+    }
+
+    /// The anonymous volumes these containers hold — `docker rm -v` takes those and leaves named
+    /// ones behind, so a named volume is never counted.
+    func heldBytes(_ containers: [TestContainer]) -> UInt64 {
+        containers.reduce(0) { sum, c in sum + c.volumes.reduce(0) { $0 + (anonymousVolumeSizes[$1] ?? 0) } }
+    }
+
+    func abandonedTestContainerBytes(now: Date) -> UInt64 {
+        heldBytes(abandonedTestContainers(now: now))
+    }
+
+    /// What a `total` holds beyond the rows docker accounts for — inside the minikube node that is
+    /// the PVC data, etcd and container logs sitting next to its docker in the same volume. docker
+    /// counts layers images share with the build cache twice, so the rows can exceed the disk: that
+    /// reads as 0, never as a negative. nil without a single row to subtract.
+    func unaccountedBytes(of total: UInt64) -> UInt64? {
+        let rows = [images, containers, volumes, buildCache].compactMap { $0 }
+        guard !rows.isEmpty else { return nil }
+        let accounted = rows.reduce(0) { $0 + $1.sizeBytes }
+        return total > accounted ? total - accounted : 0
+    }
+
     /// What a cleanup action can free. Build cache and images take docker's own reclaimable figure;
     /// dead containers take their writable layers plus the volumes only they still hold, since the
     /// action prunes the containers first and docker's figure cannot see past that.
@@ -191,6 +262,19 @@ struct DockerUsage: Equatable, Sendable {
     }
 }
 
+// MARK: - TestContainer
+
+/// A running container a testcontainers library started (Rust labels it
+/// `org.testcontainers.managed-by`, Java/Go/Node `org.testcontainers`). Nothing else carries those
+/// labels, so a long-lived container of the user's own is never taken for one.
+struct TestContainer: Equatable, Sendable {
+    let id: String
+    let name: String
+    let image: String
+    let startedAt: Date
+    let volumes: [String]
+}
+
 // MARK: - Probe
 
 /// Behind a protocol → `CleanupModel` is tested with a fake (no ssh, no docker).
@@ -203,16 +287,22 @@ protocol DockerUsageProbing: Sendable {
 /// pass walks every volume, seconds rather than milliseconds on a full disk → call off-main.
 /// Daemon down → nil.
 struct LiveDockerUsageProbe: DockerUsageProbing {
-    /// Three outputs behind `DockerUsage.sectionMarker`: the summary rows, the verbose listing
-    /// (the only one carrying per-item sizes, hence one `-v` pass for both volumes and images), and
-    /// the volumes running containers hold — the last two are what separate a volume a stopped
-    /// container merely links from one still in use. Kept on a single line: minikube hands the
+    /// Four outputs behind `DockerUsage.sectionMarker`: the summary rows, the verbose listing
+    /// (the only one carrying per-item sizes, hence one `-v` pass for both volumes and images), the
+    /// volumes running containers hold — those two are what separate a volume a stopped container
+    /// merely links from one still in use — and the running testcontainers containers, with the
+    /// flags that exclude the reaper and reusable ones. Kept on a single line: minikube hands the
     /// script to its remote shell as one word.
     private static let script = """
     docker system df --format '{{json .}}'; echo '\(DockerUsage.sectionMarker)'; \
     docker system df -v --format '{{json .}}'; echo '\(DockerUsage.sectionMarker)'; \
     docker ps -q | xargs -r docker inspect \
-    -f '{{range .Mounts}}{{if eq .Type "volume"}}{{println .Name}}{{end}}{{end}}'
+    -f '{{range .Mounts}}{{if eq .Type "volume"}}{{println .Name}}{{end}}{{end}}'; \
+    echo '\(DockerUsage.sectionMarker)'; \
+    { docker ps -q --filter label=org.testcontainers.managed-by; docker ps -q --filter label=org.testcontainers ; } \
+    | sort -u | xargs -r docker inspect -f '{{.Id}}|{{.State.StartedAt}}|{{.Name}}|{{.Config.Image}}|\
+    {{if index .Config.Labels "org.testcontainers.ryuk"}}ryuk{{end}}{{if index .Config.Labels "org.testcontainers.hash"}}reuse{{end}}|\
+    {{range .Mounts}}{{if eq .Type "volume"}}{{.Name}} {{end}}{{end}}'
     """
 
     func sample(_ host: DockerHost) -> DockerUsage? {

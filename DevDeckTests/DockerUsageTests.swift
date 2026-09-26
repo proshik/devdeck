@@ -197,4 +197,89 @@ final class DockerUsageTests: XCTestCase {
         XCTAssertNil(u.pruneableImageBytes)
         XCTAssertEqual(u.estimate(for: .unusedImages), 9_617_000_000)
     }
+
+    // MARK: - test containers left running
+
+    /// `combined` plus the fourth section: running containers a testcontainers library started.
+    /// One is three days old and holds an anonymous volume and a named one; one is ten minutes old
+    /// (a run in progress); the reaper and a reusable container are skipped by the parser.
+    private let withTests = """
+    {"Active":"4","Reclaimable":"507.9kB (5%)","Size":"8.614MB","TotalCount":"35","Type":"Containers"}
+    ---devdeck---
+    {"Images":[],\
+    "Volumes":[{"Labels":"com.docker.volume.anonymous=","Links":"1","Name":"ccc","Size":"1.78GB"},\
+    {"Labels":"com.docker.volume.anonymous=","Links":"1","Name":"ddd","Size":"500MB"},\
+    {"Labels":"com.docker.compose.project=krill","Links":"1","Name":"krill_pgdata","Size":"50.17MB"}]}---devdeck---
+    ccc
+    ddd
+    ---devdeck---
+    aaa111|2026-09-23T15:17:28.005594896Z|/dreamy_montalcini|postgres:16-alpine||ccc krill_pgdata 
+    bbb222|2026-09-26T06:30:00Z|/young_run|postgres:16-alpine||ddd 
+    rrr333|2026-09-23T15:17:20Z|/testcontainers-ryuk-1|testcontainers/ryuk:0.11.0|ryuk|
+    hhh444|2026-09-01T10:00:00Z|/reused_pg|postgres:16|reuse|
+    """
+
+    private let now = ISO8601DateFormatter().date(from: "2026-09-26T06:40:00Z")!
+
+    func testRunningTestContainersAreParsedWithoutTheReaperAndReusableOnes() throws {
+        let u = try XCTUnwrap(DockerUsage.parse(withTests))
+        let tests = try XCTUnwrap(u.testContainers)
+        XCTAssertEqual(tests.map(\.id), ["aaa111", "bbb222"])
+        XCTAssertEqual(tests[0].name, "dreamy_montalcini", "docker's leading slash is dropped")
+        XCTAssertEqual(tests[0].image, "postgres:16-alpine")
+        XCTAssertEqual(tests[0].volumes, ["ccc", "krill_pgdata"])
+        XCTAssertEqual(tests[0].startedAt, ISO8601DateFormatter().date(from: "2026-09-23T15:17:28Z"))
+        XCTAssertEqual(tests[1].volumes, ["ddd"])
+    }
+
+    func testOnlyContainersRunningLongerThanAnHourAreAbandoned() throws {
+        let u = try XCTUnwrap(DockerUsage.parse(withTests))
+        XCTAssertEqual(u.abandonedTestContainers(now: now).map(\.id), ["aaa111"],
+                       "a ten-minute-old container may belong to a run in progress")
+    }
+
+    func testAbandonedEstimateCountsOnlyTheAnonymousVolumesRmMinusVTakes() throws {
+        let u = try XCTUnwrap(DockerUsage.parse(withTests))
+        // `docker rm -v` removes anonymous volumes only — krill_pgdata stays, so it is not counted.
+        XCTAssertEqual(u.abandonedTestContainerBytes(now: now), 1_780_000_000)
+        XCTAssertEqual(u.heldBytes(u.testContainers ?? []), 1_780_000_000 + 500_000_000)
+    }
+
+    func testTestContainersAreUnknownWhenTheProbeHadNoSuchSection() throws {
+        XCTAssertNil(try XCTUnwrap(DockerUsage.parse(combined)).testContainers)
+        XCTAssertEqual(try XCTUnwrap(DockerUsage.parse(combined)).abandonedTestContainers(now: now), [])
+    }
+
+    func testAnEmptySectionMeansNoTestContainers() throws {
+        let none = withTests.components(separatedBy: "---devdeck---")[0...2]
+            .joined(separator: "---devdeck---") + "---devdeck---\n"
+        XCTAssertEqual(try XCTUnwrap(DockerUsage.parse(none)).testContainers, [])
+    }
+
+    func testGarbledTestContainerLinesAreSkipped() {
+        let lines = """
+        aaa111|2026-09-23T15:17:28Z|/ok|postgres||
+        not a container line
+        bbb222|yesterday|/bad_date|postgres||
+        """
+        XCTAssertEqual(DockerUsage.parseTestContainers(lines).map(\.id), ["aaa111"])
+    }
+
+    func testProbeScriptListsTestContainersOfEveryLibrary() {
+        let script = LiveDockerUsageProbe.invocation(.minikube).args[2]
+        XCTAssertTrue(script.contains("label=org.testcontainers.managed-by"), "testcontainers-rs")
+        XCTAssertTrue(script.contains("label=org.testcontainers "), "Java, Go and the rest")
+    }
+
+    // MARK: - what docker does not account for
+
+    func testUnaccountedIsWhatTheRowsDoNotCover() throws {
+        let u = try XCTUnwrap(DockerUsage.parse(minikube))
+        // 16.87 + 0.3569 + 1.192 + 15.9 GB of rows inside a 36 GB node volume.
+        XCTAssertEqual(u.unaccountedBytes(of: 36_000_000_000), 36_000_000_000 - 34_318_900_000)
+        XCTAssertEqual(u.unaccountedBytes(of: 30_000_000_000), 0,
+                       "docker counts shared layers twice — its rows can exceed the disk, never a negative")
+        XCTAssertNil(DockerUsage(images: nil, containers: nil, volumes: nil, buildCache: nil)
+                        .unaccountedBytes(of: 1))
+    }
 }

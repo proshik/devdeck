@@ -317,6 +317,86 @@ enum L10n {
                  "Очистка: \(cleanupActionTitle(action).lowercased()) (\(name))")
     }
 
+    /// What each button costs afterwards, shown under it — the same action means different things
+    /// on the two daemons, so the text is per host.
+    static func cleanupEffect(_ action: CleanupAction, _ host: DockerHost, engineName: String?) -> String {
+        let name = dockerHostLabel(.engineVM, engineName: engineName)
+        switch (action, host) {
+        case (.deadContainers, .engineVM):
+            return t("A removed container can't be started again with docker start, and its logs are gone. Running containers and named volumes stay.",
+                     "Удалённый контейнер уже не запустить через docker start, его логи пропадут. Работающие контейнеры и именованные volumes останутся.")
+        case (.deadContainers, .minikube):
+            return t("The logs of pods' previous runs (kubectl logs --previous) and of finished Jobs are gone. Running pods are not affected.",
+                     "Пропадут логи прошлых запусков подов (kubectl logs --previous) и завершившихся Job. Работающие поды не затрагиваются.")
+        case (.buildCache, .engineVM):
+            return t("The next docker build in \(name) starts cold. Builds inside minikube are not affected.",
+                     "Следующий docker build в \(name) пойдёт без кэша. На сборки внутри minikube не влияет.")
+        case (.buildCache, .minikube):
+            return t("The next image build in minikube (docker-env) starts from scratch and takes much longer. Pods are not affected.",
+                     "Следующая сборка образов в minikube (через docker-env) пойдёт с нуля и займёт заметно дольше. Поды не затрагиваются.")
+        case (.unusedImages, .engineVM):
+            return t("Images are pulled again on next use — e.g. postgres on the next testcontainers run. Locally built ones have to be rebuilt.",
+                     "Образы скачаются заново при следующем запуске — например, postgres при следующем прогоне testcontainers. Собранные локально придётся пересобрать.")
+        case (.unusedImages, .minikube):
+            return t("A pod with imagePullPolicy: Never won't come back after a restart until its image is rebuilt; others are pulled again.",
+                     "Под с imagePullPolicy: Never не поднимется после рестарта, пока его образ не соберут заново; остальные образы скачаются сами.")
+        }
+    }
+
+    // Test containers left running
+
+    static var usageTestContainers: String { t("Test runs", "Тесты") }
+    static func usageTestContainersRow(running: Int, abandoned: Int, size: String) -> String {
+        t("\(running) containers running · \(abandoned) for over an hour · \(size) in their volumes",
+          "контейнеров запущено: \(running) · дольше часа: \(abandoned) · \(size) в их volumes")
+    }
+    static func testContainersGroup(image: String, count: Int, youngest: String, oldest: String) -> String {
+        let times = count > 1 ? "×\(count)" : ""
+        let ages = youngest == oldest ? oldest : t("\(youngest) to \(oldest)", "от \(youngest) до \(oldest)")
+        return "\(image) \(times) — \(ages)".replacingOccurrences(of: "  ", with: " ")
+    }
+    /// "12 min" / "5 h" / "3 d" — how long a container has been running.
+    static func age(_ interval: TimeInterval) -> String {
+        let minutes = max(0, Int(interval / 60))
+        if minutes < 60 { return t("\(minutes) min", "\(minutes) мин") }
+        let hours = minutes / 60
+        if hours < 48 { return t("\(hours) h", "\(hours) ч") }
+        return t("\(hours / 24) d", "\(hours / 24) дн")
+    }
+    static var testContainersAction: String { t("Abandoned test containers", "Брошенные тестовые контейнеры") }
+    static var testContainersEffect: String {
+        t("Only containers testcontainers labelled and running for over an hour — a younger one may be a run in progress. Your own long-lived containers are never touched.",
+          "Только контейнеры с меткой testcontainers, которые работают дольше часа: более молодой может быть идущим прогоном. Ваши долгоживущие контейнеры не трогаются.")
+    }
+    static func testContainersConfirmTitle(_ host: DockerHost, engineName: String?, count: Int) -> String {
+        let name = dockerHostLabel(host, engineName: engineName)
+        return t("Remove \(count) abandoned test containers in \(name)?",
+                 "Удалить брошенные тестовые контейнеры (\(count)) в \(name)?")
+    }
+    static var testContainersConfirmMessage: String {
+        t("Stops and removes the test containers running for over an hour, with their anonymous volumes — the databases of test runs that ended without cleaning up. Named volumes stay.",
+          "Остановит и удалит тестовые контейнеры, которые работают дольше часа, вместе с их анонимными volumes — базами прогонов, которые завершились, не убрав за собой. Именованные volumes останутся.")
+    }
+    static func testContainersCommandName(_ host: DockerHost, engineName: String?) -> String {
+        let name = dockerHostLabel(host, engineName: engineName)
+        return t("Cleanup: abandoned test containers (\(name))",
+                 "Очистка: брошенные тестовые контейнеры (\(name))")
+    }
+
+    // What docker does not account for
+
+    static var usageUnaccounted: String { t("Other", "Прочее") }
+    static func usageUnaccountedRow(_ size: String, _ host: DockerHost) -> String {
+        switch host {
+        case .engineVM:
+            return t("\(size) · not in docker's figures: container logs, service data",
+                     "\(size) · не учтено docker: логи контейнеров, служебные данные")
+        case .minikube:
+            return t("\(size) · outside docker, in the same volume: PVC data, etcd, container logs",
+                     "\(size) · вне docker, в том же томе: данные PVC, etcd, логи контейнеров")
+        }
+    }
+
     // MARK: - Settings
 
     static var memoryMonitoringSection: String { t("Memory monitoring", "Мониторинг памяти") }
