@@ -134,6 +134,12 @@ struct CleanupView: View {
                         usageLine(L10n.usageUnaccounted,
                                   L10n.usageUnaccountedRow(DockerUsage.formatBytes(other), host))
                     }
+                    // The opposite gap: rows past the disk are shared layers counted twice.
+                    if let over = overcounted(usage, host), over >= Self.unaccountedFloor {
+                        Text(L10n.usageOvercounted(DockerUsage.formatBytes(over)))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                     if let tests = usage.testContainers, !tests.isEmpty {
                         testContainersRows(usage, tests, host)
                     }
@@ -174,15 +180,21 @@ struct CleanupView: View {
     /// Below this "Other" is rounding and docker's own bookkeeping — not worth a row.
     private static let unaccountedFloor: UInt64 = 256 * 1_048_576
 
+    private func unaccounted(_ usage: DockerUsage, _ host: DockerHost) -> UInt64? {
+        total(host).flatMap { usage.unaccountedBytes(of: $0) }
+    }
+
+    private func overcounted(_ usage: DockerUsage, _ host: DockerHost) -> UInt64? {
+        total(host).flatMap { usage.overcountedBytes(of: $0) }
+    }
+
     /// The whole the rows should add up to: the VM disk for the engine's daemon, the node's volume
     /// (as the engine's daemon measures it) for minikube.
-    private func unaccounted(_ usage: DockerUsage, _ host: DockerHost) -> UInt64? {
-        let total: UInt64?
+    private func total(_ host: DockerHost) -> UInt64? {
         switch host {
-        case .engineVM: total = manager.cachedVMDisk?.usedBytes
-        case .minikube: total = model.usage[.engineVM]?.nestedDaemonVolumeBytes
+        case .engineVM: return manager.cachedVMDisk?.usedBytes
+        case .minikube: return model.usage[.engineVM]?.nestedDaemonVolumeBytes
         }
-        return total.flatMap { usage.unaccountedBytes(of: $0) }
     }
 
     /// The running test containers: how many, how many look abandoned, what their volumes hold —
