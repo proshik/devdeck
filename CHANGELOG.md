@@ -7,6 +7,19 @@ versioning follows [SemVer](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Cleanup: test containers left running, an "Other" row, and what each button costs.** A test
+  run that dies without cleaning up — or, as in grount, keeps its database in a `static` Rust never
+  drops — leaves its testcontainers database *running*, so no prune ever touches it: 44 postgres
+  containers held ~40 GB while "dead containers" honestly promised 0. The page now lists running
+  containers labelled by a testcontainers library (`org.testcontainers.managed-by` for Rust,
+  `org.testcontainers` for Java/Go), grouped by image with their age and the size of their volumes,
+  and removes the ones running for over an hour with `docker rm -f -v` — younger ones may be a run
+  in progress, the reaper and reusable containers are skipped, and containers without the label
+  are never touched. An "Other" row shows what docker's figures don't cover, so a box adds up:
+  inside minikube that is the PVC data, etcd and container logs sitting in the node's volume
+  (~2 GB here). Every cleanup button now says under it what it costs afterwards, per daemon — a
+  cold build, lost `kubectl logs --previous`, a pod with `imagePullPolicy: Never` that won't come
+  back.
 - **Container engine: colima or Docker Desktop, and a green dot in the tray while it runs.** The
   menu bar icon now shows whether the engine is up without opening the popover. Detection spawns
   no processes — colima by its `ha.pid` files, Docker Desktop by the running app plus a
