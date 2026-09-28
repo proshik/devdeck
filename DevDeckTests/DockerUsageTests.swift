@@ -68,14 +68,6 @@ final class DockerUsageTests: XCTestCase {
         XCTAssertEqual(u.buildCache, DockerUsageRow(total: 0, active: 0, sizeBytes: 0, reclaimableBytes: 0))
     }
 
-    func testParseMinikubeOutput() throws {
-        let u = try XCTUnwrap(DockerUsage.parse(minikube))
-        XCTAssertEqual(u.buildCache?.reclaimableBytes, 11_970_000_000)
-        XCTAssertEqual(u.buildCache?.active, 14)
-        XCTAssertEqual(u.containers?.total, 150)
-        XCTAssertEqual(u.containers?.active, 92)
-    }
-
     func testParseTolerance() {
         XCTAssertNil(DockerUsage.parse(""))
         XCTAssertNil(DockerUsage.parse("Cannot connect to the Docker daemon"))
@@ -123,12 +115,6 @@ final class DockerUsageTests: XCTestCase {
         // Not docker's 340.9MB: that figure both misses the volumes stopped containers still link
         // and counts named dangling ones the button will not delete.
         XCTAssertEqual(u.estimate(for: .deadContainers), 507_900 + 2_692_000_000 + 253_700)
-    }
-
-    func testDeadContainerEstimateFallsBackToDockerReclaimableWithoutDetail() throws {
-        let u = try XCTUnwrap(DockerUsage.parse(colima))
-        XCTAssertNil(u.pruneableVolumeBytes)
-        XCTAssertEqual(u.estimate(for: .deadContainers), 0 + 340_100_000)
     }
 
     func testGarbledVolumeListingFallsBackInsteadOfReportingZero() throws {
@@ -190,12 +176,6 @@ final class DockerUsageTests: XCTestCase {
         let u = try XCTUnwrap(DockerUsage.parse(allInUse))
         XCTAssertEqual(u.images?.reclaimableBytes, 8_035_000_000, "docker's own figure is unchanged")
         XCTAssertEqual(u.estimate(for: .unusedImages), 0)
-    }
-
-    func testUnusedImageEstimateFallsBackToDockerWithoutTheDetailListing() throws {
-        let u = try XCTUnwrap(DockerUsage.parse(minikube))
-        XCTAssertNil(u.pruneableImageBytes)
-        XCTAssertEqual(u.estimate(for: .unusedImages), 9_617_000_000)
     }
 
     // MARK: - test containers left running

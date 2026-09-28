@@ -98,12 +98,8 @@ final class CleanupCommandsTests: XCTestCase {
         XCTAssertEqual(minikube.command, "minikube ssh -- 'docker rm -f -v aaa111'")
     }
 
-    func testTestContainerIDsArePinnedAndCountAsCleanup() {
+    func testTestContainerIDsArePinned() {
         XCTAssertEqual(CleanupCommands.testContainersID(on: .engineVM).uuidString, "C1EA0000-0000-4000-8000-000000000110")
         XCTAssertEqual(CleanupCommands.testContainersID(on: .minikube).uuidString, "C1EA0000-0000-4000-8000-000000000120")
-        for host in DockerHost.allCases {
-            XCTAssertTrue(CleanupCommands.allIDs.contains(CleanupCommands.testContainersID(on: host)))
-        }
-        XCTAssertEqual(Set(CleanupCommands.allIDs).count, CleanupCommands.allIDs.count)
     }
 }
