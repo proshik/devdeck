@@ -88,6 +88,8 @@ struct PopoverView: View {
             }
 
             Divider()
+            AwakeSectionView()
+            Divider()
             footer
         }
         .frame(width: 380)

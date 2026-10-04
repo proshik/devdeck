@@ -33,6 +33,34 @@ enum L10n {
     static var quitButton: String { t("Quit", "Выйти") }
     static var cancel: String { t("Cancel", "Отмена") }
 
+    // MARK: - Closed-lid keep-awake
+
+    static var awakeTitle: String { t("Work with lid closed", "Работать с закрытой крышкой") }
+    static var awakeEnable: String { t("Enable", "Включить") }
+    static var awakeDisable: String { t("Disable", "Выключить") }
+    static var awakeStarting: String { t("Waiting for authorization…", "Ожидание разрешения…") }
+    static var awakeStopping: String { t("Restoring sleep…", "Восстановление сна…") }
+    static var awakeActive: String { t("Sleep disabled · screen may turn off", "Сон отключён · экран может гаснуть") }
+    static var awakeDetails: String {
+        t("All processes keep running, on AC or battery. Automatically ends at 20% battery, high thermal pressure, or when DevDeck quits. Keep the Mac ventilated.",
+          "Все процессы продолжают работать, в том числе от батареи. Режим выключится при заряде 20%, перегреве или выходе из DevDeck. Обеспечьте вентиляцию Mac.")
+    }
+    static var awakeLimits: String {
+        t("Auto-off: 20% battery · heat · app quit", "Автоотключение: 20% заряда · перегрев · выход")
+    }
+    static var awakeDuration: String { t("Duration", "Длительность") }
+    static var awake30Minutes: String { t("30 min", "30 мин") }
+    static var awake1Hour: String { t("1 hour", "1 час") }
+    static var awake2Hours: String { t("2 hours", "2 часа") }
+    static var awakeRecovery: String { t("Restore sleep", "Восстановить сон") }
+    static var awakeRecoveryHelp: String {
+        t("A previous session did not finish restoring sleep. Restore its original setting with administrator authorization.",
+          "Предыдущая сессия не завершила восстановление сна. Верните исходную настройку с разрешением администратора.")
+    }
+    static var awakeThermalStop: String { t("Disabled due to high thermal pressure.", "Выключено из-за перегрева.") }
+    static var awakeRestoreFailed: String { t("Sleep was not restored. Try Restore sleep.", "Не удалось восстановить сон. Нажмите «Восстановить сон».") }
+    static var awakeError: String { t("Keep-awake failed", "Ошибка режима бодрствования") }
+
     // MARK: - Exit dialog (live daemons)
 
     static func exitDaemonsActive(_ count: Int) -> String {
