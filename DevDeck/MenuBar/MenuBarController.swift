@@ -33,7 +33,7 @@ final class MenuBarController: NSObject {
 
     init(store: CommandStore, manager: ProcessManager, appModel: AppModel,
          updateController: UpdateController, proxyManager: ProxyManager, claudeTabs: ClaudeTabsModel,
-         energy: EnergyModel, engine: EngineModel) {
+         energy: EnergyModel, engine: EngineModel, awake: AwakeModel) {
         self.manager = manager
         self.engine = engine
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -51,6 +51,7 @@ final class MenuBarController: NSObject {
                 .environment(claudeTabs)
                 .environment(energy)
                 .environment(engine)
+                .environment(awake)
         )
 
         if let button = statusItem.button {

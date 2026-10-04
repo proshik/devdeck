@@ -14,14 +14,15 @@ protocol CommandRunner: Sendable {
 
 /// Live handle for a single run. Reference type: identity == one run.
 ///
-/// `output` stream invariant: exactly one `.started` → 0..n `.line` →
-/// exactly one `.terminated` → `finish()`. `stop()` is idempotent and fire-and-forget;
-/// its effect is visible only as a subsequent `.terminated` (single source of truth).
+/// `output` stream invariant: at most one `.started` → 0..n `.line` →
+/// exactly one terminal event (`.terminated` or `.cancelled`) → `finish()`. `stop()` is idempotent and fire-and-forget;
+/// its effect is visible only as a subsequent terminal event (single source of truth).
+/// A launch failure can terminate without a preceding `.started`.
 protocol RunningProcess: AnyObject, Sendable {
     /// Fresh token for every `start` — distinguishes runs of the same Command.id
     /// and lets stale events from a superseded run be ignored.
     var token: UUID { get }
-    /// Single-consumer finite stream. Completed via `finish()` after `.terminated`.
+    /// Single-consumer finite stream. Completed via `finish()` after a terminal event.
     var output: AsyncStream<RunnerOutput> { get }
     /// SIGTERM → (after grace period) SIGKILL for zsh runs; best-effort for sudo.
     func stop()

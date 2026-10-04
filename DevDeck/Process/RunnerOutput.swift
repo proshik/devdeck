@@ -6,8 +6,9 @@ import Foundation
 /// `Sendable` — values cross the actor boundary cleanly (Process I/O happens off main,
 /// state is mutated on main).
 ///
-/// Stream invariant: exactly one `.started` → 0..n `.line` → exactly one
-/// `.terminated` → `finish()`. `.terminated` always arrives (including on launch failure).
+/// Stream invariant: at most one `.started` → 0..n `.line` → exactly one
+/// terminal event (`.terminated` or `.cancelled`) → `finish()`. A launch failure
+/// can terminate without a preceding `.started`.
 enum RunnerOutput: Sendable, Equatable {
     /// `pid == nil` for the sudo path (no managed child process).
     case started(pid: Int32?)

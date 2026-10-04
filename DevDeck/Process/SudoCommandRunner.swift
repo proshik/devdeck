@@ -6,20 +6,26 @@ struct RoutingCommandRunner: CommandRunner {
     let sudo: any CommandRunner
     let terminal: any CommandRunner
     let builtInProxy: any CommandRunner
+    let awake: any CommandRunner
 
     init(
         zsh: any CommandRunner = ZshCommandRunner(),
         sudo: any CommandRunner = SudoCommandRunner(),
         terminal: any CommandRunner = GhosttyCommandRunner(),
-        builtInProxy: any CommandRunner = BuiltInProxyRunner()
+        builtInProxy: any CommandRunner = BuiltInProxyRunner(),
+        awake: any CommandRunner = AwakeCommandRunner()
     ) {
         self.zsh = zsh
         self.sudo = sudo
         self.terminal = terminal
         self.builtInProxy = builtInProxy
+        self.awake = awake
     }
 
     func start(_ command: Command) -> any RunningProcess {
+        if command.id == AwakeHelper.daemonID && command.command == AwakeHelper.marker {
+            return awake.start(command)
+        }
         // The marker never reaches a shell: an in-process listener, not a process.
         if command.command.hasPrefix(ProxyShare.builtInCommandPrefix) { return builtInProxy.start(command) }
         if command.openInTerminal { return terminal.start(command) }   // priority: terminal

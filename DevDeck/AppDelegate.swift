@@ -13,6 +13,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let cleanupModel: CleanupModel
     let claudeTabs = ClaudeTabsModel()
     let energy = EnergyModel()
+    let awake: AwakeModel
     let engine = EngineModel()
 
     private var menuBar: MenuBarController?
@@ -20,6 +21,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     override init() {
         manager = ProcessManager(runner: RoutingCommandRunner(), notifier: notifier)
         cleanupModel = CleanupModel(manager: manager)
+        awake = AwakeModel(manager: manager)
         super.init()
     }
 
@@ -64,7 +66,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         updateController.configure(autoUpdateEnabled: store.config.settings.autoUpdateEnabled)
         menuBar = MenuBarController(store: store, manager: manager, appModel: appModel,
                                     updateController: updateController, proxyManager: proxyManager,
-                                    claudeTabs: claudeTabs, energy: energy, engine: engine)
+                                    claudeTabs: claudeTabs, energy: energy, engine: engine, awake: awake)
+        awake.startMonitoring()
         energy.isEnabled = { [weak store] in store?.config.settings.batteryMonitoring ?? false }
         energy.start()
 
@@ -95,6 +98,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// path rather than the asynchronous one, which macOS may never run. What that path costs is
     /// documented on `captureBeforeShutdown` itself; it is not unconditionally bounded.
     func applicationWillTerminate(_ notification: Notification) {
+        awake.stop()   // the privileged helper restores sleep even after this process exits
         claudeTabs.captureBeforeShutdown()
     }
 
@@ -114,6 +118,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let daemons = manager.aliveDaemons.filter {
             !($0 == ProxyShare.daemonID && store.config.proxy.engine == .builtIn)
                 && $0 != RemoteProxy.bridgeDaemonID
+                && $0 != AwakeHelper.daemonID   // this lease always ends with the app
         }
         guard !daemons.isEmpty else {
             DiagnosticLog.shared.log("Quit (no live daemons)")
