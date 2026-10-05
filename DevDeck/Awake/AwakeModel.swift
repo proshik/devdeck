@@ -70,7 +70,7 @@ final class AwakeModel {
         recovering = recovery
         manager.run(Command(id: AwakeHelper.daemonID, name: L10n.awakeTitle,
                             command: AwakeHelper.marker, isDaemon: !recovery,
-                            env: ["DEVDECK_AWAKE_SECONDS": String(min(7200, max(1, durationSeconds))),
+                            env: ["DEVDECK_AWAKE_SECONDS": String(durationSeconds == 0 ? 0 : min(7200, max(1, durationSeconds))),
                                   "DEVDECK_AWAKE_RECOVERY": recovery ? "1" : "0"]))
     }
 

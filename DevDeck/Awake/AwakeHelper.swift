@@ -23,7 +23,7 @@ enum AwakeHelper {
         lease=\(shellQuote(lease.path))
         owner=\(shellQuote(owner.uuidString))
         parent=\(max(1, parentPID))
-        duration=\(min(7200, max(1, seconds)))
+        duration=\(seconds == 0 ? 0 : min(7200, max(1, seconds)))
         # Keep this inode: unlinking a flock file would let two owners lock different inodes.
         exec 9>"$lock" || exit 1
         /usr/bin/lockf -s -t 0 9 || { echo 'Another DevDeck keep-awake session is active.' >&2; exit 1; }
@@ -72,7 +72,7 @@ enum AwakeHelper {
         printf '%s\\n' "$owner" > "$ready" || exit 1
         /bin/chmod 644 "$ready" || exit 1
         deadline=$(( $(/bin/date +%s) + duration ))
-        while [ -f "$lease" ] && kill -0 "$parent" 2>/dev/null && [ "$(/bin/date +%s)" -lt "$deadline" ]; do
+        while [ -f "$lease" ] && kill -0 "$parent" 2>/dev/null && { [ "$duration" -eq 0 ] || [ "$(/bin/date +%s)" -lt "$deadline" ]; }; do
             check_battery
             /bin/sleep 2 9>&-
         done

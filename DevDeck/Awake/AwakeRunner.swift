@@ -26,25 +26,41 @@ struct AwakeCommandRunner: CommandRunner {
             .appendingPathComponent("awake-leases/\(owner.uuidString)"))
         let recovery = command.env["DEVDECK_AWAKE_RECOVERY"] == "1"
         let seconds = Int(command.env["DEVDECK_AWAKE_SECONDS"] ?? "") ?? 7200
+        // AppleScript has a finite timeout even for an indefinite helper; use its maximum
+        // (about 68 years) so the authorization transport does not impose a two-hour limit.
+        let authorizationTimeout = seconds == 0 ? Int(Int32.max) : 7500
         let privileged = Command(name: command.name,
                                  command: AwakeHelper.script(lease: lease.url, owner: owner,
                                      parentPID: ProcessInfo.processInfo.processIdentifier,
                                      seconds: seconds, recoveryOnly: recovery), needsSudo: true)
         return AwakeProcess(lease: lease, owner: owner, recovery: recovery) {
-            // Use the native password dialog consistently; never kill the root helper to stop it.
-            let script = "with timeout of 7500 seconds\ndo shell script \"\(AppleScriptEscaper.escape(privileged.command))\" with administrator privileges\nend timeout"
-            return StreamingProcess(makeProcess: {
-                let process = Process()
-                process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
-                process.arguments = ["-e", script]
-                process.standardOutput = Pipe()
-                process.standardError = Pipe()
-                process.standardInput = FileHandle.nullDevice
-                return process
-            }, startedPID: { _ in nil },
-               mapTerminal: { code, cancelled in cancelled ? .cancelled : .terminated(exitCode: code) },
-               cancelMarkers: ["User canceled", "(-128)"])
+            // Same Touch ID path as ordinary sudo commands. AwakeProcess only revokes
+            // the lease on stop; it never kills either authorization process or root helper.
+            guard TouchIDSudo.isEnabled() else { return Self.startViaOsascript(privileged, timeoutSeconds: authorizationTimeout) }
+            return FallbackProcess(
+                primary: { SudoCommandRunner.startViaSudo(privileged) },
+                fallback: { Self.startViaOsascript(privileged, timeoutSeconds: authorizationTimeout) },
+                shouldFallback: { code, sawStdout, stderrTail in
+                    SudoCommandRunner.isAuthFailure(exitCode: code, sawStdout: sawStdout,
+                                                   stderrTail: stderrTail)
+                }
+            )
         }
+    }
+
+    private static func startViaOsascript(_ privileged: Command, timeoutSeconds: Int) -> any RunningProcess {
+        let script = "with timeout of \(timeoutSeconds) seconds\ndo shell script \"\(AppleScriptEscaper.escape(privileged.command))\" with administrator privileges\nend timeout"
+        return StreamingProcess(makeProcess: {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+            process.arguments = ["-e", script]
+            process.standardOutput = Pipe()
+            process.standardError = Pipe()
+            process.standardInput = FileHandle.nullDevice
+            return process
+        }, startedPID: { _ in nil },
+           mapTerminal: { code, cancelled in cancelled ? .cancelled : .terminated(exitCode: code) },
+           cancelMarkers: ["User canceled", "(-128)"])
     }
 }
 
@@ -95,7 +111,7 @@ final class AwakeProcess: RunningProcess, @unchecked Sendable {
         stopped = true
         lock.unlock()
         if !lease.remove() {
-            continuation.yield(.line("Could not revoke keep-awake lease; the helper's timer remains active.", stream: .stderr))
+            continuation.yield(.line("Could not revoke keep-awake lease; quit DevDeck to let the helper restore sleep.", stream: .stderr))
         }
     }
 
