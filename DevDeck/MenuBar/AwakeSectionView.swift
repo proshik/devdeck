@@ -25,6 +25,7 @@ struct AwakeSectionView: View {
                     Text(L10n.awake30Minutes).tag(1800)
                     Text(L10n.awake1Hour).tag(3600)
                     Text(L10n.awake2Hours).tag(7200)
+                    Text(L10n.awakeIndefinite).tag(0)
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()

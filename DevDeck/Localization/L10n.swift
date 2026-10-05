@@ -52,6 +52,7 @@ enum L10n {
     static var awake30Minutes: String { t("30 min", "30 мин") }
     static var awake1Hour: String { t("1 hour", "1 час") }
     static var awake2Hours: String { t("2 hours", "2 часа") }
+    static var awakeIndefinite: String { t("Indefinitely", "Бессрочно") }
     static var awakeRecovery: String { t("Restore sleep", "Восстановить сон") }
     static var awakeRecoveryHelp: String {
         t("A previous session did not finish restoring sleep. Restore its original setting with administrator authorization.",

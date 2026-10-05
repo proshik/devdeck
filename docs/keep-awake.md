@@ -1,13 +1,16 @@
 # Closed-lid keep-awake
 
-The popover offers **Work with lid closed** for 30 minutes, one hour or two hours
-(default). It keeps all local processes running, including coding harnesses that
-were launched outside DevDeck. The display may turn off. This is a manual lease;
+The popover offers **Work with lid closed** for 30 minutes, one hour, two hours
+(default), or **Indefinitely**. The indefinite option has no helper deadline; manual
+stop, app exit, battery and thermal cutoffs still restore sleep. It keeps all local
+processes running, including coding harnesses launched outside DevDeck. The display may turn off. This is a manual lease;
 it does not infer whether an agent is actively working.
 
 ## Accepted scenarios
 
-- Enabling requests native administrator authorization. Waiting for a password is
+- Enabling uses the same administrator authorization as ordinary sudo commands:
+  Touch ID when enabled for sudo, otherwise the native password dialog. Failed
+  Touch ID authorization falls back to that dialog. Waiting for authorization is
   not reported as an active session. Cancelling leaves no active lease.
 - A synthetic daemon runs through `ProcessManager`; no new supervision engine or
   persisted user command is introduced. Normal sudo daemon restrictions remain.
@@ -35,15 +38,18 @@ it does not infer whether an agent is actively working.
 other requests for sleep during the lease. Existing third-party ownership is respected:
 if sleep was already disabled, ending the lease restores that disabled value.
 
-The privileged program is embedded in Swift and passed literally to AppleScript,
-with a timeout longer than the maximum lease. It never executes a writable helper
-file and never writes to a user-controlled path as root. Its root-owned paths are
+The privileged program is embedded in Swift and passed literally to sudo or
+AppleScript, with an AppleScript timeout longer than the maximum lease. It never
+executes a writable helper file and never writes to a user-controlled path as root.
+Its root-owned paths are
 `/var/db/devdeck-awake.previous` and `/var/run/devdeck-awake.{lock,ready}`. The user-owned
 0600 lease under DevDeck Application Support is only checked for existence.
 
 The app's force quit is handled by the surviving helper. Force-killing the helper
 itself cannot run cleanup; use recovery on the next launch. Thermal cutoff requires
-a responsive app; the battery cutoff and maximum duration live in the helper.
+a responsive app; the battery cutoff and timed-session deadline live in the helper.
+For indefinite sessions the AppleScript fallback uses its maximum transport timeout
+(about 68 years), so it does not impose the timed sessions’ two-hour limit.
 
 ## Validation
 

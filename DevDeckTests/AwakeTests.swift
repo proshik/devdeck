@@ -107,6 +107,18 @@ final class AwakeTests: XCTestCase {
         XCTAssertFalse(model.stopping)
     }
 
+    func testIndefiniteDurationReachesRunnerAndCanBeStopped() throws {
+        let runner = FakeCommandRunner()
+        let model = AwakeModel(manager: ProcessManager(runner: runner), hasJournal: { false })
+        model.durationSeconds = 0
+        model.start()
+        let controller = try XCTUnwrap(runner.controller(for: AwakeHelper.daemonID))
+        XCTAssertEqual(controller.command.env["DEVDECK_AWAKE_SECONDS"], "0",
+                       "An indefinite session must not be replaced with a timed lease")
+        model.stop()
+        XCTAssertEqual(controller.stopCount, 1)
+    }
+
     func testHotMacRefusesNewLeaseButStillAllowsSleepRecovery() {
         let runner = FakeCommandRunner()
         let model = AwakeModel(manager: ProcessManager(runner: runner), hasJournal: { true },
