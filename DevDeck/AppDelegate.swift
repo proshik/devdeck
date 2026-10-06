@@ -4,17 +4,22 @@ import AppKit
 /// and the menu bar controller. Both the popover and the main window receive them — single state.
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    let store = CommandStore(defaultConfigData: AppDelegate.bundledDefaultConfig())
+    let store = CommandStore(defaultConfigData: AppRuntime.isIsolated ? nil : AppDelegate.bundledDefaultConfig())
     let notifier = LiveNotifier()
     let manager: ProcessManager
     let appModel = AppModel()
     let updateController = UpdateController()
-    let proxyManager = ProxyManager()
+    let proxyManager: ProxyManager = {
+        let credentials: any ProxyCredentialStore = AppRuntime.isIsolated
+            ? SessionProxyCredentialStore() : KeychainProxyCredentialStore()
+        return ProxyManager(credentials: credentials)
+    }()
     let cleanupModel: CleanupModel
-    let claudeTabs = ClaudeTabsModel()
+    let claudeTabs = ClaudeTabsModel(defaults: AppRuntime.preferences)
     let energy = EnergyModel()
     let awake: AwakeModel
     let engine = EngineModel()
+    let monitoring: DeckMonitoringModel
 
     private var menuBar: MenuBarController?
 
@@ -22,13 +27,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         manager = ProcessManager(runner: RoutingCommandRunner(), notifier: notifier)
         cleanupModel = CleanupModel(manager: manager)
         awake = AwakeModel(manager: manager)
+        monitoring = DeckMonitoringModel(manager: manager, energy: energy)
         super.init()
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        guard !AppRuntime.isTesting else { return }
         DiagnosticLog.shared.installCrashHandlers()
         AppearanceManager.shared.apply()   // apply the persisted Light/Dark/System choice app-wide
-        notifier.requestAuthorization()   // native notifications for daemons/command errors
+        if !AppRuntime.isIsolated { notifier.requestAuthorization() }
         store.start()
         DiagnosticLog.shared.log("DevDeck launch: \(store.config.commands.count) commands, \(store.config.chains.count) chains")
         // The engine is known before the first probe asks for it; the tray timer keeps it fresh.
@@ -37,7 +44,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         cleanupModel.engineKind = { [weak engine] in engine?.activeKind }
         cleanupModel.engineName = { [weak engine] in engine?.activeName }
         // Adopt daemons that survived a previous session (crash / "keep in background") → don't fight over the port.
-        manager.adoptSurvivingDaemons(commands: store.commandsByID)
+        if !AppRuntime.isIsolated { manager.adoptSurvivingDaemons(commands: store.commandsByID) }
         // Read the memory-monitoring flags live from the config — no copy when they change.
         // The VM memory/disk and cluster probes speak `colima ssh`/`colima list`: under another
         // engine they stay off (caches cleared) instead of reporting a stopped colima.
@@ -61,27 +68,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         manager.outputObserver = { [weak proxyManager] commandID, line, stream in
             proxyManager?.ingestDaemonOutput(commandID, line, stream)
         }
-        proxyManager.start()
+        if !AppRuntime.isIsolated { proxyManager.start() }
         // Start Sparkle with the persisted auto-update preference; populates the indicator when off.
-        updateController.configure(autoUpdateEnabled: store.config.settings.autoUpdateEnabled)
+        if !AppRuntime.isIsolated {
+            updateController.configure(autoUpdateEnabled: store.config.settings.autoUpdateEnabled)
+        }
         menuBar = MenuBarController(store: store, manager: manager, appModel: appModel,
                                     updateController: updateController, proxyManager: proxyManager,
-                                    claudeTabs: claudeTabs, energy: energy, engine: engine, awake: awake)
-        awake.startMonitoring()
+                                    claudeTabs: claudeTabs, energy: energy, engine: engine, awake: awake,
+                                    monitoring: monitoring)
+        if !AppRuntime.isIsolated { awake.startMonitoring() }
         energy.isEnabled = { [weak store] in store?.config.settings.batteryMonitoring ?? false }
         energy.start()
 
         // Global hotkey (⌃⌥D) toggles the popover; enabled per the persisted setting.
         HotKeyManager.shared.onTrigger = { [weak menuBar] in menuBar?.toggle() }
-        HotKeyManager.shared.setEnabled(store.config.settings.globalHotkeyEnabled)
+        if !AppRuntime.isIsolated {
+            HotKeyManager.shared.setEnabled(store.config.settings.globalHotkeyEnabled)
+        }
 
         // Run directories are no longer deleted when a command finishes — a live tab keeps its
         // script around for diagnosing. Collect the ones whose terminal is gone now instead.
-        sweepStaleTerminalDirectories()
+        if !AppRuntime.isIsolated { sweepStaleTerminalDirectories() }
 
-        // Snapshots of the Claude Code tabs, and the post-reboot restore.
+        // Snapshots of the coding-agent tabs, and the post-reboot restore.
         // Both closures read live from the config, so a hand-edited config.json — the flag or the
-        // interval — takes effect without a relaunch.
+        // interval — takes effect without a relaunch. Development launches use their own
+        // snapshot and preferences; hosted tests return before starting any services.
         claudeTabs.start(isEnabled: { [weak store] in store?.config.settings.claudeTabsRestore ?? false },
                          captureInterval: { [weak store] in
                              ClaudeTabsCaptureInterval.clamped(
@@ -98,6 +111,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// path rather than the asynchronous one, which macOS may never run. What that path costs is
     /// documented on `captureBeforeShutdown` itself; it is not unconditionally bounded.
     func applicationWillTerminate(_ notification: Notification) {
+        guard !AppRuntime.isTesting else { return }
         awake.stop()   // the privileged helper restores sleep even after this process exits
         claudeTabs.captureBeforeShutdown()
     }

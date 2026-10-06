@@ -29,6 +29,7 @@ enum SnapshotRowAction {
 /// `GroupBox` styling — the two sections belong to the same page and read better sharing one
 /// vocabulary than mixing two.
 struct ClaudeTabsView: View {
+    @Environment(CommandStore.self) private var store
     @Environment(ClaudeTabsModel.self) private var claudeTabs
     @State private var historyQuery = ""
 
@@ -50,6 +51,10 @@ struct ClaudeTabsView: View {
         // it — usually the longer of the two — gets the rest of the page.
         VStack(alignment: .leading, spacing: 12) {
             header
+            Toggle(L10n.claudeTabsRestoreToggle, isOn: Binding(
+                get: { store.config.settings.claudeTabsRestore },
+                set: { store.setClaudeTabsRestore($0) }
+            ))
 
             if entries.isEmpty {
                 Text(L10n.claudeTabsNoSnapshot).foregroundStyle(.secondary)

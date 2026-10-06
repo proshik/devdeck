@@ -22,22 +22,25 @@ Launch, stop, and monitor local dev commands and long-running daemons
 
 </div>
 
-> Swift + SwiftUI/AppKit · `NSStatusItem` + `NSPopover` · sandbox-free · `LSUIElement` (menu bar only, no Dock icon).
+> Swift + SwiftUI/AppKit · `NSStatusItem` + `NSPopover` · sandbox-free · menu bar launch, Dock and ⌘Tab while the full window is open.
 
 ---
 
 ## Features
 
-- **Menu bar deck** on every display: click the icon → a minimalist popover with your
-  **commands**, **daemons**, and **chains**; run/stop buttons and status indicators
+- **Menu bar deck** on every display: compact **Environment**, **Monitoring**, and **Displays**
+  sections. Environment contains your **commands**, **daemons**, **chains**, and **port forwards**;
+  run/stop buttons and status indicators
   (grey / yellow spinner / green daemon / red).
 - **Collapsible sections** with an active counter; the collapse state is remembered across launches.
-- **Main window**: command editor, chain builder (drag-and-drop ordering), live logs.
+- **Main window**: grouped sidebar, command editor, chain builder (drag-and-drop ordering),
+  live logs, General settings and a separate DevDeck Updates page.
 - **Chains** — sequential execution, stop on error, the failed step highlighted.
 - **sudo commands** — via the native macOS password dialog (`osascript … with administrator privileges`).
 - **Memory freeing** — gracefully quit memory-hungry GUI apps before a heavy build and
   relaunch them afterwards (for a memory-hungry `just dev-build`).
-- **Memory header** — RAM (used/total/%), swap, color by pressure; auto-refreshes once a second.
+- **Monitoring** — RAM (used/total/%), swap, load average, container and energy measurements;
+  compact rows in the panel and dedicated pages with monitoring settings.
 - **Cleanup page** — where the colima disk goes (`docker system df` for the VM and for the docker
   inside the minikube node) with one confirm-first button per reclaimable category, and a colima
   restart for when the VM's page cache has eaten the Mac. The popover points at it past 85%.
@@ -69,7 +72,7 @@ brew install --cask proshik/tap/devdeck
 ```
 
 This adds the [`proshik/tap`](https://github.com/proshik/homebrew-tap) tap automatically and installs
-the latest release. The icon appears in the menu bar (no Dock icon — it's an `LSUIElement` app).
+the latest release. The icon appears in the menu bar at launch.
 
 - **Homebrew 6.0+** asks you to trust a third-party tap once. If you see "untrusted tap", run
   `brew trust proshik/tap` and re-run the install.
@@ -123,7 +126,9 @@ Grab the `.dmg` from [Releases](https://github.com/proshik/devdeck/releases) and
 - **Language:** Swift, UI in SwiftUI + AppKit (`NSStatusItem`, `NSPopover`).
 - **Build:** an Xcode project (`DevDeck.xcodeproj`) — produces the `.app` bundle, `Info.plist`, icon,
   and live previews out of the box; the path to eventual distribution (Mac App Store / notarization).
-- **`Info.plist`:** `LSUIElement = true` (no Dock icon, menu bar only). No sandbox — it needs to launch
+- **`Info.plist`:** `LSUIElement = true` starts in menu bar mode. Opening the full window switches
+  to a regular app with Dock/⌘Tab; closing it returns to menu bar mode without stopping services.
+  No sandbox — it needs to launch
   external processes and reach arbitrary working directories.
 - **One third-party dependency:** [Sparkle](https://sparkle-project.org) (in-app updates), pulled in
   via SwiftPM. Nothing else — no networking, UI or utility libraries.
@@ -141,6 +146,22 @@ open build/dd/Build/Products/Debug/DevDeck.app
 ```
 
 **With `just`:** `just run`
+
+**Isolated development app:**
+
+```sh
+./scripts/run-development.sh
+```
+
+This opens **DevDeck — Development** with a separate app identity, preferences
+and configuration under `/tmp/devdeck-development-data`. Installed proxy credentials
+are not read; development credentials stay in memory. Saved services, session
+capture, global hotkey registration and automatic updates do not start automatically.
+Commands you launch explicitly still run. Close the development app before rerunning
+the script. `DEVDECK_DEVELOPMENT_DATA` can select another absolute configuration path.
+
+See the [module specification](docs/devdeck-modules-spec.md) and
+[implementation stages](docs/devdeck-modules-implementation-plan.md).
 
 ## Tests
 
@@ -297,7 +318,7 @@ expected. The target Mac must be on **macOS 15 (Sequoia)+**.
    - **Right-click `DevDeck.app` → "Open" → "Open"** (the dialog remembers the permission); **or**
    - in the terminal: `xattr -dr com.apple.quarantine /Applications/DevDeck.app`, then launch; **or**
    - launch it, get the rejection, then **System Settings → Privacy & Security → "Open Anyway"**.
-3. The icon appears in the menu bar (it's not in the Dock — that's `LSUIElement`).
+3. The icon appears in the menu bar. Opening the full window also makes DevDeck available in Dock and ⌘Tab.
 
 > The quarantine attribute is set **only when downloading via a browser/AirDrop**. If you move the dmg
 > over `scp`/a flash drive, the quarantine-clearing step may not be needed.

@@ -1,5 +1,9 @@
 # DevDeck — Implementation Plan
 
+Новая переделка интерфейса и дополнительные функции по принятому нативному дизайну:
+[спецификация](devdeck-modules-spec.md) и
+[план по законченным этапам](devdeck-modules-implementation-plan.md).
+
 ## Context
 
 The user frequently runs a set of commands manually in the terminal as part of the local dev cycle for myproject:
