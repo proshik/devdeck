@@ -37,6 +37,18 @@ final class UpdateController: NSObject, SPUUpdaterDelegate {
     /// How many published releases are newer than the installed build.
     private(set) var releasesBehind: Int = 0
     var updateAvailable: Bool { releasesBehind > 0 }
+    private(set) var isChecking = false
+    private(set) var lastCheckedAt: Date?
+    private(set) var lastError: String?
+
+    var statusText: String {
+        if isChecking { return L10n.deckChecking }
+        if let lastError { return lastError }
+        if updateAvailable, let latestVersion {
+            return L10n.updateAvailableRow(currentVersion, latestVersion, behind: releasesBehind)
+        }
+        return lastCheckedAt == nil ? L10n.deckNotChecked : L10n.upToDate
+    }
 
     override init() {
         currentVersion = Bundle.main.shortVersion
@@ -53,7 +65,9 @@ final class UpdateController: NSObject, SPUUpdaterDelegate {
         do {
             try updater.start()
         } catch {
+            lastError = error.localizedDescription
             DiagnosticLog.shared.log("Sparkle failed to start: \(error.localizedDescription)", level: .warn)
+            return
         }
         if !autoUpdateEnabled { checkSilently() }
     }
@@ -65,15 +79,33 @@ final class UpdateController: NSObject, SPUUpdaterDelegate {
 
     /// Silent background probe — populates `latestVersion` / `releasesBehind` without any UI.
     func checkSilently() {
+        guard !isChecking, controller.updater.canCheckForUpdates else { return }
+        isChecking = true
+        lastError = nil
         controller.updater.checkForUpdateInformation()
     }
 
     /// User-initiated check that shows Sparkle's standard install UI.
     func checkForUpdatesUserInitiated() {
+        guard !isChecking, controller.updater.canCheckForUpdates else { return }
+        isChecking = true
+        lastError = nil
         controller.checkForUpdates(nil)
     }
 
     // MARK: - SPUUpdaterDelegate
+
+    func updater(_ updater: SPUUpdater, willScheduleUpdateCheckAfterDelay delay: TimeInterval) {
+        isChecking = false
+    }
+
+    func updater(_ updater: SPUUpdater, didFinishUpdateCycleFor updateCheck: SPUUpdateCheck, error: Error?) {
+        isChecking = false
+        if let error, !((error as NSError).domain == SUSparkleErrorDomain
+                        && (error as NSError).code == Int(SUError.noUpdateError.rawValue)) {
+            lastError = error.localizedDescription
+        }
+    }
 
     func updater(_ updater: SPUUpdater, didFinishLoading appcast: SUAppcast) {
         // Sparkle compares CFBundleVersion; our build numbers are monotonic integers (git commit count).
@@ -85,10 +117,13 @@ final class UpdateController: NSObject, SPUUpdaterDelegate {
         let summary = appcastSummary(installedBuild: installed, items: items)
         releasesBehind = summary.behind
         latestVersion = summary.latest
+        lastCheckedAt = .now
     }
 
     func updaterDidNotFindUpdate(_ updater: SPUUpdater) {
+        lastError = nil
         releasesBehind = 0
         latestVersion = currentVersion
+        lastCheckedAt = .now
     }
 }

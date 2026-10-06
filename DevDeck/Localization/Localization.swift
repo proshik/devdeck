@@ -32,12 +32,12 @@ final class LocalizationManager {
     var language: AppLanguage {
         didSet {
             guard oldValue != language else { return }
-            UserDefaults.standard.set(language.rawValue, forKey: Self.defaultsKey)
+            AppRuntime.preferences.set(language.rawValue, forKey: Self.defaultsKey)
         }
     }
 
     init() {
-        if let raw = UserDefaults.standard.string(forKey: Self.defaultsKey),
+        if let raw = AppRuntime.preferences.string(forKey: Self.defaultsKey),
            let stored = AppLanguage(rawValue: raw) {
             language = stored
         } else {

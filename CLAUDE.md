@@ -19,7 +19,9 @@ generic and not tied to any specific project.
 - **Build:** Xcode project (`DevDeck.xcodeproj`). Produces an `.app` bundle, `Info.plist`, icon,
   and live preview out of the box; the only path to future distribution (Mac App Store / notarization
   via Archive → Distribute).
-- **`Info.plist`:** `LSUIElement = true` (no Dock icon, menu bar only). Sandbox-free —
+- **`Info.plist`:** `LSUIElement = true` starts in menu bar mode. While the full window is open,
+  activation policy is `regular` (Dock and Cmd-Tab); closing it restores `accessory` without quitting.
+  Sandbox-free —
   required for launching external processes and accessing arbitrary working directories.
 - **Minimum macOS:** set to the current version of the developer's machine.
 - **File-system-synchronized groups:** a new `.swift` under `DevDeck/` or `DevDeckTests/` is picked

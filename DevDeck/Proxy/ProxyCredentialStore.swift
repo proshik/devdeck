@@ -18,6 +18,24 @@ protocol ProxyCredentialStore: Sendable {
     func setPassword(_ password: String?, for account: String)
 }
 
+/// The isolated development app must neither read nor change installed proxy credentials.
+final class SessionProxyCredentialStore: ProxyCredentialStore, @unchecked Sendable {
+    private let lock = NSLock()
+    private var passwords: [String: String] = [:]
+
+    func password(for account: String) -> String? {
+        lock.lock()
+        defer { lock.unlock() }
+        return passwords[account]
+    }
+
+    func setPassword(_ password: String?, for account: String) {
+        lock.lock()
+        defer { lock.unlock() }
+        passwords[account] = password?.isEmpty == false ? password : nil
+    }
+}
+
 /// The real store — a generic password item per account under one service.
 /// Upsert is delete-then-add: simpler than `SecItemUpdate` and idempotent when nothing is stored yet.
 struct KeychainProxyCredentialStore: ProxyCredentialStore {

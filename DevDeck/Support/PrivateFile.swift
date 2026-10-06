@@ -23,8 +23,7 @@ enum PrivateFile {
 
     /// `~/Library/Application Support/DevDeck` — the config, the log and the generated gost config.
     static var applicationSupportDirectory: URL {
-        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("DevDeck")
+        AppRuntime.supportDirectory
     }
 
     /// Create the directory if it is missing, and tighten it to 0700 either way.

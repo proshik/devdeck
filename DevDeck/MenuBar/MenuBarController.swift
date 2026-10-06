@@ -3,11 +3,14 @@ import SwiftUI
 
 /// Tray icon + popover control panel. Replaces the temporary menu from Stage 0.
 @MainActor
-final class MenuBarController: NSObject {
+final class MenuBarController: NSObject, NSPopoverDelegate {
     private let statusItem: NSStatusItem
     private let popover: NSPopover
     private let manager: ProcessManager
     private let engine: EngineModel
+    private let appModel: AppModel
+    private let monitoring: DeckMonitoringModel
+    private let monitoringReader = UUID()
     private var iconTimer: Timer?
 
     /// Colored pressure dot drawn over the (always-template) tray glyph. Kept as a separate
@@ -33,15 +36,22 @@ final class MenuBarController: NSObject {
 
     init(store: CommandStore, manager: ProcessManager, appModel: AppModel,
          updateController: UpdateController, proxyManager: ProxyManager, claudeTabs: ClaudeTabsModel,
-         energy: EnergyModel, engine: EngineModel, awake: AwakeModel) {
+         energy: EnergyModel, engine: EngineModel, awake: AwakeModel, monitoring: DeckMonitoringModel,
+         popover suppliedPopover: NSPopover? = nil) {
+        let popover = suppliedPopover ?? NSPopover()
         self.manager = manager
         self.engine = engine
+        self.appModel = appModel
+        self.monitoring = monitoring
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        popover = NSPopover()
+        self.popover = popover
         super.init()
 
+        appModel.dismissPanel = { [weak self] in self?.popover.performClose(nil) }
+
         popover.behavior = .transient
-        popover.contentViewController = NSHostingController(
+        popover.delegate = self
+        let hosting = NSHostingController(
             rootView: PopoverView()
                 .environment(store)
                 .environment(manager)
@@ -52,13 +62,18 @@ final class MenuBarController: NSObject {
                 .environment(energy)
                 .environment(engine)
                 .environment(awake)
+                .environment(monitoring)
+                .defaultAppStorage(AppRuntime.preferences)
         )
+        popover.contentViewController = hosting
 
         if let button = statusItem.button {
+            button.toolTip = AppRuntime.isIsolated ? L10n.deckDevelopmentTitle : "DevDeck"
             button.image = TrayIcon.image()   // always template → stays light/adaptive on a dark menu bar
             button.image?.accessibilityDescription = "DevDeck"
             button.action = #selector(togglePopover)
             button.target = self
+            button.sendAction(on: [.leftMouseUp, .rightMouseUp])
 
             // Pin the dot to the top-right corner of the glyph box via constraints, so it
             // resolves at layout time (button.bounds isn't final yet during init) and the
@@ -113,15 +128,56 @@ final class MenuBarController: NSObject {
     }
 
     /// Public entry point for the global hotkey.
-    func toggle() { togglePopover() }
+    func toggle() { togglePanel(focusPicker: true) }
+
+    func popoverWillShow(_ notification: Notification) { monitoring.begin(monitoringReader) }
+    func popoverDidClose(_ notification: Notification) { monitoring.end(monitoringReader) }
 
     @objc private func togglePopover() {
+        if let event = NSApp.currentEvent,
+           event.type == .rightMouseUp || event.modifierFlags.contains(.control),
+           let button = statusItem.button {
+            popover.performClose(nil)
+            let menu = NSMenu()
+            let quit = NSMenuItem(title: L10n.quit, action: #selector(quitFromMenu), keyEquivalent: "q")
+            quit.target = self
+            menu.addItem(quit)
+            NSMenu.popUpContextMenu(menu, with: event, for: button)
+            return
+        }
+        togglePanel(focusPicker: false)
+    }
+
+    @objc private func quitFromMenu() {
+        // With live daemons the application delegate supplies the Kill / Keep / Cancel dialog.
+        guard !manager.hasLiveDaemons() else {
+            NSApp.terminate(nil)
+            return
+        }
+        NSApp.activate()
+        let alert = NSAlert()
+        alert.messageText = L10n.quitConfirmTitle
+        alert.informativeText = L10n.quitConfirmMessage
+        alert.addButton(withTitle: L10n.quitButton)
+        alert.addButton(withTitle: L10n.cancel)
+        if alert.runModal() == .alertFirstButtonReturn { NSApp.terminate(nil) }
+    }
+
+    private func togglePanel(focusPicker: Bool) {
         guard let button = statusItem.button else { return }
         if popover.isShown {
             popover.performClose(nil)
         } else {
+            let screen = NSScreen.screens.first { $0.frame.contains(NSEvent.mouseLocation) }
+                ?? button.window?.screen ?? NSScreen.main
+            appModel.panelContentHeightLimit = min(560, max(120, (screen?.visibleFrame.height ?? 800) - 160))
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
-            popover.contentViewController?.view.window?.makeKey()
+            if let window = popover.contentViewController?.view.window {
+                window.makeKey()
+                // Mouse opening starts without an automatic focus ring. Tab navigation and
+                // opening with the global hotkey retain the native keyboard focus indication.
+                if !focusPicker { window.makeFirstResponder(nil) }
+            }
         }
     }
 }

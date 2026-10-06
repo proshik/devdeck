@@ -40,13 +40,13 @@ final class AppearanceManager {
     var appearance: AppAppearance {
         didSet {
             guard oldValue != appearance else { return }
-            UserDefaults.standard.set(appearance.rawValue, forKey: Self.defaultsKey)
+            AppRuntime.preferences.set(appearance.rawValue, forKey: Self.defaultsKey)
             apply()
         }
     }
 
     init() {
-        if let raw = UserDefaults.standard.string(forKey: Self.defaultsKey),
+        if let raw = AppRuntime.preferences.string(forKey: Self.defaultsKey),
            let stored = AppAppearance(rawValue: raw) {
             appearance = stored
         } else {

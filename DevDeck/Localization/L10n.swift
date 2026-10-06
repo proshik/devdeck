@@ -471,7 +471,7 @@ enum L10n {
     }
     static var startupSection: String { t("Startup", "Запуск") }
     static var launchAtLoginToggle: String { t("Launch at login", "Запускать при входе") }
-    static var globalHotkeyToggle: String { t("Global hotkey ⌃⌥D opens the deck", "Глобальный хоткей ⌃⌥D открывает деку") }
+    static var globalHotkeyToggle: String { t("Open the panel with ⌃⌥D", "Открывать панель сочетанием ⌃⌥D") }
     static var languagePicker: String { t("Interface language", "Язык интерфейса") }
 
     // MARK: - Notifications
@@ -614,7 +614,7 @@ enum L10n {
         }
     }
     static var swapRate: String { t("Swap rate", "Swap-rate") }
-    static var cpuLoad: String { t("CPU load", "Загрузка CPU") }
+    static var cpuLoad: String { t("CPU load (1 min)", "Нагрузка CPU (1 мин)") }
     static var diskVM: String { t("VM disk", "Диск VM") }
     static func clusterHealthToggle(engineName: String?) -> String {
         let name = engineName ?? "VM"

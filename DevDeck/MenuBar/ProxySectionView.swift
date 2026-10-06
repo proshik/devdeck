@@ -293,8 +293,9 @@ struct ProxySectionView: View {
     /// The ☰ button opens the main window on the Proxy page (there is no per-run log to show —
     /// gost's output lands in the daemon log under its own id).
     private func openProxyPage() {
-        appModel.selection = .proxy
-        openWindow(id: "main")
-        NSApp.activate()
+        appModel.showMainWindow(selection: .proxy) {
+            openWindow(id: "main")
+            NSApp.activate()
+        }
     }
 }

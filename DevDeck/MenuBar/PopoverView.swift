@@ -1,379 +1,135 @@
 import SwiftUI
 
-/// Minimalist menu bar control deck (variant B — "Commands"/"Chains" sections).
-/// A thin view: data from `CommandStore`, statuses from `ProcessManager`, actions live there too.
+/// Native compact control panel backed by the existing process and settings models.
 struct PopoverView: View {
     @Environment(CommandStore.self) private var store
     @Environment(ProcessManager.self) private var manager
     @Environment(AppModel.self) private var appModel
     @Environment(UpdateController.self) private var updates
-    @Environment(EnergyModel.self) private var energy
-    @Environment(EngineModel.self) private var engine
     @Environment(\.openWindow) private var openWindow
+    @State private var contentHeight: CGFloat = 1
 
-    // Section collapse state is remembered across popover opens and app restarts.
     @AppStorage("popover.section.commands.collapsed") private var commandsCollapsed = false
     @AppStorage("popover.section.daemons.collapsed") private var daemonsCollapsed = false
     @AppStorage("popover.section.chains.collapsed") private var chainsCollapsed = false
-    /// Only the everyday metrics show by default; the rest (and the battery) fold under "More".
-    @AppStorage("popover.section.metrics.collapsed") private var metricsCollapsed = true
-    /// Metric whose explanation is unfolded under the grid (click a cell; click again to fold).
-    /// Tooltips exist too, but the header redraws every second and macOS never gets the still
-    /// second of hovering it wants before showing one.
-    @State private var explainedMetric: HeaderMetric?
+    @AppStorage("popover.section.ports.collapsed") private var portsCollapsed = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            memoryHeader
-                .task {
-                    // Refresh colima/minikube health, the VM disk and the minikube line while the
-                    // popover is open — the three ssh/CLI probes that are too slow for the 2 s loop.
-                    while !Task.isCancelled {
-                        await manager.refreshClusterHealth()
-                        await manager.refreshVMDisk()
-                        await manager.refreshMinikubeSample()
-                        try? await Task.sleep(for: .seconds(15))
-                    }
-                }
+        @Bindable var appModel = appModel
+        VStack(spacing: 0) {
+            HStack(spacing: 12) {
+                Text("DevDeck").font(.headline)
+                Spacer(minLength: 12)
+                Button(L10n.deckSettings, systemImage: "gearshape") { openItem(.settings) }
+                .labelStyle(.iconOnly).buttonStyle(.borderless)
+                .frame(width: 24, height: 24)
+                .foregroundStyle(updates.updateAvailable || diskNeedsCleanup ? Color.orange : Color.primary)
+                .help(updates.updateAvailable ? L10n.updateAvailableHelp(updates.latestVersion ?? "")
+                      : diskNeedsCleanup ? L10n.cleanupHelp : L10n.settings)
+            }.padding(.horizontal, 16).padding(.vertical, 8)
+            PanelSectionPicker(selection: $appModel.panelSection)
+                .frame(maxWidth: .infinity).padding(.horizontal, 16).padding(.bottom, 12)
             Divider()
-
-            if let error = store.error {
-                Text(error)
-                    .font(.caption2)
-                    .foregroundStyle(.white)
-                    .padding(6)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color.red.opacity(0.85))
-            }
-
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
-                    if commands.isEmpty && daemons.isEmpty && store.config.chains.isEmpty {
-                        Text(L10n.noCommandsYet)
-                            .foregroundStyle(.secondary)
-                            .font(.system(size: 12))
-                            .padding(12)
+                    if let error = store.error {
+                        Label(error, systemImage: "exclamationmark.triangle.fill")
+                            .font(.caption).foregroundStyle(.red)
+                            .padding(16)
                     }
-
-                    if !commands.isEmpty {
-                        CollapsibleSection(title: L10n.commands, count: commands.count,
-                                           runningCount: runningCommandsCount,
-                                           collapsed: $commandsCollapsed) {
-                            ForEach(commands) { commandRow($0) }
-                        }
+                    switch appModel.panelSection {
+                    case .environment: environmentContent
+                    case .monitoring: monitoringContent
+                    case .displays:
+                        AwakeSectionView()
+                        Button(L10n.deckDetails) { openItem(.awake) }
+                            .buttonStyle(.plain).foregroundStyle(.tint)
+                            .padding(.horizontal, 16).padding(.bottom, 10)
                     }
-
-                    if !daemons.isEmpty {
-                        CollapsibleSection(title: L10n.daemons, count: daemons.count,
-                                           runningCount: aliveDaemonsCount,
-                                           collapsed: $daemonsCollapsed) {
-                            ForEach(daemons) { commandRow($0) }
-                        }
-                    }
-
-                    if !store.config.chains.isEmpty {
-                        CollapsibleSection(title: L10n.chains, count: store.config.chains.count,
-                                           runningCount: runningChainsCount,
-                                           collapsed: $chainsCollapsed) {
-                            ForEach(store.config.chains) { chainRow($0) }
-                        }
-                    }
-
-                    // Renders itself only when sharing or discovery is switched on.
-                    ProxySectionView()
-
-                    ClaudeTabsSectionView()
                 }
-                .padding(.vertical, 4)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
+                .onGeometryChange(for: CGFloat.self) { ceil($0.size.height) } action: {
+                    if contentHeight != $0 { contentHeight = $0 }
+                }
             }
-
-            Divider()
-            AwakeSectionView()
-            Divider()
-            footer
+            .scrollBounceBehavior(.basedOnSize)
+            .frame(height: min(contentHeight, appModel.panelContentHeightLimit))
         }
+        .font(.body)
         .frame(width: 380)
-        // minHeight (not maxHeight) actually grows the popover: it sizes to content, so a cap alone
-        // does nothing when the content is shorter. The inner ScrollView fills the extra space.
-        .frame(minHeight: 675, maxHeight: 950)
-        .focusEffectDisabled()   // don't draw a focus ring on the first button when the popover opens
-        .task {
-            while !Task.isCancelled {
-                await manager.refreshVMSample()
-                await manager.refreshHostSample()
-                await energy.refresh()   // battery every tick; a process snapshot at most every 10 s
-                try? await Task.sleep(for: .seconds(2))
-            }
-        }
+        .fixedSize(horizontal: false, vertical: true)
+        .background(.background)
     }
 
-    /// Two-column layout for the metric cells below the memory bar.
-    private static let metricColumns = [
-        GridItem(.flexible(), spacing: 12, alignment: .leading),
-        GridItem(.flexible(), spacing: 12, alignment: .leading),
-    ]
-    /// Colour for a metric cell with no data (value is left blank).
-    private static let placeholderColor = Color.secondary.opacity(0.45)
-
-    /// Header: system memory bar, the metrics looked at every day, and the rest behind "More".
-    /// Every label in a visible grid is always present — the value is simply left blank when there's
-    /// no data — so the block keeps its height and the command list below never jumps.
-    private var memoryHeader: some View {
-        TimelineView(.periodic(from: .now, by: 1)) { _ in
-            let memory = SystemMemory.current()
-            let swapRate = swapRateText()
-            let alarm = HeaderMetric.hiddenAlarm(
-                cluster: manager.cachedClusterHealth?.level,
-                swap: memory.swapUsedBytes > 0
-                    ? SystemMemory.swapSeverity(swapUsedBytes: memory.swapUsedBytes, totalRAMBytes: memory.totalBytes)
-                    : nil,
-                pressure: manager.cachedHostSample?.pressure,
-                swapRateActive: !swapRate.isEmpty,
-                battery: energy.battery)
-            VStack(alignment: .leading, spacing: 7) {
-                HStack {
-                    Text(L10n.memory).foregroundStyle(.secondary)
-                    Spacer()
-                    Text(SystemMemory.format(usedBytes: memory.usedBytes, totalBytes: memory.totalBytes))
-                        .monospacedDigit()
-                        .foregroundStyle(.primary)
-                }
-                .font(.system(size: 11))
-                .help(HeaderMetric.memory.help)
-
-                GeometryReader { geo in
-                    ZStack(alignment: .leading) {
-                        Capsule().fill(Color.secondary.opacity(0.20))
-                        Capsule().fill(pressureColor(memory.fraction))
-                            .frame(width: max(2, geo.size.width * memory.fraction))
-                    }
-                }
-                .frame(height: 4)
-
-                LazyVGrid(columns: Self.metricColumns, alignment: .leading, spacing: 5) {
-                    ForEach(HeaderMetric.pinned.filter { $0.isAvailable(engineKind: engine.activeKind) },
-                            id: \.self) { metric in
-                        metricCell(metric, memory: memory, swapRate: swapRate)
-                    }
-                    metricsToggle(alarm: alarm)
-                }
-
-                if !metricsCollapsed {
-                    LazyVGrid(columns: Self.metricColumns, alignment: .leading, spacing: 5) {
-                        // No battery (a desktop Mac, or the setting is off) — no cell at all.
-                        ForEach(HeaderMetric.hidden.filter {
-                                    ($0 != .battery || energy.battery != nil) && $0.isAvailable(engineKind: engine.activeKind)
-                                }, id: \.self) { metric in
-                            metricCell(metric, memory: memory, swapRate: swapRate)
-                        }
-                    }
-                    energyConsumers
-                }
-
-                if let explainedMetric {
-                    (Text(explainedMetric.title(engineName: engine.activeName) + ": ").fontWeight(.semibold) + Text(explainedMetric.help))
-                        .font(.system(size: 10))
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .padding(.top, 4)
-                        .transition(.opacity)
-                }
-
-                // Past the cleanup threshold the disk cell alone is easy to miss — one orange line
-                // that opens the Cleanup page, where the buttons live (the popover stays a deck).
-                if let disk = manager.cachedVMDisk, disk.fraction >= VMDiskInfo.cleanupHintFraction {
-                    Button { openItem(.cleanup) } label: {
-                        Label(L10n.cleanupDiskHint, systemImage: "trash")
-                            .font(.system(size: 10))
-                            .foregroundStyle(.orange)
-                    }
-                    .buttonStyle(.plain)
-                    .padding(.top, 2)
+    private var environmentContent: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if commands.isEmpty && daemons.isEmpty && ports.isEmpty && store.config.chains.isEmpty {
+                HStack(spacing: 8) {
+                    Text(L10n.noCommandsYet).foregroundStyle(.secondary)
+                    Spacer(minLength: 4)
+                    Button(L10n.deckCommands, systemImage: "arrow.up.forward") { openItem(.commands) }
+                        .labelStyle(.iconOnly).buttonStyle(.borderless)
+                        .foregroundStyle(.secondary).frame(width: 28, height: 28)
+                        .help(L10n.deckCommands)
+                }.padding(.horizontal, 16).padding(.vertical, 10)
+            }
+            if !commands.isEmpty {
+                CollapsibleSection(title: L10n.commands, count: commands.count,
+                                   runningCount: runningCommandsCount, collapsed: $commandsCollapsed) {
+                    ForEach(commands) { commandRow($0) }
                 }
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 9)
-        }
-    }
-
-    /// Live swap rate (↑ out to disk, ↓ in from disk): distinguishes "full but stable" from
-    /// "actively thrashing". Gate at ~0.1 MB/s so sub-rounding noise doesn't show. Empty when idle.
-    private func swapRateText() -> String {
-        let outRate = manager.cachedSwapOutRatePages ?? 0
-        let inRate = manager.cachedSwapInRatePages ?? 0
-        let gate = 100_000.0
-        let outActive = outRate * Double(hostPageSize) >= gate
-        let inActive = inRate * Double(hostPageSize) >= gate
-        return [
-            outActive ? "↑" + HostMetricsSample.formatRate(pagesPerSec: outRate, pageSize: hostPageSize) : nil,
-            inActive ? "↓" + HostMetricsSample.formatRate(pagesPerSec: inRate, pageSize: hostPageSize) : nil,
-        ].compactMap { $0 }.joined(separator: " ")
-    }
-
-    /// Value and colour of one grid cell; a blank value in the placeholder colour means no data.
-    private func cellValue(_ metric: HeaderMetric, memory: SystemMemory, swapRate: String) -> (String, Color) {
-        switch metric {
-        case .memory:
-            return ("", Self.placeholderColor)   // drawn as the bar above the grid
-        case .cluster:
-            let health = manager.cachedClusterHealth
-            return (health.map { L10n.clusterHealthValue($0.level) } ?? "",
-                    health.map { clusterColor($0.level) } ?? Self.placeholderColor)
-        case .swap:
-            guard memory.swapUsedBytes > 0 else { return ("", Self.placeholderColor) }
-            let color: Color = switch SystemMemory.swapSeverity(
-                swapUsedBytes: memory.swapUsedBytes, totalRAMBytes: memory.totalBytes) {
-            case .normal: .secondary
-            case .elevated: .orange
-            case .high: .red
-            }
-            return (SystemMemory.formatGiB(memory.swapUsedBytes), color)
-        case .vmEngine:
-            let vm = manager.vmMemorySample()
-            return (vm?.format() ?? "", vm.map { pressureColor($0.fraction) } ?? Self.placeholderColor)
-        case .vmMinikube:
-            // minikube memory from inside the VM: 1 s sampler during a run, 15 s refresh otherwise.
-            let mk = manager.minikubeSample()
-            return (mk.map { $0.format() + ($0.rustcCount > 0 ? " · rustc \($0.rustcCount)" : "") } ?? "",
-                    mk.map { pressureColor($0.fraction) } ?? Self.placeholderColor)
-        case .pressure:
-            let host = manager.cachedHostSample
-            return (host.map { L10n.pressureValue($0.pressure) } ?? "",
-                    host.map { pressureLevelColor($0.pressure) } ?? Self.placeholderColor)
-        case .diskVM:
-            let disk = manager.cachedVMDisk
-            return (disk.map { $0.format() } ?? "", disk.map { pressureColor($0.fraction) } ?? Self.placeholderColor)
-        case .swapRate:
-            return swapRate.isEmpty ? ("", Self.placeholderColor) : (swapRate, .orange)
-        case .cpuLoad:
-            // 1-minute load average, coloured by load-per-core (thrashing during builds).
-            var loads = [Double](repeating: 0, count: 3)
-            guard getloadavg(&loads, 3) >= 1 else { return ("", Self.placeholderColor) }
-            let cores = Double(max(1, ProcessInfo.processInfo.activeProcessorCount))
-            return (String(format: "%.2f", loads[0]), pressureColor(loads[0] / cores))
-        case .battery:
-            guard let battery = energy.battery else { return ("", Self.placeholderColor) }
-            let color: Color = !battery.onBattery ? .secondary
-                : battery.percent <= HeaderMetric.lowBatteryCritical ? .red
-                : battery.percent <= HeaderMetric.lowBatteryWarning ? .orange : .green
-            return (battery.format(), color)
-        }
-    }
-
-    private func metricCell(_ metric: HeaderMetric, memory: SystemMemory, swapRate: String) -> some View {
-        let (value, color) = cellValue(metric, memory: memory, swapRate: swapRate)
-        return metricCell(metric, value, color: color)
-    }
-
-    /// One label · value metric cell for the header grid; the tooltip explains the figure.
-    private func metricCell(_ metric: HeaderMetric, _ value: String, color: Color) -> some View {
-        HStack(spacing: 4) {
-            Text(metric.title(engineName: engine.activeName)).foregroundStyle(.secondary)
-            Spacer(minLength: 4)
-            Text(value).monospacedDigit().foregroundStyle(color).lineLimit(1)
-        }
-        .font(.system(size: 10))
-        .contentShape(Rectangle())
-        .onTapGesture { explainedMetric = explainedMetric == metric ? nil : metric }
-        .help(metric.help)
-    }
-
-    /// "More ▸" in the last pinned cell. Collapsed, it takes the colour of the worst hidden metric,
-    /// so folding them away never hides trouble.
-    private func metricsToggle(alarm: HeaderMetric.Alarm) -> some View {
-        Button {
-            withAnimation(.easeInOut(duration: 0.18)) {
-                metricsCollapsed.toggle()
-                if metricsCollapsed, let explainedMetric, HeaderMetric.hidden.contains(explainedMetric) {
-                    self.explainedMetric = nil
+            if !daemons.isEmpty {
+                CollapsibleSection(title: L10n.daemons, count: daemons.count,
+                                   runningCount: aliveDaemonsCount, collapsed: $daemonsCollapsed) {
+                    ForEach(daemons) { commandRow($0) }
                 }
             }
-        } label: {
-            HStack(spacing: 3) {
-                Spacer(minLength: 4)
-                Text(L10n.moreMetrics)
-                Image(systemName: metricsCollapsed ? "chevron.right" : "chevron.down")
-                    .font(.system(size: 8, weight: .semibold))
-            }
-            .font(.system(size: 10))
-            .foregroundStyle(metricsCollapsed ? alarmColor(alarm) : .secondary)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-    }
-
-    private func alarmColor(_ alarm: HeaderMetric.Alarm) -> Color {
-        switch alarm {
-        case .none: return .secondary
-        case .warning: return .orange
-        case .critical: return .red
-        }
-    }
-
-    /// Who used the battery: live while discharging, frozen as "last discharge" once back on AC.
-    @ViewBuilder
-    private var energyConsumers: some View {
-        if energy.battery != nil, let tally = energy.tally {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(energyTitle(tally)).foregroundStyle(.secondary)
-                if energy.consumers.isEmpty {
-                    Text(L10n.energyNoData).foregroundStyle(Self.placeholderColor)
-                }
-                ForEach(energy.consumers, id: \.name) { consumer in
-                    HStack(spacing: 6) {
-                        Text(consumer.name == EnergyTally.vmName
-                             ? HeaderMetric.vmEngine.title(engineName: engine.activeName)
-                             : consumer.name).lineLimit(1).truncationMode(.middle)
-                        Spacer(minLength: 4)
-                        Text("\(Int((consumer.share * 100).rounded()))%")
-                            .monospacedDigit().foregroundStyle(.secondary)
-                        Text(L10n.watts(consumer.averageWatts))
-                            .monospacedDigit()
-                            .frame(minWidth: 46, alignment: .trailing)
-                    }
-                    .padding(.leading, 8)
+            if !ports.isEmpty {
+                CollapsibleSection(title: L10n.deckPorts, count: ports.count,
+                                   runningCount: ports.filter { StatusIndicator.forCommand(manager.states[$0.id]).isStop }.count,
+                                   collapsed: $portsCollapsed) {
+                    ForEach(ports) { commandRow($0) }
                 }
             }
-            .font(.system(size: 10))
-            .padding(.top, 2)
+            if !store.config.chains.isEmpty {
+                CollapsibleSection(title: L10n.chains, count: store.config.chains.count,
+                                   runningCount: runningChainsCount, collapsed: $chainsCollapsed) {
+                    ForEach(store.config.chains) { chainRow($0) }
+                }
+            }
+            ProxySectionView()
+            Divider().padding(.horizontal, 16)
+            ClaudeTabsSectionView()
         }
     }
 
-    private func energyTitle(_ tally: EnergyTally) -> String {
-        let since = tally.since.formatted(date: .omitted, time: .shortened)
-        if !energy.isDischarging {
-            return L10n.energyLastDischarge(since, tally.lastUpdate.formatted(date: .omitted, time: .shortened))
-        }
-        return tally.missedUnplug ? L10n.energySinceObserved(since) : L10n.energySince(since)
-    }
-
-    private func pressureLevelColor(_ level: MemoryPressureLevel) -> Color {
-        switch level {
-        case .normal: return .secondary
-        case .warning: return .orange
-        case .critical: return .red
-        }
-    }
-
-    private func pressureColor(_ fraction: Double) -> Color {
-        fraction < 0.70 ? .green : (fraction < 0.85 ? .yellow : .red)
-    }
-
-    private func clusterColor(_ level: ClusterHealthLevel) -> Color {
-        switch level {
-        case .healthy: return .green
-        case .degraded: return .orange
-        case .down: return .red
-        case .unknown: return .gray
-        }
+    private var monitoringContent: some View {
+        @Bindable var appModel = appModel
+        return VStack(alignment: .leading, spacing: 10) {
+            Picker(L10n.deckMonitoring, selection: $appModel.monitoringSection) {
+                ForEach(MonitoringSection.allCases) { Text($0.title).tag($0) }
+            }.pickerStyle(.segmented).labelsHidden().controlSize(.small)
+            MonitoringMetricsView(section: appModel.monitoringSection)
+            Button(L10n.deckDetails) {
+                switch appModel.monitoringSection {
+                case .mac: openItem(.monitoring)
+                case .containers: openItem(.containers)
+                case .energy: openItem(.energy)
+                }
+            }.buttonStyle(.plain).foregroundStyle(.tint)
+        }.padding(.horizontal, 16).padding(.vertical, 10)
     }
 
     // MARK: splitting and counters
 
     /// Regular commands (not daemons).
-    private var commands: [Command] { store.config.commands.filter { !$0.isDaemon } }
+    private var commands: [Command] { store.config.commands.filter { !$0.isDaemon && $0.port == nil } }
     /// Daemon commands (long-running).
-    private var daemons: [Command] { store.config.commands.filter { $0.isDaemon } }
+    private var daemons: [Command] { store.config.commands.filter { $0.isDaemon && $0.port == nil } }
+
+    private var ports: [Command] { store.config.commands.filter { $0.port != nil } }
 
     private var runningCommandsCount: Int {
         commands.filter { StatusIndicator.forCommand(manager.states[$0.id]).isStop }.count
@@ -392,7 +148,7 @@ struct PopoverView: View {
                 needsSudo: command.needsSudo,
                 indicator: StatusIndicator.forCommand(manager.states[command.id]),
                 onToggle: { toggleCommand(command) },
-                onLogs: { openItem(.command(command.id)) },
+                onLogs: { appModel.detailTab = .logs; openItem(.command(command.id)) },
                 watchdog: command.isDaemon
                     ? DeckRow.WatchdogBadge(enabled: command.watchdogEnabled,
                                             phase: manager.watchdogPhases[command.id])
@@ -413,69 +169,12 @@ struct PopoverView: View {
             needsSudo: false,
             indicator: StatusIndicator.forChain(manager.chainStates[chain.id]),
             onToggle: { toggleChain(chain) },
-            onLogs: { openItem(.chain(chain.id)) }
+            onLogs: { appModel.detailTab = .logs; openItem(.chain(chain.id)) }
         )
-    }
-
-    private var footer: some View {
-        HStack(spacing: 14) {
-            Button(L10n.openDevDeck) { openMainWindow() }
-                .buttonStyle(.plain)
-            Spacer(minLength: 10)
-            if updates.updateAvailable {
-                Button { updates.checkForUpdatesUserInitiated() } label: {
-                    Image(systemName: "arrow.down.circle.fill")
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(.orange)
-                .help(L10n.updateAvailableHelp(updates.latestVersion ?? ""))
-            }
-            Button { revealLog() } label: {
-                Image(systemName: "doc.text")
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
-            .help(L10n.revealLogHelp)
-            // Straight to the Cleanup page; lights up orange once the VM disk is past the threshold.
-            Button { openItem(.cleanup) } label: {
-                Image(systemName: "trash")
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(diskNeedsCleanup ? Color.orange : Color.secondary)
-            .help(L10n.cleanupHelp)
-            Button(L10n.quit) { confirmQuit() }
-                .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
-        }
-        .font(.system(size: 12))
-        .padding(.horizontal, 16)
-        .padding(.vertical, 11)
     }
 
     private var diskNeedsCleanup: Bool {
         (manager.cachedVMDisk?.fraction ?? 0) >= VMDiskInfo.cleanupHintFraction
-    }
-
-    private func revealLog() {
-        NSWorkspace.shared.activateFileViewerSelecting([DiagnosticLog.shared.fileURL])
-    }
-
-    private func confirmQuit() {
-        // If there are daemons, let applicationShouldTerminate show the "Kill / Keep / Cancel"
-        // dialog (which is itself the confirmation). Otherwise — a simple quit confirmation.
-        guard !manager.hasLiveDaemons() else {
-            NSApp.terminate(nil)
-            return
-        }
-        NSApp.activate()
-        let alert = NSAlert()
-        alert.messageText = L10n.quitConfirmTitle
-        alert.informativeText = L10n.quitConfirmMessage
-        alert.addButton(withTitle: L10n.quitButton)
-        alert.addButton(withTitle: L10n.cancel)
-        if alert.runModal() == .alertFirstButtonReturn {
-            NSApp.terminate(nil)
-        }
     }
 
     // MARK: actions
@@ -535,13 +234,14 @@ struct PopoverView: View {
     }
 
     private func openItem(_ selection: MainSelection) {
-        appModel.selection = selection
-        openMainWindow()
+        openMainWindow(selection: selection)
     }
 
-    private func openMainWindow() {
-        openWindow(id: "main")
-        NSApp.activate()   // macOS 14+: without the deprecated ignoringOtherApps
+    private func openMainWindow(selection: MainSelection? = nil) {
+        appModel.showMainWindow(selection: selection) {
+            openWindow(id: "main")
+            NSApp.activate()
+        }
     }
 }
 
@@ -561,8 +261,8 @@ struct CollapsibleSection<Content: View>: View {
                 withAnimation(.easeInOut(duration: 0.18)) { collapsed.toggle() }
             } label: {
                 HStack(spacing: 6) {
-                    Text(title.uppercased())
-                        .font(.system(size: 10, weight: .bold))
+                    Text(title)
+                        .font(.caption).fontWeight(.semibold)
                         .foregroundStyle(.secondary)
                     Text("\(runningCount > 0 ? runningCount : count)")
                         .font(.system(size: 10, weight: .semibold))
@@ -573,7 +273,7 @@ struct CollapsibleSection<Content: View>: View {
                         .font(.system(size: 9, weight: .semibold))
                         .foregroundStyle(.tertiary)
                 }
-                .padding(.horizontal, 12)
+                .padding(.horizontal, 16)
                 .padding(.top, 8)
                 .padding(.bottom, 4)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -623,36 +323,39 @@ struct DeckRow: View {
                 Button(action: { onWatchdogToggle?() }) {
                     Image(systemName: watchdog.enabled ? "shield.fill" : "shield.slash")
                         .font(.system(size: 13))
-                        .frame(width: 30, height: 30)
+                        .frame(width: 24, height: 24)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(watchdogColor(watchdog))
                 .help(watchdogHelp(watchdog))
+                .accessibilityLabel(watchdogHelp(watchdog) + " " + name)
             }
 
             Button(action: onToggle) {
                 Image(systemName: indicator.isStop ? "stop.fill" : "play.fill")
-                    .font(.system(size: 15))
-                    .frame(width: 30, height: 30)        // large tap target
+                    .font(.system(size: 12))
+                    .frame(width: 24, height: 24)        // large tap target
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .foregroundStyle(indicator.isStop ? Color.red : Color.green)
             .help(indicator.isStop ? L10n.stop : L10n.run)
+            .accessibilityLabel((indicator.isStop ? L10n.stop : L10n.run) + " " + name)
 
             Button(action: onLogs) {
                 Image(systemName: "list.bullet.rectangle")
-                    .font(.system(size: 14))
-                    .frame(width: 30, height: 30)
+                    .font(.system(size: 12))
+                    .frame(width: 24, height: 24)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .foregroundStyle(.secondary)
             .help(L10n.logs)
+            .accessibilityLabel(L10n.logs + " " + name)
         }
         .font(.system(size: 13))
-        .padding(.leading, 12)
+        .padding(.leading, 16)
         .padding(.trailing, 16)   // right gap: the scrollbar "slider" won't overlap the buttons
         .padding(.vertical, 2)
         .contentShape(Rectangle())
@@ -713,7 +416,7 @@ struct PortConflictPanel: View {
         .padding(8)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(RoundedRectangle(cornerRadius: 6).fill(Color.yellow.opacity(0.12)))
-        .padding(.horizontal, 12)
+        .padding(.horizontal, 16)
         .padding(.vertical, 4)
     }
 }
@@ -731,6 +434,9 @@ struct StatusDot: View {
             }
         }
         .frame(width: 14, height: 14)
+        .accessibilityElement()
+        .accessibilityLabel(L10n.deckStatus(status))
+        .help(L10n.deckStatus(status))
     }
 
     private var color: Color {

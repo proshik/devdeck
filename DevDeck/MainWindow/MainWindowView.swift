@@ -1,55 +1,35 @@
 import SwiftUI
 
-/// Main window: command/chain list on the left, editor + logs for the selected item on the right.
+/// Stable navigation; commands and chains have their own list beside the editor and logs.
 struct MainWindowView: View {
     @Environment(CommandStore.self) private var store
     @Environment(AppModel.self) private var appModel
 
     var body: some View {
-        @Bindable var appModel = appModel
-
         NavigationSplitView {
-            // Row order = order in the menu bar popover; dragging persists it to config.json.
-            List(selection: $appModel.selection) {
-                Section(L10n.commands) {
-                    ForEach(commands) { command in
-                        sidebarRow(command, icon: "terminal")
-                    }
-                    .onMove { store.moveCommands($0, to: $1, daemons: false) }
+            List(selection: sidebarSelection) {
+                Section(L10n.settings) {
+                    navigationRow(L10n.deckGeneral, icon: "gearshape", selection: .settings)
+                    navigationRow(L10n.deckPanel, icon: "square.grid.2x2", selection: .panel)
+                    navigationRow(L10n.deckUpdates, icon: "arrow.down.circle", selection: .updates)
                 }
-                Section(L10n.daemons) {
-                    ForEach(daemons) { command in
-                        sidebarRow(command, icon: "infinity")
-                    }
-                    .onMove { store.moveCommands($0, to: $1, daemons: true) }
+                Section(L10n.deckEnvironment) {
+                    navigationRow(L10n.deckCommands, icon: "terminal", selection: .commands)
+                    navigationRow(L10n.deckPorts, icon: "arrow.left.arrow.right", selection: .ports)
+                    navigationRow(L10n.proxy, icon: "network", selection: .proxy)
+                    navigationRow(L10n.claudeTabsSection, icon: "macwindow", selection: .claudeTabs)
+                    navigationRow(L10n.cleanup, icon: "trash", selection: .cleanup)
                 }
-                Section(L10n.chains) {
-                    ForEach(store.config.chains) { chain in
-                        Label(chain.name.isEmpty ? L10n.untitled : chain.name, systemImage: "link")
-                            .tag(MainSelection.chain(chain.id))
-                            .contextMenu {
-                                Button(L10n.duplicate) { duplicateChain(chain.id) }
-                            }
-                    }
-                    .onMove { store.moveChains($0, to: $1) }
+                Section(L10n.deckObservation) {
+                    navigationRow(L10n.deckThisMac, icon: "waveform.path.ecg", selection: .monitoring)
+                    navigationRow(L10n.deckContainers, icon: "shippingbox", selection: .containers)
+                    navigationRow(L10n.deckEnergy, icon: "battery.100percent", selection: .energy)
+                }
+                Section(L10n.deckMacTools) {
+                    navigationRow(L10n.awakeTitle, icon: "cup.and.saucer", selection: .awake)
                 }
             }
-            .frame(minWidth: 220)
-            // Settings pinned to the bottom of the sidebar — always visible, separated from the
-            // scrolling commands/daemons/chains list.
-            .safeAreaInset(edge: .bottom, spacing: 0) {
-                VStack(spacing: 0) {
-                    Divider()
-                    VStack(spacing: 2) {
-                        pinnedButton(L10n.proxy, icon: "network", selection: .proxy)
-                        pinnedButton(L10n.cleanup, icon: "trash", selection: .cleanup)
-                        pinnedButton(L10n.claudeTabsSection, icon: "macwindow", selection: .claudeTabs)
-                        pinnedButton(L10n.settings, icon: "gearshape", selection: .settings)
-                    }
-                    .padding(8)
-                }
-                .background(.bar)
-            }
+            .navigationSplitViewColumnWidth(min: 210, ideal: 235, max: 290)
             .toolbar {
                 ToolbarItem {
                     Menu {
@@ -62,30 +42,37 @@ struct MainWindowView: View {
         } detail: {
             detail
         }
-        .frame(minWidth: 760, minHeight: 480)
+        .frame(minWidth: 860, minHeight: 580)
         // The sidebar's toolbar makes AppKit draw its titlebar separator, which on macOS 26 lands
-        // across the traffic lights. Nothing here is separated by it — the sidebar has its own
-        // divider above the pinned buttons.
-        .background(WindowAccessor { $0.titlebarSeparatorStyle = .none })
+        // across the traffic lights. The sidebar already has its native separation.
+        .background(WindowAccessor {
+            $0.titlebarSeparatorStyle = .none
+            $0.hidesOnDeactivate = false
+            appModel.mainWindowActivation.track($0)
+        })
     }
 
     @ViewBuilder
     private var detail: some View {
         switch appModel.selection {
-        case .command(let id):
-            if let command = store.commandsByID[id] {
-                CommandDetailView(command: command).id(id)
-            } else {
-                placeholder
-            }
-        case .chain(let id):
-            if let chain = store.config.chains.first(where: { $0.id == id }) {
-                ChainDetailView(chain: chain).id(id)
-            } else {
-                placeholder
-            }
+        case .commands, .command, .chain:
+            commandWorkspace
         case .settings:
             SettingsView()
+        case .panel:
+            PanelSettingsView()
+        case .updates:
+            UpdatesView()
+        case .monitoring:
+            MonitoringPage(section: .mac)
+        case .containers:
+            MonitoringPage(section: .containers)
+        case .energy:
+            MonitoringPage(section: .energy)
+        case .awake:
+            AwakeSettingsView()
+        case .ports:
+            portForwards
         case .proxy:
             ProxyShareEditorView(share: store.config.proxy)
         case .cleanup:
@@ -94,6 +81,84 @@ struct MainWindowView: View {
             ClaudeTabsView()
         case nil:
             placeholder
+        }
+    }
+
+    // Keep the workspace selected in the sidebar when a command is selected in its inner list.
+    // Binding the sidebar directly to that command would leave it without a matching row.
+    private var sidebarSelection: Binding<MainSelection?> {
+        Binding(get: {
+            switch appModel.selection {
+            case .command, .chain: .commands
+            default: appModel.selection
+            }
+        }, set: { if let selection = $0 { appModel.selection = selection } })
+    }
+
+    private var commandSelection: Binding<MainSelection?> {
+        Binding(get: {
+            switch appModel.selection {
+            case .command, .chain: appModel.selection
+            default: nil
+            }
+        }, set: { if let selection = $0 { appModel.selection = selection } })
+    }
+
+    private var commandWorkspace: some View {
+        HSplitView {
+            VStack(spacing: 0) {
+                List(selection: commandSelection) {
+                    if store.config.commands.isEmpty && store.config.chains.isEmpty {
+                        Text(L10n.noCommandsYet).foregroundStyle(.secondary)
+                    }
+                    if !commands.isEmpty {
+                        Section(L10n.commands) {
+                            ForEach(commands) { sidebarRow($0, icon: "terminal") }
+                                .onMove { store.moveCommands($0, to: $1, daemons: false) }
+                        }
+                    }
+                    if !daemons.isEmpty {
+                        Section(L10n.daemons) {
+                            ForEach(daemons) { sidebarRow($0, icon: "infinity") }
+                                .onMove { store.moveCommands($0, to: $1, daemons: true) }
+                        }
+                    }
+                    if !store.config.chains.isEmpty {
+                        Section(L10n.chains) {
+                            ForEach(store.config.chains) { chain in
+                                Label(chain.name.isEmpty ? L10n.untitled : chain.name, systemImage: "link")
+                                    .tag(MainSelection.chain(chain.id))
+                                    .contextMenu {
+                                        Button(L10n.duplicate) { duplicateChain(chain.id) }
+                                    }
+                            }.onMove { store.moveChains($0, to: $1) }
+                        }
+                    }
+                }
+                Divider()
+                Menu {
+                    Button(L10n.newCommand) { addCommand() }
+                    Button(L10n.newDaemon) { addCommand(daemon: true) }
+                    Button(L10n.newChain) { addChain() }
+                } label: { Label(L10n.deckAdd, systemImage: "plus") }
+                    .fixedSize().padding(12).frame(maxWidth: .infinity, alignment: .leading)
+                    .background(.bar)
+            }.frame(minWidth: 190, idealWidth: 230, maxWidth: 300)
+            commandDetail.frame(minWidth: 350, maxWidth: .infinity, maxHeight: .infinity)
+        }.navigationTitle(L10n.deckCommands)
+    }
+
+    @ViewBuilder private var commandDetail: some View {
+        switch appModel.selection {
+        case .command(let id):
+            if let command = store.commandsByID[id] {
+                CommandDetailView(command: command).id(id)
+            } else { placeholder }
+        case .chain(let id):
+            if let chain = store.config.chains.first(where: { $0.id == id }) {
+                ChainDetailView(chain: chain).id(id)
+            } else { placeholder }
+        default: placeholder
         }
     }
 
@@ -114,35 +179,33 @@ struct MainWindowView: View {
             }
     }
 
-    /// Pinned sidebar entry (Proxy / Settings) styled to mimic a selected sidebar row.
-    private func pinnedButton(_ title: String, icon: String, selection: MainSelection) -> some View {
-        let selected = appModel.selection == selection
-        return Button {
-            appModel.selection = selection
-        } label: {
-            HStack(spacing: 6) {
-                // A fixed icon column instead of `Label`'s intrinsic one: SF Symbols differ in
-                // width (`macwindow.on.rectangle` is half again as wide as `trash`), and with a
-                // plain Label that difference pushes one row's title out of line with its
-                // neighbours. Sizing the column makes the alignment a property of the layout
-                // rather than of whichever symbol someone picks next.
-                Image(systemName: icon)
-                    .frame(width: 18, alignment: .center)
-                Text(title)
+    private func navigationRow(_ title: String, icon: String, selection: MainSelection) -> some View {
+        Label(title, systemImage: icon).tag(selection)
+    }
+
+    private var portForwards: some View {
+        List {
+            let ports = store.config.commands.filter { $0.port != nil }
+            if ports.isEmpty {
+                Text(L10n.deckNoPortForwards).foregroundStyle(.secondary)
             }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.vertical, 5)
-                .padding(.horizontal, 8)
-                .contentShape(Rectangle())
-                .background(
-                    RoundedRectangle(cornerRadius: 6)
-                        .fill(selected ? Color.accentColor.opacity(0.22) : .clear)
-                )
-        }
-        .buttonStyle(.plain)
+            ForEach(ports) { command in
+                Button {
+                    appModel.selection = .command(command.id)
+                } label: {
+                    HStack {
+                        Label(command.name, systemImage: "arrow.left.arrow.right")
+                        Spacer()
+                        if let port = command.port { Text(String(port)).monospacedDigit().foregroundStyle(.secondary) }
+                        Image(systemName: "chevron.right").foregroundStyle(.tertiary)
+                    }
+                }.buttonStyle(.plain)
+            }
+        }.navigationTitle(L10n.deckPorts)
     }
 
     private func addCommand(daemon: Bool = false) {
+        appModel.detailTab = .editor
         let command = Command(id: UUID(), name: daemon ? L10n.newDaemon : L10n.newCommand,
                               command: "", isDaemon: daemon)
         store.upsert(command)
@@ -150,6 +213,7 @@ struct MainWindowView: View {
     }
 
     private func addChain() {
+        appModel.detailTab = .editor
         let chain = Chain(id: UUID(), name: L10n.newChain, commandIDs: [])
         store.upsert(chain)
         appModel.selection = .chain(chain.id)
@@ -160,11 +224,13 @@ struct MainWindowView: View {
     /// from under us; leave the selection alone.
     private func duplicateCommand(_ id: UUID) {
         guard let copyID = store.duplicate(commandID: id) else { return }
+        appModel.detailTab = .editor
         appModel.selection = .command(copyID)
     }
 
     private func duplicateChain(_ id: UUID) {
         guard let copyID = store.duplicate(chainID: id) else { return }
+        appModel.detailTab = .editor
         appModel.selection = .chain(copyID)
     }
 }
@@ -172,13 +238,17 @@ struct MainWindowView: View {
 /// Command detail: "Command" (editor) and "Logs" tabs.
 struct CommandDetailView: View {
     let command: Command
+    @Environment(AppModel.self) private var appModel
 
     var body: some View {
-        TabView {
+        @Bindable var appModel = appModel
+        TabView(selection: $appModel.detailTab) {
             CommandEditorView(command: command)
                 .tabItem { Label(L10n.commandTab, systemImage: "slider.horizontal.3") }
+                .tag(DetailTab.editor)
             LogView(id: command.id)
                 .tabItem { Label(L10n.logs, systemImage: "list.bullet.rectangle") }
+                .tag(DetailTab.logs)
         }
         .padding()
     }
@@ -187,13 +257,17 @@ struct CommandDetailView: View {
 /// Chain detail: "Chain" (editor) and "Logs" tabs.
 struct ChainDetailView: View {
     let chain: Chain
+    @Environment(AppModel.self) private var appModel
 
     var body: some View {
-        TabView {
+        @Bindable var appModel = appModel
+        TabView(selection: $appModel.detailTab) {
             ChainEditorView(chain: chain)
                 .tabItem { Label(L10n.chainTab, systemImage: "slider.horizontal.3") }
+                .tag(DetailTab.editor)
             LogView(id: chain.id)
                 .tabItem { Label(L10n.logs, systemImage: "list.bullet.rectangle") }
+                .tag(DetailTab.logs)
         }
         .padding()
     }
