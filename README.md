@@ -33,6 +33,10 @@ Launch, stop, and monitor local dev commands and long-running daemons
   run/stop buttons and status indicators
   (grey / yellow spinner / green daemon / red).
 - **Collapsible sections** with an active counter; the collapse state is remembered across launches.
+- **Panel & Modules** — create named tabs with icons, move or remove modules and add them
+  from the catalogue, reorder or hide tabs, restore the standard layout, remember the
+  last tab or choose an initial one. Customization survives restarting the app.
+  Hiding or removing a service keeps it running and leaves a compact activity summary.
 - **Main window**: grouped sidebar, command editor, chain builder (drag-and-drop ordering),
   live logs, General settings and a separate DevDeck Updates page.
 - **Chains** — sequential execution, stop on error, the failed step highlighted.

@@ -165,33 +165,6 @@ struct MonitoringPage: View {
     }
 }
 
-struct PanelSettingsView: View {
-    var body: some View {
-        Form {
-            Section(L10n.deckPanel) {
-                Text(L10n.deckPanelDescription).foregroundStyle(.secondary)
-            }
-            Section(L10n.deckSection) {
-                ForEach(PanelSection.allCases) { section in
-                    LabeledContent {
-                        Text(description(section)).foregroundStyle(.secondary)
-                    } label: { Label(section.title, systemImage: section.symbol) }
-                }
-            }
-        }
-        .formStyle(.grouped)
-        .navigationTitle(L10n.deckPanel)
-    }
-
-    private func description(_ section: PanelSection) -> String {
-        switch section {
-        case .environment: [L10n.commands, L10n.daemons, L10n.chains, L10n.deckPorts, L10n.proxy, L10n.claudeTabsSection].joined(separator: ", ")
-        case .monitoring: MonitoringSection.allCases.map(\.title).joined(separator: ", ")
-        case .displays: L10n.awakeTitle
-        }
-    }
-}
-
 struct AwakeSettingsView: View {
     var body: some View {
         Form {

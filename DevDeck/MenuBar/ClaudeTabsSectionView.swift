@@ -19,14 +19,19 @@ struct ClaudeTabsSectionView: View {
                 Spacer(minLength: 4)
                 Text(stateText).font(.caption).foregroundStyle(.secondary)
                     .lineLimit(1).monospacedDigit()
-                Button(L10n.claudeTabsSection, systemImage: "arrow.up.forward") {
+                Button {
                     appModel.showMainWindow(selection: .claudeTabs) {
                         openWindow(id: "main")
                         NSApp.activate()
                     }
-                }.labelStyle(.iconOnly).buttonStyle(.borderless)
-                    .foregroundStyle(.secondary).frame(width: 28, height: 28)
-                    .help(L10n.claudeTabsSection)
+                } label: {
+                    Label(L10n.claudeTabsSection, systemImage: "arrow.up.forward")
+                        .labelStyle(.iconOnly).frame(width: 28, height: 28)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.borderless).controlHoverFeedback()
+                .foregroundStyle(.secondary)
+                .help(L10n.claudeTabsSection)
             }
             if let error = claudeTabs.lastError {
                 Label(error, systemImage: "exclamationmark.triangle")

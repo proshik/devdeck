@@ -376,6 +376,15 @@ final class CommandStore {
         persist(updated)
     }
 
+    /// Mutates layout only. Process and data-collection settings are deliberately untouched.
+    func updatePanel(_ mutation: (inout PanelConfiguration) -> Void) {
+        var updated = config
+        mutation(&updated.panel)
+        updated.panel = updated.panel.normalized()
+        guard updated != config else { return }
+        persist(updated)
+    }
+
     /// Save; a write failure goes into `error` (the UI shows a banner) instead of throwing out.
     private func persist(_ newConfig: Config) {
         do {

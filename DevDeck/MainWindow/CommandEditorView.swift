@@ -112,7 +112,7 @@ struct CommandEditorView: View {
                         Button(role: .destructive) { envRows.removeAll { $0.id == row.id } } label: {
                             Image(systemName: "minus.circle")
                         }
-                        .buttonStyle(.borderless)
+                        .buttonStyle(.borderless).controlHoverFeedback()
                     }
                 }
                 Button(L10n.addEnvVar) { envRows.append(EnvRow(key: "", value: "")) }

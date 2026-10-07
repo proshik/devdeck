@@ -42,7 +42,8 @@ struct MainWindowView: View {
         } detail: {
             detail
         }
-        .frame(minWidth: 860, minHeight: 580)
+        // Reserve room for the sidebar at its maximum width and three complete tab cards.
+        .frame(minWidth: 1040, minHeight: 580)
         // The sidebar's toolbar makes AppKit draw its titlebar separator, which on macOS 26 lands
         // across the traffic lights. The sidebar already has its native separation.
         .background(WindowAccessor {
@@ -199,7 +200,7 @@ struct MainWindowView: View {
                         if let port = command.port { Text(String(port)).monospacedDigit().foregroundStyle(.secondary) }
                         Image(systemName: "chevron.right").foregroundStyle(.tertiary)
                     }
-                }.buttonStyle(.plain)
+                }.buttonStyle(.plain).controlHoverFeedback()
             }
         }.navigationTitle(L10n.deckPorts)
     }

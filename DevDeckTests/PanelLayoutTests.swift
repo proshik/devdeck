@@ -43,6 +43,28 @@ final class PanelLayoutTests: XCTestCase {
         let action = try XCTUnwrap(picker.action)
         NSApp.sendAction(action, to: picker.target, from: picker)
         XCTAssertEqual(appModel.panelSection, .displays)
+        XCTAssertEqual(try ConfigCodec.decode(Data(contentsOf: directory.appendingPathComponent("config.json"))).panel.lastSection,
+                       "displays", "the native tab action must save the last section")
+        store.updatePanel {
+            $0.moveSection(.displays, before: .environment)
+            $0.setSectionVisible(.monitoring, false)
+        }
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertEqual((0..<picker.segmentCount).map { picker.label(forSegment: $0) }, [L10n.deckDisplays, L10n.deckEnvironment])
+        picker.selectedSegment = 1
+        NSApp.sendAction(action, to: picker.target, from: picker)
+        XCTAssertEqual(appModel.panelSection, .environment, "selection must follow reordered visible IDs, not enum indexes")
+        store.updatePanel {
+            $0.setSectionVisible(.environment, false)
+            $0.setSectionVisible(.displays, false)
+        }
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertNil(findPicker(in: hosting.view), "an empty panel must offer configuration instead of unavailable tabs")
+        XCTAssertLessThan(hosting.view.fittingSize.height, 250)
+        try saveSnapshot(hosting.view, name: "panel-all-hidden")
+        store.updatePanel { $0.sections = PanelConfiguration.standard.sections }
+        try await Task.sleep(for: .milliseconds(100))
+        let currentPicker = try XCTUnwrap(findPicker(in: hosting.view))
         let previousLanguage = LocalizationManager.shared.language
         let previousAppearance = NSApp.appearance
         defer {
@@ -57,9 +79,9 @@ final class PanelLayoutTests: XCTestCase {
                     appModel.panelSection = section
                     try await Task.sleep(for: .milliseconds(100))
                     hosting.view.layoutSubtreeIfNeeded()
-                    XCTAssertEqual((0..<picker.segmentCount).map { picker.toolTip(forSegment: $0) }, PanelSection.allCases.map(\.title))
+                    XCTAssertEqual((0..<currentPicker.segmentCount).map { currentPicker.toolTip(forSegment: $0) }, PanelSection.allCases.map(\.title))
                     XCTAssertLessThan(hosting.view.fittingSize.height, 700)
-                    XCTAssertEqual(picker.selectedSegment, PanelSection.allCases.firstIndex(of: section))
+                    XCTAssertEqual(currentPicker.selectedSegment, PanelSection.allCases.firstIndex(of: section))
                     try saveSnapshot(hosting.view, name: "panel-\(section.rawValue)-\(language.rawValue)-\(appearance.rawValue)")
                 }
             }
@@ -104,7 +126,7 @@ final class PanelLayoutTests: XCTestCase {
         try await Task.sleep(for: .milliseconds(150))
         XCTAssertGreaterThan(popoverContent.bounds.height, compactPopoverHeight,
                              "the real popover must resize when switching sections")
-        XCTAssertLessThan(popoverContent.bounds.height, 400)
+        XCTAssertLessThan(popoverContent.bounds.height, 700, "all visible monitoring modules must fit the content cap")
         popover.performClose(nil)
 
         let mainRoot = MainWindowView()
@@ -122,12 +144,101 @@ final class PanelLayoutTests: XCTestCase {
         mainWindow.setFrameOrigin(NSPoint(x: -2500, y: -2500))
         mainWindow.orderFront(nil)
         defer { mainWindow.close() }
-        for selection in [MainSelection.settings, .commands, .panel, .updates, .monitoring, .containers, .energy, .awake, .ports] {
+        for selection in [MainSelection.settings, .commands, .panel, .updates, .monitoring, .containers, .energy, .awake, .ports, .proxy, .claudeTabs, .cleanup] {
             appModel.selection = selection
+            mainWindow.setContentSize(NSSize(width: mainHosting.view.fittingSize.width, height: 580))
             try await Task.sleep(for: .milliseconds(100))
             mainHosting.view.layoutSubtreeIfNeeded()
             XCTAssertGreaterThanOrEqual(mainHosting.view.bounds.width, 860)
             try saveSnapshot(mainHosting.view, name: "window-\(selection)")
+            if selection == .panel {
+                // The default tabs must be fully usable at the window's actual minimum,
+                // not merely aligned in a row that extends outside its viewport.
+                let minimumWidth = mainHosting.view.fittingSize.width
+                for width in [minimumWidth, 1080.0] {
+                    mainWindow.setContentSize(NSSize(width: width, height: 580))
+                    try await Task.sleep(for: .milliseconds(100))
+                    mainHosting.view.layoutSubtreeIfNeeded()
+                    let headers = try PanelSection.allCases.map { section in
+                        let checkbox = try XCTUnwrap(findVisibilityCheckbox(in: mainHosting.view,
+                                                                           id: "panel-section-\(section.rawValue)"))
+                        return checkbox.convert(checkbox.bounds, to: mainHosting.view)
+                    }
+                    for rect in headers.dropFirst() {
+                        XCTAssertEqual(rect.midY, headers[0].midY, accuracy: 1, "tabs must not wrap onto a second row")
+                    }
+                    for section in PanelSection.allCases {
+                        let checkbox = try XCTUnwrap(findVisibilityCheckbox(in: mainHosting.view,
+                                                                           id: "panel-section-\(section.rawValue)"))
+                        let controlRect = checkbox.convert(checkbox.bounds, to: mainHosting.view)
+                        XCTAssertGreaterThanOrEqual(controlRect.minX, mainHosting.view.bounds.minX)
+                        XCTAssertLessThanOrEqual(controlRect.maxX + 24, mainHosting.view.bounds.maxX,
+                                      "all default tab controls must be visible at the minimum width (\(width))")
+                    }
+                    for module in PanelModuleID.allCases {
+                        let checkbox = try XCTUnwrap(findVisibilityCheckbox(in: mainHosting.view,
+                                                                           id: "panel-module-\(module.rawValue)"))
+                        let rect = checkbox.convert(checkbox.bounds, to: mainHosting.view)
+                        XCTAssertLessThanOrEqual(rect.maxX, mainHosting.view.bounds.maxX - 20,
+                                                 "module visibility must remain reachable without horizontal scrolling")
+                    }
+                    for layout in store.config.panel.sections {
+                        let header = try XCTUnwrap(findVisibilityCheckbox(in: mainHosting.view,
+                                                                         id: "panel-section-\(layout.id)"))
+                        let headerRect = header.convert(header.bounds, to: mainHosting.view)
+                        for placement in layout.modules {
+                            let checkbox = try XCTUnwrap(findVisibilityCheckbox(in: mainHosting.view,
+                                                                               id: "panel-module-\(placement.id)"))
+                            let rect = checkbox.convert(checkbox.bounds, to: mainHosting.view)
+                            XCTAssertEqual(rect.midX, headerRect.midX, accuracy: 1,
+                                           "tab and module visibility controls must share one column")
+                        }
+                    }
+                    XCTAssertLessThan(headers[0].midX, headers[1].midX)
+                    XCTAssertLessThan(headers[1].midX, headers[2].midX)
+                    try saveSnapshot(mainHosting.view, name: "window-panel-\(Int(width))")
+                }
+                let settings = store.config.settings
+                let toggle = try XCTUnwrap(findVisibilityCheckbox(in: mainHosting.view, id: "panel-module-proxy"))
+                XCTAssertEqual(toggle.accessibilityLabel(), L10n.panelShowModule(PanelModuleID.proxy.title))
+                _ = toggle.accessibilityPerformPress()
+                try await Task.sleep(for: .milliseconds(100))
+                XCTAssertFalse(store.config.panel.isShown(.proxy), "the actual settings checkbox must hide the block")
+                XCTAssertEqual(store.config.settings, settings, "visibility must not change collection or process settings")
+                let newToggle = try XCTUnwrap(findVisibilityCheckbox(in: mainHosting.view, id: "panel-module-proxy"))
+                _ = newToggle.accessibilityPerformPress()
+                try await Task.sleep(for: .milliseconds(100))
+                XCTAssertTrue(store.config.panel.isShown(.proxy))
+
+                // Custom names and reordered IDs must drive the actual native tray control.
+                var custom: PanelSection!
+                store.updatePanel {
+                    custom = $0.addSection(name: "Focused tools", icon: "star")
+                    $0.moveModule(.proxy, to: custom)
+                    $0.removeModule(.awake)
+                    $0.moveSection(custom, before: .monitoring)
+                }
+                try await Task.sleep(for: .milliseconds(150))
+                let customPicker = try XCTUnwrap(findPicker(in: hosting.view))
+                XCTAssertEqual((0..<customPicker.segmentCount).map { customPicker.label(forSegment: $0) },
+                               [L10n.deckEnvironment, "Focused tools", L10n.deckMonitoring])
+                customPicker.selectedSegment = 1
+                NSApp.sendAction(try XCTUnwrap(customPicker.action), to: customPicker.target, from: customPicker)
+                XCTAssertEqual(appModel.panelSection, custom)
+                XCTAssertEqual(try ConfigCodec.decode(Data(contentsOf: directory.appendingPathComponent("config.json"))).panel.lastSection,
+                               custom.rawValue)
+                store.updatePanel { $0.renameSection(custom, name: "Renamed tools", icon: "network") }
+                try await Task.sleep(for: .milliseconds(100))
+                XCTAssertEqual(customPicker.label(forSegment: 1), "Renamed tools")
+                XCTAssertEqual(customPicker.selectedSegment, 1, "renaming must preserve the selected identity")
+                try saveSnapshot(mainHosting.view, name: "window-panel-custom-catalogue")
+                store.updatePanel { $0.removeSection(custom) }
+                try await Task.sleep(for: .milliseconds(100))
+                XCTAssertEqual(customPicker.segmentCount, 2)
+                XCTAssertNotEqual(appModel.panelSection, custom, "removing the selected tab must select an available tab")
+                store.updatePanel { $0.restoreStandardLayout() }
+                try await Task.sleep(for: .milliseconds(100))
+            }
         }
 
         // A logs link from the tray must keep its command and tab selected even though the
@@ -166,6 +277,24 @@ final class PanelLayoutTests: XCTestCase {
             popover: routedPopover
         )
         defer { routedPopover.performClose(nil); withExtendedLifetime(menuBar) {} }
+        store.updatePanel {
+            $0.rememberLastSection = false
+            $0.initialSection = "displays"
+            $0.lastSection = "monitoring"
+        }
+        appModel.panelSection = .monitoring
+        routedPopover.show(relativeTo: anchor.bounds, of: anchor, preferredEdge: .minY)
+        try await Task.sleep(for: .milliseconds(150))
+        XCTAssertTrue(routedPopover.isShown)
+        XCTAssertEqual(appModel.panelSection, .displays, "opening must use the configured initial section")
+        routedPopover.performClose(nil)
+        try await Task.sleep(for: .milliseconds(150))
+        store.updatePanel { $0.rememberLastSection = true; $0.lastSection = "environment" }
+        routedPopover.show(relativeTo: anchor.bounds, of: anchor, preferredEdge: .minY)
+        try await Task.sleep(for: .milliseconds(150))
+        XCTAssertEqual(appModel.panelSection, .environment, "reopening must restore the saved last section")
+        routedPopover.performClose(nil)
+        try await Task.sleep(for: .milliseconds(150))
         for page in [MainSelection.settings, .panel, .updates] {
             routedPopover.show(relativeTo: anchor.bounds, of: anchor, preferredEdge: .minY)
             try await Task.sleep(for: .milliseconds(100))
@@ -211,6 +340,11 @@ final class PanelLayoutTests: XCTestCase {
     private func findPicker(in view: NSView) -> NSSegmentedControl? {
         if let picker = view as? NSSegmentedControl { return picker }
         return view.subviews.lazy.compactMap { self.findPicker(in: $0) }.first
+    }
+
+    private func findVisibilityCheckbox(in view: NSView, id: String) -> NSButton? {
+        if let control = view as? NSButton, control.accessibilityIdentifier() == id { return control }
+        return view.subviews.lazy.compactMap { self.findVisibilityCheckbox(in: $0, id: id) }.first
     }
 
     private func saveSnapshot(_ view: NSView, name: String) throws {

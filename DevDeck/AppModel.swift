@@ -25,7 +25,6 @@ enum MainSelection: Hashable {
 final class AppModel {
     var selection: MainSelection? = .settings
     var panelSection: PanelSection = .environment
-    var monitoringSection: MonitoringSection = .mac
     var detailTab: DetailTab = .editor
     var panelContentHeightLimit: CGFloat = 560
     @ObservationIgnored var dismissPanel: () -> Void = {}
@@ -43,14 +42,37 @@ final class AppModel {
 
 enum DetailTab: Hashable { case editor, logs }
 
-enum PanelSection: String, CaseIterable, Identifiable {
-    case environment, monitoring, displays
+struct PanelSection: RawRepresentable, Hashable, Codable, CaseIterable, Identifiable, Sendable {
+    let rawValue: String
+    static let environment = Self(rawValue: "environment")!
+    static let monitoring = Self(rawValue: "monitoring")!
+    static let displays = Self(rawValue: "displays")!
+    static let allCases: [Self] = [.environment, .monitoring, .displays]
+
+    init?(rawValue: String) {
+        guard ["environment", "monitoring", "displays"].contains(rawValue)
+                || (rawValue.hasPrefix("custom-") && UUID(uuidString: String(rawValue.dropFirst(7))) != nil) else { return nil }
+        self.rawValue = rawValue
+    }
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        let value = try container.decode(String.self)
+        guard let section = Self(rawValue: value) else {
+            throw DecodingError.dataCorruptedError(in: container, debugDescription: "Invalid panel section ID")
+        }
+        self = section
+    }
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
+    }
     var id: String { rawValue }
     var title: String {
         switch self {
         case .environment: L10n.deckEnvironment
         case .monitoring: L10n.deckMonitoring
         case .displays: L10n.deckDisplays
+        default: L10n.panelNewTab
         }
     }
     var symbol: String {
@@ -58,6 +80,7 @@ enum PanelSection: String, CaseIterable, Identifiable {
         case .environment: "terminal"
         case .monitoring: "waveform.path.ecg"
         case .displays: "display"
+        default: "square.grid.2x2"
         }
     }
 }
