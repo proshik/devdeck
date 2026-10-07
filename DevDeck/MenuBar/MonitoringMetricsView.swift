@@ -7,6 +7,8 @@ struct MonitoringMetricsView: View {
     @Environment(EnergyModel.self) private var energy
     @Environment(EngineModel.self) private var engine
     let section: MonitoringSection
+    var compact = false
+    var onDetails: (() -> Void)? = nil
 
     private static let placeholderColor = Color.secondary.opacity(0.45)
 
@@ -31,12 +33,24 @@ struct MonitoringMetricsView: View {
                     }.frame(minHeight: 24)
                 }
                 ForEach(metrics.filter { $0.isAvailable(engineKind: engine.activeKind) }, id: \.self) { metric in
-                    metricRow(metric, memory: memory)
+                    HStack(spacing: 8) {
+                        metricRow(metric, memory: memory)
+                        if let onDetails {
+                            Button(action: onDetails) {
+                                Label(L10n.deckEnergy, systemImage: "arrow.up.forward")
+                                    .labelStyle(.iconOnly).frame(width: 28, height: 28)
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.borderless).controlHoverFeedback()
+                            .foregroundStyle(.secondary).help(L10n.deckEnergy)
+                        }
+                    }
                 }
                 if section == .energy {
                     energyConsumers
                     if !store.config.settings.batteryMonitoring {
                         Text(L10n.deckCollectionOff).foregroundStyle(.secondary)
+                            .font(.caption).padding(.leading, compact ? 28 : 0)
                     }
                 }
                 if section == .mac && !store.config.settings.hostMemoryMonitoring {
@@ -52,8 +66,11 @@ struct MonitoringMetricsView: View {
             ? (SystemMemory.format(usedBytes: memory.usedBytes, totalBytes: memory.totalBytes), pressureColor(memory.fraction))
             : cellValue(metric, memory: memory, swapRate: swapRateText())
         return HStack(spacing: 8) {
-            Image(systemName: symbol(metric)).foregroundStyle(.secondary).frame(width: 16)
-            Text(metric.title(engineName: engine.activeName))
+            Label {
+                Text(metric.title(engineName: engine.activeName))
+            } icon: {
+                Image(systemName: symbol(metric)).foregroundStyle(.secondary)
+            }.labelStyle(DeckLabelStyle())
             Spacer(minLength: 8)
             Text(pair.0.isEmpty ? "—" : pair.0)
                 .monospacedDigit().foregroundStyle(pair.0.isEmpty ? .secondary : pair.1)
@@ -153,11 +170,11 @@ struct MonitoringMetricsView: View {
     private var energyConsumers: some View {
         if energy.battery != nil, let tally = energy.tally {
             VStack(alignment: .leading, spacing: 3) {
-                Text(energyTitle(tally)).foregroundStyle(.secondary)
+                if !compact { Text(energyTitle(tally)).foregroundStyle(.secondary) }
                 if energy.consumers.isEmpty {
                     Text(L10n.energyNoData).foregroundStyle(Self.placeholderColor)
                 }
-                ForEach(energy.consumers, id: \.name) { consumer in
+                ForEach(compact ? Array(energy.consumers.prefix(3)) : energy.consumers, id: \.name) { consumer in
                     HStack(spacing: 6) {
                         Text(consumer.name == EnergyTally.vmName
                              ? HeaderMetric.vmEngine.title(engineName: engine.activeName)
@@ -169,11 +186,14 @@ struct MonitoringMetricsView: View {
                             .monospacedDigit()
                             .frame(minWidth: 46, alignment: .trailing)
                     }
-                    .padding(.leading, 8)
+                    .padding(.leading, compact ? 0 : 8)
                 }
             }
             .font(.caption)
+            .padding(.leading, compact ? 28 : 0)
+            .padding(.trailing, compact && onDetails != nil ? 36 : 0)
             .padding(.top, 2)
+            .help(energyTitle(tally))
         }
     }
 

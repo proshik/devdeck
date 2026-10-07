@@ -73,6 +73,7 @@ struct PopoverView: View {
             .frame(height: min(contentHeight, appModel.panelContentHeightLimit))
         }
         .font(.body)
+        .labelStyle(DeckLabelStyle())
         .frame(width: 380)
         .fixedSize(horizontal: false, vertical: true)
         .background(.background)
@@ -127,16 +128,14 @@ struct PopoverView: View {
                 ProxySectionView()
             } else { emptyModule(module) }
         case .agentTabs:
-            Divider().padding(.horizontal, 16)
             ClaudeTabsSectionView()
         case .mac: measurementModule(module, section: .mac)
         case .containers: measurementModule(module, section: .containers)
-        case .energy: measurementModule(module, section: .energy)
+        case .energy:
+            MonitoringMetricsView(section: .energy, compact: true, onDetails: { openItem(.energy) })
+                .padding(.horizontal, 16).padding(.vertical, 10)
         case .awake:
-            AwakeSectionView()
-            Button(L10n.deckDetails) { openItem(.awake) }
-                .buttonStyle(.plain).controlHoverFeedback().foregroundStyle(.tint)
-                .padding(.horizontal, 16).padding(.bottom, 10)
+            AwakeSectionView(compact: true, onDetails: { openItem(.awake) })
         }
     }
 
