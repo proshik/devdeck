@@ -36,6 +36,19 @@
 	</array>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
+	<key>UTExportedTypeDeclarations</key>
+	<array>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>local.devdeck.panel-item</string>
+			<key>UTTypeDescription</key>
+			<string>DevDeck panel layout item</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+			</array>
+		</dict>
+	</array>
 	<key>SUFeedURL</key>
 	<string>https://raw.githubusercontent.com/proshik/devdeck/main/appcast.xml</string>
 	<key>SUPublicEDKey</key>

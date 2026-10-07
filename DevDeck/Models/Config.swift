@@ -135,6 +135,7 @@ struct Config: Codable, Equatable {
     var proxy: ProxyShare
     /// Client-side remote (SSH) proxies — egress through a VDS, no LAN peer involved.
     var remoteProxies: [RemoteProxy]
+    var panel: PanelConfiguration
 
     init(
         schemaVersion: Int = Config.currentSchemaVersion,
@@ -142,7 +143,8 @@ struct Config: Codable, Equatable {
         chains: [Chain] = [],
         settings: Settings = Settings(),
         proxy: ProxyShare = ProxyShare(),
-        remoteProxies: [RemoteProxy] = []
+        remoteProxies: [RemoteProxy] = [],
+        panel: PanelConfiguration = .standard
     ) {
         self.schemaVersion = schemaVersion
         self.commands = commands
@@ -150,10 +152,11 @@ struct Config: Codable, Equatable {
         self.settings = settings
         self.proxy = proxy
         self.remoteProxies = remoteProxies
+        self.panel = panel.normalized()
     }
 
     enum CodingKeys: String, CodingKey {
-        case schemaVersion, commands, chains, settings, proxy, remoteProxies
+        case schemaVersion, commands, chains, settings, proxy, remoteProxies, panel
     }
 
     init(from decoder: Decoder) throws {
@@ -164,6 +167,7 @@ struct Config: Codable, Equatable {
         settings = try c.decodeIfPresent(Settings.self, forKey: .settings) ?? Settings()
         proxy = try c.decodeIfPresent(ProxyShare.self, forKey: .proxy) ?? ProxyShare()
         remoteProxies = try c.decodeIfPresent([RemoteProxy].self, forKey: .remoteProxies) ?? []
+        panel = (try c.decodeIfPresent(PanelConfiguration.self, forKey: .panel) ?? .standard).normalized()
     }
 
     /// 2 — added the `proxy` block and the proxy settings/`routeThroughProxy` flag.

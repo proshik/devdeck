@@ -48,7 +48,7 @@ struct ChainEditorView: View {
                         } label: {
                             Image(systemName: "minus.circle")
                         }
-                        .buttonStyle(.borderless)
+                        .buttonStyle(.borderless).controlHoverFeedback()
                         .foregroundStyle(.secondary)
                         .help(L10n.removeStep)
                     }

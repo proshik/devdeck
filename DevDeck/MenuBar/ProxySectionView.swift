@@ -148,7 +148,7 @@ struct ProxySectionView: View {
             .padding(.vertical, 3)
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.plain).controlHoverFeedback()
     }
 
     /// Both addresses at once: where to dial, and — once the host reported it — where traffic
@@ -193,7 +193,7 @@ struct ProxySectionView: View {
             .foregroundStyle(.secondary)
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.plain).controlHoverFeedback()
         .disabled(proxy.clientCheck == .running)
         .padding(.leading, 34)
         .padding(.trailing, 16)
@@ -237,7 +237,7 @@ struct ProxySectionView: View {
             .padding(.vertical, 3)
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.plain).controlHoverFeedback()
     }
 
     // MARK: browser via proxy
@@ -258,7 +258,7 @@ struct ProxySectionView: View {
             .foregroundStyle(.secondary)
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.plain).controlHoverFeedback()
         .padding(.leading, 34)
         .padding(.trailing, 16)
         .padding(.bottom, 2)

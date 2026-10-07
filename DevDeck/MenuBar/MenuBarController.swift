@@ -7,6 +7,7 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
     private let statusItem: NSStatusItem
     private let popover: NSPopover
     private let manager: ProcessManager
+    private let store: CommandStore
     private let engine: EngineModel
     private let appModel: AppModel
     private let monitoring: DeckMonitoringModel
@@ -40,6 +41,7 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
          popover suppliedPopover: NSPopover? = nil) {
         let popover = suppliedPopover ?? NSPopover()
         self.manager = manager
+        self.store = store
         self.engine = engine
         self.appModel = appModel
         self.monitoring = monitoring
@@ -130,7 +132,10 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
     /// Public entry point for the global hotkey.
     func toggle() { togglePanel(focusPicker: true) }
 
-    func popoverWillShow(_ notification: Notification) { monitoring.begin(monitoringReader) }
+    func popoverWillShow(_ notification: Notification) {
+        appModel.panelSection = store.config.panel.openingSection ?? .environment
+        monitoring.begin(monitoringReader)
+    }
     func popoverDidClose(_ notification: Notification) { monitoring.end(monitoringReader) }
 
     @objc private func togglePopover() {

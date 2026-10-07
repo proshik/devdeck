@@ -6,6 +6,8 @@ struct PopoverView: View {
     @Environment(ProcessManager.self) private var manager
     @Environment(AppModel.self) private var appModel
     @Environment(UpdateController.self) private var updates
+    @Environment(ProxyManager.self) private var proxy
+    @Environment(AwakeModel.self) private var awake
     @Environment(\.openWindow) private var openWindow
     @State private var contentHeight: CGFloat = 1
 
@@ -15,20 +17,30 @@ struct PopoverView: View {
     @AppStorage("popover.section.ports.collapsed") private var portsCollapsed = false
 
     var body: some View {
-        @Bindable var appModel = appModel
         VStack(spacing: 0) {
             HStack(spacing: 12) {
                 Text("DevDeck").font(.headline)
                 Spacer(minLength: 12)
-                Button(L10n.deckSettings, systemImage: "gearshape") { openItem(.settings) }
-                .labelStyle(.iconOnly).buttonStyle(.borderless)
-                .frame(width: 24, height: 24)
+                Button { openItem(.settings) } label: {
+                    Label(L10n.deckSettings, systemImage: "gearshape")
+                        .labelStyle(.iconOnly).frame(width: 24, height: 24)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.borderless).controlHoverFeedback()
                 .foregroundStyle(updates.updateAvailable || diskNeedsCleanup ? Color.orange : Color.primary)
                 .help(updates.updateAvailable ? L10n.updateAvailableHelp(updates.latestVersion ?? "")
                       : diskNeedsCleanup ? L10n.cleanupHelp : L10n.settings)
             }.padding(.horizontal, 16).padding(.vertical, 8)
-            PanelSectionPicker(selection: $appModel.panelSection)
-                .frame(maxWidth: .infinity).padding(.horizontal, 16).padding(.bottom, 12)
+            if !store.config.panel.visibleSections.isEmpty {
+                PanelSectionTabs(selection: Binding(
+                    get: { selectedSection ?? .environment },
+                    set: { section in
+                        appModel.panelSection = section
+                        store.updatePanel { $0.lastSection = section.rawValue }
+                    }
+                ), sections: store.config.panel.visibleSectionLayouts)
+                    .frame(maxWidth: .infinity).padding(.horizontal, 16).padding(.bottom, 12)
+            }
             Divider()
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
@@ -37,16 +49,20 @@ struct PopoverView: View {
                             .font(.caption).foregroundStyle(.red)
                             .padding(16)
                     }
-                    switch appModel.panelSection {
-                    case .environment: environmentContent
-                    case .monitoring: monitoringContent
-                    case .displays:
-                        AwakeSectionView()
-                        Button(L10n.deckDetails) { openItem(.awake) }
-                            .buttonStyle(.plain).foregroundStyle(.tint)
-                            .padding(.horizontal, 16).padding(.bottom, 10)
+                    if let section = selectedSection {
+                        if section == .environment && store.config.panel.showMemoryInEnvironment { memoryRow }
+                        ForEach(store.config.panel.visibleModules(in: section)) { module in
+                            moduleContent(module).contextMenu { PanelModuleMenu(module: module) }
+                        }
+                    } else {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text(L10n.panelEmpty).foregroundStyle(.secondary)
+                            Button(L10n.deckPanelSettings) { openItem(.panel) }
+                        }.padding(16)
                     }
+                    hiddenActivity
                 }
+                .padding(.bottom, 12)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .fixedSize(horizontal: false, vertical: true)
                 .onGeometryChange(for: CGFloat.self) { ceil($0.size.height) } action: {
@@ -60,66 +76,137 @@ struct PopoverView: View {
         .frame(width: 380)
         .fixedSize(horizontal: false, vertical: true)
         .background(.background)
+        .onChange(of: store.config.panel) { _, panel in
+            if let resolved = panel.resolvedSection(preferred: appModel.panelSection) { appModel.panelSection = resolved }
+        }
     }
 
-    private var environmentContent: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            if commands.isEmpty && daemons.isEmpty && ports.isEmpty && store.config.chains.isEmpty {
+    private var selectedSection: PanelSection? {
+        store.config.panel.resolvedSection(preferred: appModel.panelSection)
+    }
+
+    @ViewBuilder private func moduleContent(_ module: PanelModuleID) -> some View {
+        switch module {
+        case .commands:
+            if commands.isEmpty {
                 HStack(spacing: 8) {
                     Text(L10n.noCommandsYet).foregroundStyle(.secondary)
                     Spacer(minLength: 4)
-                    Button(L10n.deckCommands, systemImage: "arrow.up.forward") { openItem(.commands) }
-                        .labelStyle(.iconOnly).buttonStyle(.borderless)
-                        .foregroundStyle(.secondary).frame(width: 28, height: 28)
-                        .help(L10n.deckCommands)
+                    detailsButton(module)
                 }.padding(.horizontal, 16).padding(.vertical, 10)
-            }
-            if !commands.isEmpty {
+            } else {
                 CollapsibleSection(title: L10n.commands, count: commands.count,
                                    runningCount: runningCommandsCount, collapsed: $commandsCollapsed) {
                     ForEach(commands) { commandRow($0) }
                 }
             }
+        case .daemons:
             if !daemons.isEmpty {
                 CollapsibleSection(title: L10n.daemons, count: daemons.count,
                                    runningCount: aliveDaemonsCount, collapsed: $daemonsCollapsed) {
                     ForEach(daemons) { commandRow($0) }
                 }
-            }
+            } else { emptyModule(module) }
+        case .chains:
+            if !store.config.chains.isEmpty {
+                CollapsibleSection(title: L10n.chains, count: store.config.chains.count,
+                                   runningCount: runningChainsCount, collapsed: $chainsCollapsed) {
+                    ForEach(store.config.chains) { chainRow($0) }
+                }
+            } else { emptyModule(module) }
+        case .portForwards:
             if !ports.isEmpty {
                 CollapsibleSection(title: L10n.deckPorts, count: ports.count,
                                    runningCount: ports.filter { StatusIndicator.forCommand(manager.states[$0.id]).isStop }.count,
                                    collapsed: $portsCollapsed) {
                     ForEach(ports) { commandRow($0) }
                 }
-            }
-            if !store.config.chains.isEmpty {
-                CollapsibleSection(title: L10n.chains, count: store.config.chains.count,
-                                   runningCount: runningChainsCount, collapsed: $chainsCollapsed) {
-                    ForEach(store.config.chains) { chainRow($0) }
-                }
-            }
-            ProxySectionView()
+            } else { emptyModule(module) }
+        case .proxy:
+            if store.config.settings.proxyShareEnabled || store.config.settings.proxyDiscoveryEnabled || !store.config.remoteProxies.isEmpty {
+                ProxySectionView()
+            } else { emptyModule(module) }
+        case .agentTabs:
             Divider().padding(.horizontal, 16)
             ClaudeTabsSectionView()
+        case .mac: measurementModule(module, section: .mac)
+        case .containers: measurementModule(module, section: .containers)
+        case .energy: measurementModule(module, section: .energy)
+        case .awake:
+            AwakeSectionView()
+            Button(L10n.deckDetails) { openItem(.awake) }
+                .buttonStyle(.plain).controlHoverFeedback().foregroundStyle(.tint)
+                .padding(.horizontal, 16).padding(.bottom, 10)
         }
     }
 
-    private var monitoringContent: some View {
-        @Bindable var appModel = appModel
-        return VStack(alignment: .leading, spacing: 10) {
-            Picker(L10n.deckMonitoring, selection: $appModel.monitoringSection) {
-                ForEach(MonitoringSection.allCases) { Text($0.title).tag($0) }
-            }.pickerStyle(.segmented).labelsHidden().controlSize(.small)
-            MonitoringMetricsView(section: appModel.monitoringSection)
-            Button(L10n.deckDetails) {
-                switch appModel.monitoringSection {
-                case .mac: openItem(.monitoring)
-                case .containers: openItem(.containers)
-                case .energy: openItem(.energy)
-                }
-            }.buttonStyle(.plain).foregroundStyle(.tint)
+    private func measurementModule(_ module: PanelModuleID, section: MonitoringSection) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Label(module.title, systemImage: module.symbol).fontWeight(.medium)
+                Spacer(minLength: 4)
+                detailsButton(module)
+            }
+            MonitoringMetricsView(section: section)
         }.padding(.horizontal, 16).padding(.vertical, 10)
+    }
+
+    private func detailsButton(_ module: PanelModuleID) -> some View {
+        Button { openItem(module.settingsSelection) } label: {
+            Label(module.title, systemImage: "arrow.up.forward")
+                .labelStyle(.iconOnly).frame(width: 28, height: 28)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.borderless).controlHoverFeedback()
+        .foregroundStyle(.secondary).help(module.title)
+    }
+
+    private func emptyModule(_ module: PanelModuleID) -> some View {
+        HStack(spacing: 8) {
+            Text(module.title).foregroundStyle(.secondary).lineLimit(1)
+            Spacer(minLength: 4)
+            Text(L10n.panelNoItems).font(.caption).foregroundStyle(.secondary)
+            detailsButton(module)
+        }.padding(.horizontal, 16).padding(.vertical, 8)
+    }
+
+    private var memoryRow: some View {
+        TimelineView(.periodic(from: .now, by: 2)) { _ in
+            let memory = SystemMemory.current()
+            HStack {
+                Label(L10n.memory, systemImage: "memorychip")
+                Spacer(minLength: 4)
+                Text(SystemMemory.format(usedBytes: memory.usedBytes, totalBytes: memory.totalBytes))
+                    .foregroundStyle(.secondary).monospacedDigit()
+            }.padding(.horizontal, 16).padding(.vertical, 10)
+        }
+    }
+
+    private var activeHiddenModules: [PanelModuleID] {
+        PanelActivity.activeModules(commands: store.config.commands, states: manager.states,
+                                    chains: store.config.chains, chainStates: manager.chainStates,
+                                    proxyActive: proxy.isAdvertising || proxy.activeProxy?.isLive == true
+                                        || StatusIndicator.forCommand(manager.states[ProxyShare.daemonID]).isStop
+                                        || StatusIndicator.forCommand(manager.states[RemoteProxy.bridgeDaemonID]).isStop,
+                                    agentCaptureEnabled: store.config.settings.claudeTabsRestore,
+                                    awakeActive: awake.isBusy)
+            .filter { !store.config.panel.isShown($0) }
+    }
+
+    @ViewBuilder private var hiddenActivity: some View {
+        if !activeHiddenModules.isEmpty {
+            Divider().padding(.horizontal, 16)
+            HStack(spacing: 8) {
+                Label(L10n.panelHiddenActivity(activeHiddenModules.count), systemImage: "bolt.horizontal.circle")
+                    .font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                Spacer(minLength: 4)
+                Menu(L10n.panelManage) {
+                    ForEach(activeHiddenModules) { module in
+                        Button(module.title) { openItem(module.settingsSelection) }
+                    }
+                }.menuStyle(.borderlessButton).fixedSize().controlHoverFeedback()
+            }.padding(.horizontal, 16).padding(.vertical, 10)
+        }
     }
 
     // MARK: splitting and counters
@@ -279,7 +366,7 @@ struct CollapsibleSection<Content: View>: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.plain).controlHoverFeedback()
 
             if !collapsed {
                 content()
@@ -326,7 +413,7 @@ struct DeckRow: View {
                         .frame(width: 24, height: 24)
                         .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.plain).controlHoverFeedback()
                 .foregroundStyle(watchdogColor(watchdog))
                 .help(watchdogHelp(watchdog))
                 .accessibilityLabel(watchdogHelp(watchdog) + " " + name)
@@ -338,7 +425,7 @@ struct DeckRow: View {
                     .frame(width: 24, height: 24)        // large tap target
                     .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.plain).controlHoverFeedback()
             .foregroundStyle(indicator.isStop ? Color.red : Color.green)
             .help(indicator.isStop ? L10n.stop : L10n.run)
             .accessibilityLabel((indicator.isStop ? L10n.stop : L10n.run) + " " + name)
@@ -349,7 +436,7 @@ struct DeckRow: View {
                     .frame(width: 24, height: 24)
                     .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.plain).controlHoverFeedback()
             .foregroundStyle(.secondary)
             .help(L10n.logs)
             .accessibilityLabel(L10n.logs + " " + name)

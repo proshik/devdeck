@@ -1,6 +1,44 @@
 import Foundation
 
 extension L10n {
+    static var panelNewTab: String { t("New tab", "Новая вкладка") }
+    static var panelAddTab: String { t("Add tab…", "Добавить вкладку…") }
+    static var panelEditTab: String { t("Rename and change icon…", "Изменить название и иконку…") }
+    static var panelTabName: String { t("Tab name", "Название вкладки") }
+    static var panelTabIcon: String { t("Icon", "Иконка") }
+    static var panelGridIcon: String { t("Modules", "Модули") }
+    static var panelFavoriteIcon: String { t("Favorites", "Избранное") }
+    static var panelRemoveTab: String { t("Remove tab", "Удалить вкладку") }
+    static var panelRemoveTabHelp: String { t("Remove tab; its modules return to Available modules", "Удалить вкладку; её модули вернутся в доступные") }
+    static var panelRemoveModule: String { t("Remove from panel", "Удалить из панели") }
+    static var panelAvailableModules: String { t("Available modules", "Доступные модули") }
+    static var panelAllModulesAdded: String { t("All modules have been added. Remove one from a tab to return it here.", "Все модули добавлены. Удалите модуль из вкладки, чтобы вернуть его сюда.") }
+    static var panelNoTabs: String { t("Add a tab, then add modules from the catalogue below.", "Добавьте вкладку, затем выберите модули из каталога ниже.") }
+    static var panelAddModule: String { t("Add module", "Добавить модуль") }
+    static var panelAddTo: String { t("Add to", "Добавить в") }
+    static var panelHide: String { t("Hide in panel", "Скрыть в панели") }
+    static var panelShow: String { t("Show in panel", "Показывать в панели") }
+    static var panelMoveTo: String { t("Move to", "Перенести в") }
+    static var panelMoveUp: String { t("Move up", "Переместить вверх") }
+    static var panelMoveDown: String { t("Move down", "Переместить вниз") }
+    static var panelBehavior: String { t("Panel behavior", "Поведение панели") }
+    static var panelRememberLast: String { t("Return to the last section", "Возвращаться на последнюю вкладку") }
+    static var panelInitialSection: String { t("Initial section", "Начальная вкладка") }
+    static var panelMemoryInEnvironment: String { t("Show memory in Environment", "Показывать память во вкладке «Среда»") }
+    static var panelRestoreLayout: String { t("Restore standard layout", "Восстановить стандартное расположение") }
+    static var panelDragSection: String { t("Drag to reorder sections", "Перетащите для изменения порядка вкладок") }
+    static var panelSectionActions: String { t("Section order", "Порядок вкладок") }
+    static var panelModuleActions: String { t("Move, hide or remove module", "Перенести, скрыть или удалить модуль") }
+    static var panelShowSection: String { t("Show section in panel", "Показывать вкладку в панели") }
+    static func panelShowModule(_ name: String) -> String { t("Show \(name) in panel", "Показывать «\(name)» в панели") }
+    static var panelDropModules: String { t("Drag modules here", "Перетащите сюда модули") }
+    static var panelDropHere: String { t("Drop here to add at the end", "Перетащите сюда для добавления в конец") }
+    static var panelArrangementHelp: String { t("Drag modules and tab headings to rearrange them, or use the ⋯ menus.", "Переставляйте модули и заголовки вкладок перетаскиванием или через меню ⋯.") }
+    static var panelVisibilityHelp: String { t("Hiding or removing modules only changes the panel. Running commands, ports and proxies continue working; data collection is configured on each function’s page.", "Скрытие и удаление модулей меняют только панель. Работающие команды, порты и прокси продолжают работать; сбор данных настраивается на странице каждой функции.") }
+    static var panelEmpty: String { t("The panel is empty", "Панель пуста") }
+    static var panelNoItems: String { t("No items", "Нет элементов") }
+    static var panelManage: String { t("Manage…", "Управление…") }
+    static func panelHiddenActivity(_ count: Int) -> String { t("Active hidden modules: \(count)", "Активных скрытых модулей: \(count)") }
     static var deckEnvironment: String { t("Environment", "Среда") }
     static var deckCommands: String { t("Commands & Chains", "Команды и цепочки") }
     static var deckAdd: String { t("Add", "Добавить") }

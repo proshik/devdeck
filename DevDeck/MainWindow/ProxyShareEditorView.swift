@@ -129,7 +129,7 @@ struct ProxyShareEditorView: View {
                     }
                     .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.plain).controlHoverFeedback()
                 .disabled(missing)
 
                 Spacer()
@@ -140,13 +140,13 @@ struct ProxyShareEditorView: View {
                 Button { beginEditingRemote(remote) } label: {
                     Image(systemName: "pencil")
                 }
-                .buttonStyle(.borderless)
+                .buttonStyle(.borderless).controlHoverFeedback()
                 .help(L10n.proxyRemoteEditHelp)
 
                 Button(role: .destructive) { deletingRemote = remote } label: {
                     Image(systemName: "trash")
                 }
-                .buttonStyle(.borderless)
+                .buttonStyle(.borderless).controlHoverFeedback()
                 .help(L10n.proxyRemoteDeleteHelp)
             }
 
@@ -200,37 +200,41 @@ struct ProxyShareEditorView: View {
 
     private var editRemoteSheet: some View {
         let handEdited = editTunnelPlan == .handEdited
-        return Form {
-            TextField(L10n.proxyRemoteName, text: $editName)
+        return VStack(alignment: .leading, spacing: 24) {
+            Text(L10n.proxyRemoteEdit).font(.headline)
+            Form {
+                TextField(L10n.proxyRemoteName, text: $editName)
 
-            if editTunnelCommand == nil {
-                warning(L10n.proxyRemoteTunnelMissing)
-            } else if handEdited {
-                warning(L10n.proxyRemoteTunnelHandEdited)
-                Button(L10n.proxyRemoteOpenTunnelCommand) { openEditingTunnelCommandInEditor() }
-            } else {
-                TextField(L10n.proxyRemoteDestination, text: $editDestination)
-                Text(L10n.proxyRemoteDestinationHint).font(.caption).foregroundStyle(.secondary)
+                if editTunnelCommand == nil {
+                    warning(L10n.proxyRemoteTunnelMissing)
+                } else if handEdited {
+                    warning(L10n.proxyRemoteTunnelHandEdited)
+                    Button(L10n.proxyRemoteOpenTunnelCommand) { openEditingTunnelCommandInEditor() }
+                } else {
+                    TextField(L10n.proxyRemoteDestination, text: $editDestination)
+                    Text(L10n.proxyRemoteDestinationHint).font(.caption).foregroundStyle(.secondary)
+                }
+
+                TextField(L10n.proxyRemoteLocalPort, value: $editLocalPort, format: .number.grouping(.never))
+                TextField(L10n.proxyRemoteSocksPort, value: $editSocksPort, format: .number.grouping(.never))
+                if handEdited && editTunnelCommand != nil {
+                    Text(L10n.proxyRemoteSocksPortHandEditedHint).font(.caption).foregroundStyle(.secondary)
+                }
             }
-
-            TextField(L10n.proxyRemoteLocalPort, value: $editLocalPort, format: .number.grouping(.never))
-            TextField(L10n.proxyRemoteSocksPort, value: $editSocksPort, format: .number.grouping(.never))
-            if handEdited && editTunnelCommand != nil {
-                Text(L10n.proxyRemoteSocksPortHandEditedHint).font(.caption).foregroundStyle(.secondary)
-            }
-
-            HStack {
-                Button(L10n.cancel) { editingRemote = nil }
+            .formStyle(.grouped)
+            .scrollDisabled(true)
+            .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 8) {
                 Spacer()
+                Button(L10n.cancel) { editingRemote = nil }.keyboardShortcut(.cancelAction)
                 Button(L10n.save) { saveRemoteEdit() }
-                    .buttonStyle(.borderedProminent)
+                    .keyboardShortcut(.defaultAction)
                     .disabled(editName.trimmingCharacters(in: .whitespaces).isEmpty
                               || (!handEdited && editDestination.trimmingCharacters(in: .whitespaces).isEmpty))
             }
         }
-        .formStyle(.grouped)
-        .frame(width: 380)
-        .padding()
+        .padding(24)
+        .frame(width: 480)
     }
 
     private func saveRemoteEdit() {
@@ -251,29 +255,34 @@ struct ProxyShareEditorView: View {
     }
 
     private var addRemoteSheet: some View {
-        Form {
-            TextField(L10n.proxyRemoteName, text: $remoteName)
-            TextField(L10n.proxyRemoteDestination, text: $remoteDestination)
-            Text(L10n.proxyRemoteDestinationHint).font(.caption).foregroundStyle(.secondary)
-            TextField(L10n.proxyRemoteLocalPort, value: $remoteLocalPort, format: .number.grouping(.never))
-            TextField(L10n.proxyRemoteSocksPort, value: $remoteSocksPort, format: .number.grouping(.never))
-            HStack {
-                Button(L10n.cancel) { addingRemote = false }
+        VStack(alignment: .leading, spacing: 24) {
+            Text(L10n.proxyRemoteAdd).font(.headline)
+            Form {
+                TextField(L10n.proxyRemoteName, text: $remoteName)
+                TextField(L10n.proxyRemoteDestination, text: $remoteDestination)
+                Text(L10n.proxyRemoteDestinationHint).font(.caption).foregroundStyle(.secondary)
+                TextField(L10n.proxyRemoteLocalPort, value: $remoteLocalPort, format: .number.grouping(.never))
+                TextField(L10n.proxyRemoteSocksPort, value: $remoteSocksPort, format: .number.grouping(.never))
+            }
+            .formStyle(.grouped)
+            .scrollDisabled(true)
+            .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 8) {
                 Spacer()
+                Button(L10n.cancel) { addingRemote = false }.keyboardShortcut(.cancelAction)
                 Button(L10n.save) {
                     proxy.addRemoteProxy(name: remoteName.trimmingCharacters(in: .whitespaces),
                                          destination: remoteDestination.trimmingCharacters(in: .whitespaces),
                                          localPort: remoteLocalPort, socksPort: remoteSocksPort)
                     addingRemote = false
                 }
-                .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.defaultAction)
                 .disabled(remoteName.trimmingCharacters(in: .whitespaces).isEmpty
                           || remoteDestination.trimmingCharacters(in: .whitespaces).isEmpty)
             }
         }
-        .formStyle(.grouped)
-        .frame(width: 380)
-        .padding()
+        .padding(24)
+        .frame(width: 480)
     }
 
     private func resetRemoteDraft() {
@@ -476,7 +485,7 @@ struct ProxyShareEditorView: View {
             }
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.plain).controlHoverFeedback()
     }
 
     private func detail(for found: DiscoveredProxy) -> String {
