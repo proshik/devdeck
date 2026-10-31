@@ -26,6 +26,8 @@ struct MainWindowView: View {
                     navigationRow(L10n.deckEnergy, icon: "battery.100percent", selection: .energy)
                 }
                 Section(L10n.deckMacTools) {
+                    navigationRow(L10n.deckDisplays, icon: "display", selection: .displays)
+                    navigationRow(L10n.clipboardTitle, icon: "clipboard", selection: .clipboard)
                     navigationRow(L10n.awakeTitle, icon: "cup.and.saucer", selection: .awake)
                 }
             }
@@ -72,6 +74,10 @@ struct MainWindowView: View {
             MonitoringPage(section: .energy)
         case .awake:
             AwakeSettingsView()
+        case .displays:
+            DisplayBrightnessSettingsView()
+        case .clipboard:
+            ClipboardView()
         case .ports:
             portForwards
         case .proxy:

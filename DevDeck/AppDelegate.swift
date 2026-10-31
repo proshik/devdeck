@@ -20,6 +20,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let awake: AwakeModel
     let engine = EngineModel()
     let monitoring: DeckMonitoringModel
+    let clipboard = ClipboardModel(paster: ClipboardPasteController())
+    let brightness = DisplayBrightnessModel()
 
     private var menuBar: MenuBarController?
 
@@ -27,7 +29,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         manager = ProcessManager(runner: RoutingCommandRunner(), notifier: notifier)
         cleanupModel = CleanupModel(manager: manager)
         awake = AwakeModel(manager: manager)
-        monitoring = DeckMonitoringModel(manager: manager, energy: energy)
+        monitoring = DeckMonitoringModel(manager: manager, energy: energy, store: store, engine: engine)
         super.init()
     }
 
@@ -76,10 +78,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menuBar = MenuBarController(store: store, manager: manager, appModel: appModel,
                                     updateController: updateController, proxyManager: proxyManager,
                                     claudeTabs: claudeTabs, energy: energy, engine: engine, awake: awake,
-                                    monitoring: monitoring)
+                                    monitoring: monitoring, clipboard: clipboard, brightness: brightness)
+        brightness.start(settings: { [weak store] in store?.config.settings.displays ?? .init() })
+        clipboard.dismissPanel = { [weak appModel] in appModel?.dismissPanel() }
+        clipboard.start(settings: { [weak store] in store?.config.settings.clipboard ?? .init() })
         if !AppRuntime.isIsolated { awake.startMonitoring() }
         energy.isEnabled = { [weak store] in store?.config.settings.batteryMonitoring ?? false }
         energy.start()
+        monitoring.start(store: store, engine: engine, manager: manager)
 
         // Global hotkey (⌃⌥D) toggles the popover; enabled per the persisted setting.
         HotKeyManager.shared.onTrigger = { [weak menuBar] in menuBar?.toggle() }
@@ -113,6 +119,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         guard !AppRuntime.isTesting else { return }
         awake.stop()   // the privileged helper restores sleep even after this process exits
+        monitoring.stop()
+        clipboard.stop()
+        brightness.stop()
         claudeTabs.captureBeforeShutdown()
     }
 

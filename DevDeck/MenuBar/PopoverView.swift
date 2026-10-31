@@ -88,6 +88,10 @@ struct PopoverView: View {
 
     @ViewBuilder private func moduleContent(_ module: PanelModuleID) -> some View {
         switch module {
+        case .brightness:
+            BrightnessSectionView(onDetails: { openItem(.displays) })
+        case .clipboard:
+            ClipboardSectionView(onDetails: { openItem(.clipboard) })
         case .commands:
             if commands.isEmpty {
                 HStack(spacing: 8) {
@@ -146,7 +150,7 @@ struct PopoverView: View {
                 Spacer(minLength: 4)
                 detailsButton(module)
             }
-            MonitoringMetricsView(section: section)
+            MonitoringMetricsView(section: section, compact: true)
         }.padding(.horizontal, 16).padding(.vertical, 10)
     }
 
@@ -170,15 +174,7 @@ struct PopoverView: View {
     }
 
     private var memoryRow: some View {
-        TimelineView(.periodic(from: .now, by: 2)) { _ in
-            let memory = SystemMemory.current()
-            HStack {
-                Label(L10n.memory, systemImage: "memorychip")
-                Spacer(minLength: 4)
-                Text(SystemMemory.format(usedBytes: memory.usedBytes, totalBytes: memory.totalBytes))
-                    .foregroundStyle(.secondary).monospacedDigit()
-            }.padding(.horizontal, 16).padding(.vertical, 10)
-        }
+        MonitoringMemoryRow().padding(.horizontal, 16).padding(.vertical, 10)
     }
 
     private var activeHiddenModules: [PanelModuleID] {
@@ -548,5 +544,23 @@ struct RunningSpinner: View {
             .rotationEffect(.degrees(spinning ? 360 : 0))
             .animation(.linear(duration: 0.8).repeatForever(autoreverses: false), value: spinning)
             .onAppear { spinning = true }
+    }
+}
+
+private struct MonitoringMemoryRow: View {
+    @Environment(DeckMonitoringModel.self) private var monitoring
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+        HStack {
+            Label(L10n.memory, systemImage: "memorychip")
+            Spacer(minLength: 4)
+            Text(monitoring.snapshot.mac?.value.sample.memory.map {
+                SystemMemory.format(usedBytes: $0.usedBytes, totalBytes: $0.totalBytes)
+            } ?? "—").foregroundStyle(.secondary).monospacedDigit()
+        }
+        if let status = monitoring.memoryStatus {
+            Text(status).font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        }
+        }
     }
 }

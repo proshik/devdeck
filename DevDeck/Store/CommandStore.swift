@@ -376,6 +376,27 @@ final class CommandStore {
         persist(updated)
     }
 
+    func updateMonitoring(_ mutation: (inout MonitoringSettings) -> Void) {
+        var updated = config
+        mutation(&updated.settings.monitoring)
+        guard updated != config else { return }
+        persist(updated)
+    }
+
+    func updateDisplays(_ mutation: (inout DisplayBrightnessSettings) -> Void) {
+        var updated = config
+        mutation(&updated.settings.displays)
+        guard updated != config else { return }
+        persist(updated)
+    }
+
+    func updateClipboard(_ mutation: (inout ClipboardSettings) -> Void) {
+        var updated = config
+        mutation(&updated.settings.clipboard)
+        guard updated != config else { return }
+        persist(updated)
+    }
+
     /// Mutates layout only. Process and data-collection settings are deliberately untouched.
     func updatePanel(_ mutation: (inout PanelConfiguration) -> Void) {
         var updated = config

@@ -89,8 +89,8 @@ struct MinikubeRunStats: Equatable {
 final class LiveMinikubeProbe: MinikubeProbing {
     func sample() -> MinikubeSample? {
         let args = ["ssh", "--", MinikubeSample.probeScript]
-        guard let out = ProcessTree.run("/opt/homebrew/bin/minikube", args)
-                ?? ProcessTree.run("/usr/bin/env", ["minikube"] + args) else { return nil }
+        guard let out = MonitoringCommand.run("/opt/homebrew/bin/minikube", args)
+                ?? MonitoringCommand.run("/usr/bin/env", ["minikube"] + args) else { return nil }
         return MinikubeSample.parse(out)
     }
 }

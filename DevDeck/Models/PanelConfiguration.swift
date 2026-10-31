@@ -4,13 +4,15 @@ import Foundation
 /// module goes when loading a layout made by an older application version.
 enum PanelModuleID: String, Codable, CaseIterable, Identifiable, Sendable {
     case commands, daemons, chains, portForwards, proxy, agentTabs
-    case mac, containers, energy, awake
+    case mac, containers, energy, brightness, awake
+    case clipboard
     var id: String { rawValue }
     var defaultSection: PanelSection {
         switch self {
         case .commands, .daemons, .chains, .portForwards, .proxy, .agentTabs: .environment
         case .mac, .containers, .energy: .monitoring
-        case .awake: .displays
+        case .awake, .brightness: .displays
+        case .clipboard: .clipboard
         }
     }
     var title: String {
@@ -25,6 +27,8 @@ enum PanelModuleID: String, Codable, CaseIterable, Identifiable, Sendable {
         case .containers: L10n.deckContainers
         case .energy: L10n.deckEnergy
         case .awake: L10n.awakeTitle
+        case .brightness: L10n.brightnessTitle
+        case .clipboard: L10n.clipboardHistory
         }
     }
     var symbol: String {
@@ -39,6 +43,8 @@ enum PanelModuleID: String, Codable, CaseIterable, Identifiable, Sendable {
         case .containers: "shippingbox"
         case .energy: "battery.100percent"
         case .awake: "cup.and.saucer"
+        case .brightness: "sun.max"
+        case .clipboard: "clipboard"
         }
     }
     var settingsSelection: MainSelection {
@@ -50,7 +56,9 @@ enum PanelModuleID: String, Codable, CaseIterable, Identifiable, Sendable {
         case .mac: .monitoring
         case .containers: .containers
         case .energy: .energy
+        case .brightness: .displays
         case .awake: .awake
+        case .clipboard: .clipboard
         }
     }
     // No dependence on a collection flag or the presence of commands: an empty/disabled

@@ -12,6 +12,10 @@ final class PanelLayoutTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: directory) }
         let store = CommandStore(configURL: directory.appendingPathComponent("config.json"))
         try store.save(.empty)
+        // Keep the three-tab minimum-width regression fixture. Additional built-in/custom
+        // tabs use the existing horizontal scroller and are exercised separately.
+        store.updatePanel { $0.removeSection(.clipboard) }
+        let testedSections: [PanelSection] = [.environment, .monitoring, .displays]
         let manager = ProcessManager(runner: FakeCommandRunner(), vmMonitoringEnabled: { false },
                                      hostMonitoringEnabled: { false })
         let appModel = AppModel()
@@ -21,10 +25,12 @@ final class PanelLayoutTests: XCTestCase {
         let proxy = ProxyManager(discovering: FakeProxyDiscovering(), advertiser: FakeProxyAdvertising(),
                                  credentials: FakeProxyCredentialStore())
         let root = PopoverView()
+            .environment(DeckMonitoringModel())
             .environment(store).environment(manager).environment(appModel)
             .environment(UpdateController()).environment(energy).environment(engine).environment(proxy)
             .environment(ClaudeTabsModel(defaults: AppRuntime.preferences))
             .environment(AwakeModel(manager: manager, hasJournal: { false }))
+            .environment(ClipboardModel()).environment(DisplayBrightnessModel())
             .defaultAppStorage(AppRuntime.preferences)
         let hosting = NSHostingController(rootView: root)
         let window = NSWindow(contentViewController: hosting)
@@ -38,7 +44,7 @@ final class PanelLayoutTests: XCTestCase {
         XCTAssertEqual(shortSize.width, 380, accuracy: 2)
         XCTAssertLessThan(shortSize.height, 400, "an empty panel must not reserve the old 675 pt")
         let picker = try XCTUnwrap(findPicker(in: hosting.view))
-        XCTAssertEqual((0..<picker.segmentCount).map { picker.toolTip(forSegment: $0) }, PanelSection.allCases.map(\.title))
+        XCTAssertEqual((0..<picker.segmentCount).map { picker.toolTip(forSegment: $0) }, testedSections.map(\.title))
         picker.selectedSegment = 2
         let action = try XCTUnwrap(picker.action)
         NSApp.sendAction(action, to: picker.target, from: picker)
@@ -62,7 +68,7 @@ final class PanelLayoutTests: XCTestCase {
         XCTAssertNil(findPicker(in: hosting.view), "an empty panel must offer configuration instead of unavailable tabs")
         XCTAssertLessThan(hosting.view.fittingSize.height, 250)
         try saveSnapshot(hosting.view, name: "panel-all-hidden")
-        store.updatePanel { $0.sections = PanelConfiguration.standard.sections }
+        store.updatePanel { $0 = .standard; $0.removeSection(.clipboard) }
         try await Task.sleep(for: .milliseconds(100))
         let currentPicker = try XCTUnwrap(findPicker(in: hosting.view))
         let previousLanguage = LocalizationManager.shared.language
@@ -75,13 +81,13 @@ final class PanelLayoutTests: XCTestCase {
             LocalizationManager.shared.language = language
             for appearance in [NSAppearance.Name.aqua, .darkAqua] {
                 NSApp.appearance = NSAppearance(named: appearance)
-                for section in PanelSection.allCases {
+                for section in testedSections {
                     appModel.panelSection = section
                     try await Task.sleep(for: .milliseconds(100))
                     hosting.view.layoutSubtreeIfNeeded()
-                    XCTAssertEqual((0..<currentPicker.segmentCount).map { currentPicker.toolTip(forSegment: $0) }, PanelSection.allCases.map(\.title))
+                    XCTAssertEqual((0..<currentPicker.segmentCount).map { currentPicker.toolTip(forSegment: $0) }, testedSections.map(\.title))
                     XCTAssertLessThan(hosting.view.fittingSize.height, 700)
-                    XCTAssertEqual(currentPicker.selectedSegment, PanelSection.allCases.firstIndex(of: section))
+                    XCTAssertEqual(currentPicker.selectedSegment, testedSections.firstIndex(of: section))
                     try saveSnapshot(hosting.view, name: "panel-\(section.rawValue)-\(language.rawValue)-\(appearance.rawValue)")
                 }
             }
@@ -134,6 +140,7 @@ final class PanelLayoutTests: XCTestCase {
             .environment(UpdateController()).environment(energy).environment(engine).environment(proxy)
             .environment(ClaudeTabsModel(defaults: AppRuntime.preferences))
             .environment(AwakeModel(manager: manager, hasJournal: { false }))
+            .environment(ClipboardModel()).environment(DisplayBrightnessModel())
             .environment(CleanupModel(manager: manager, probe: FakeDockerUsageProbe([:])))
             .environment(DeckMonitoringModel(interval: .milliseconds(20), refresh: {}, refreshHeavy: {}))
             .defaultAppStorage(AppRuntime.preferences)
@@ -144,7 +151,7 @@ final class PanelLayoutTests: XCTestCase {
         mainWindow.setFrameOrigin(NSPoint(x: -2500, y: -2500))
         mainWindow.orderFront(nil)
         defer { mainWindow.close() }
-        for selection in [MainSelection.settings, .commands, .panel, .updates, .monitoring, .containers, .energy, .awake, .ports, .proxy, .claudeTabs, .cleanup] {
+        for selection in [MainSelection.settings, .commands, .panel, .updates, .monitoring, .containers, .energy, .awake, .clipboard, .displays, .ports, .proxy, .claudeTabs, .cleanup] {
             appModel.selection = selection
             mainWindow.setContentSize(NSSize(width: mainHosting.view.fittingSize.width, height: 580))
             try await Task.sleep(for: .milliseconds(100))
@@ -159,7 +166,7 @@ final class PanelLayoutTests: XCTestCase {
                     mainWindow.setContentSize(NSSize(width: width, height: 580))
                     try await Task.sleep(for: .milliseconds(100))
                     mainHosting.view.layoutSubtreeIfNeeded()
-                    let headers = try PanelSection.allCases.map { section in
+                    let headers = try testedSections.map { section in
                         let checkbox = try XCTUnwrap(findVisibilityCheckbox(in: mainHosting.view,
                                                                            id: "panel-section-\(section.rawValue)"))
                         return checkbox.convert(checkbox.bounds, to: mainHosting.view)
@@ -167,7 +174,7 @@ final class PanelLayoutTests: XCTestCase {
                     for rect in headers.dropFirst() {
                         XCTAssertEqual(rect.midY, headers[0].midY, accuracy: 1, "tabs must not wrap onto a second row")
                     }
-                    for section in PanelSection.allCases {
+                    for section in testedSections {
                         let checkbox = try XCTUnwrap(findVisibilityCheckbox(in: mainHosting.view,
                                                                            id: "panel-section-\(section.rawValue)"))
                         let controlRect = checkbox.convert(checkbox.bounds, to: mainHosting.view)
@@ -175,7 +182,7 @@ final class PanelLayoutTests: XCTestCase {
                         XCTAssertLessThanOrEqual(controlRect.maxX + 24, mainHosting.view.bounds.maxX,
                                       "all default tab controls must be visible at the minimum width (\(width))")
                     }
-                    for module in PanelModuleID.allCases {
+                    for module in PanelModuleID.allCases.filter { $0 != .clipboard } {
                         let checkbox = try XCTUnwrap(findVisibilityCheckbox(in: mainHosting.view,
                                                                            id: "panel-module-\(module.rawValue)"))
                         let rect = checkbox.convert(checkbox.bounds, to: mainHosting.view)
@@ -216,6 +223,7 @@ final class PanelLayoutTests: XCTestCase {
                     custom = $0.addSection(name: "Focused tools", icon: "star")
                     $0.moveModule(.proxy, to: custom)
                     $0.removeModule(.awake)
+                    $0.removeModule(.brightness)
                     $0.moveSection(custom, before: .monitoring)
                 }
                 try await Task.sleep(for: .milliseconds(150))

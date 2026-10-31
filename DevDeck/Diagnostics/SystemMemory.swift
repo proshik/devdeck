@@ -5,7 +5,8 @@ import Darwin
 enum SwapSeverity { case normal, elevated, high }
 
 /// A snapshot of system memory (like "Memory Used" in Activity Monitor).
-struct SystemMemory: Equatable {
+struct SystemMemory: Equatable, Sendable {
+    var swapAvailable = true
     let usedBytes: UInt64
     let totalBytes: UInt64
     let swapUsedBytes: UInt64
@@ -23,6 +24,11 @@ struct SystemMemory: Equatable {
     /// "Used" as Activity Monitor labels it (see `used`); total = physical RAM; + swap.
     /// On a syscall failure returns used = 0 (the UI shows 0 instead of crashing).
     static func current() -> SystemMemory {
+        currentIfAvailable() ?? SystemMemory(usedBytes: 0, totalBytes: ProcessInfo.processInfo.physicalMemory)
+    }
+
+    /// Monitoring must distinguish a kernel failure from a real zero. Legacy callers keep their fallback.
+    static func currentIfAvailable() -> SystemMemory? {
         let total = ProcessInfo.processInfo.physicalMemory
 
         var stats = vm_statistics64_data_t()
@@ -33,15 +39,17 @@ struct SystemMemory: Equatable {
                 host_statistics64(mach_host_self(), HOST_VM_INFO64, rebound, &count)
             }
         }
-        guard result == KERN_SUCCESS else { return SystemMemory(usedBytes: 0, totalBytes: total) }
+        guard result == KERN_SUCCESS else { return nil }
 
         let usedBytes = used(internalPages: UInt64(stats.internal_page_count),
                              purgeablePages: UInt64(stats.purgeable_count),
                              wiredPages: UInt64(stats.wire_count),
                              compressorPages: UInt64(stats.compressor_page_count),
                              pageSize: UInt64(vm_page_size))
-        return SystemMemory(usedBytes: min(usedBytes, total), totalBytes: total,
-                            swapUsedBytes: swapUsedBytes())
+        let swap = swapUsedBytesIfAvailable()
+        var value = SystemMemory(usedBytes: min(usedBytes, total), totalBytes: total, swapUsedBytes: swap ?? 0)
+        value.swapAvailable = swap != nil
+        return value
     }
 
     /// "Memory Used" the way Activity Monitor and htop define it: App Memory + Wired + Compressed,
@@ -58,10 +66,12 @@ struct SystemMemory: Equatable {
     }
 
     /// Swap used (bytes). 0 if swap is unused or unavailable.
-    static func swapUsedBytes() -> UInt64 {
+    static func swapUsedBytes() -> UInt64 { swapUsedBytesIfAvailable() ?? 0 }
+
+    static func swapUsedBytesIfAvailable() -> UInt64? {
         var usage = xsw_usage()
         var size = MemoryLayout<xsw_usage>.size
-        guard sysctlbyname("vm.swapusage", &usage, &size, nil, 0) == 0 else { return 0 }
+        guard sysctlbyname("vm.swapusage", &usage, &size, nil, 0) == 0 else { return nil }
         return usage.xsu_used
     }
 

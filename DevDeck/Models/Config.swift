@@ -17,6 +17,9 @@ enum EnginePreference: String, Codable, CaseIterable, Sendable {
 /// Application settings stored in config.json under the `settings` key.
 /// Decoding is resilient: missing keys fall back to default values.
 struct Settings: Codable, Equatable {
+    var monitoring = MonitoringSettings()
+    var clipboard = ClipboardSettings()
+    var displays = DisplayBrightnessSettings()
     var vmMemoryMonitoring: Bool
     var minikubeMemoryMonitoring: Bool
     var hostMemoryMonitoring: Bool
@@ -88,6 +91,7 @@ struct Settings: Codable, Equatable {
     }
 
     enum CodingKeys: String, CodingKey {
+        case clipboard, displays, monitoring
         case vmMemoryMonitoring, minikubeMemoryMonitoring, hostMemoryMonitoring, globalHotkeyEnabled,
              clusterHealthMonitoring, autoUpdateEnabled, proxyShareEnabled, proxyDiscoveryEnabled,
              activeProxyName, activeProxyUsername, activeProxyHost, activeProxyPort,
@@ -97,6 +101,9 @@ struct Settings: Codable, Equatable {
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
+        monitoring = try c.decodeIfPresent(MonitoringSettings.self, forKey: .monitoring) ?? .init()
+        displays = try c.decodeIfPresent(DisplayBrightnessSettings.self, forKey: .displays) ?? .init()
+        clipboard = try c.decodeIfPresent(ClipboardSettings.self, forKey: .clipboard) ?? ClipboardSettings()
         vmMemoryMonitoring = try c.decodeIfPresent(Bool.self, forKey: .vmMemoryMonitoring) ?? true
         minikubeMemoryMonitoring = try c.decodeIfPresent(Bool.self, forKey: .minikubeMemoryMonitoring) ?? true
         hostMemoryMonitoring = try c.decodeIfPresent(Bool.self, forKey: .hostMemoryMonitoring) ?? true

@@ -1,229 +1,130 @@
 import SwiftUI
 
-/// Existing measurements, shared by the panel and full window. New sensors belong to a later stage.
+/// Rendering reads only the shared snapshot; no kernel reads, CLI probes or view-owned timers.
 struct MonitoringMetricsView: View {
-    @Environment(CommandStore.self) private var store
-    @Environment(ProcessManager.self) private var manager
-    @Environment(EnergyModel.self) private var energy
-    @Environment(EngineModel.self) private var engine
+    @Environment(DeckMonitoringModel.self) private var monitoring
     let section: MonitoringSection
     var compact = false
     var onDetails: (() -> Void)? = nil
 
-    private static let placeholderColor = Color.secondary.opacity(0.45)
-
-    private var metrics: [HeaderMetric] {
+    private var enabled: Bool {
+        monitoring.context.settings.enabled && !monitoring.suspended && {
+            switch section {
+            case .mac: true
+            case .energy: monitoring.context.batteryEnabled
+            case .containers: monitoring.context.vmEnabled || monitoring.context.minikubeEnabled || monitoring.context.clusterEnabled
+            }
+        }()
+    }
+    private var measuredAt: Date? {
         switch section {
-        case .mac: [.memory, .swap, .pressure, .swapRate, .cpuLoad]
-        case .containers: [.vmEngine, .vmMinikube, .diskVM, .cluster]
-        case .energy: [.battery]
+        case .mac: monitoring.snapshot.mac?.date
+        case .containers: monitoring.snapshot.containers?.date
+        case .energy: monitoring.snapshot.energy?.date
         }
     }
-
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 2)) { _ in
-            let memory = SystemMemory.current()
-            VStack(alignment: .leading, spacing: 4) {
-                if section == .containers {
-                    HStack {
-                        Label(engine.activeName ?? L10n.deckContainers, systemImage: "shippingbox")
-                        Spacer()
-                        Text(engine.isActiveRunning ? L10n.deckEngineRunning : L10n.deckEngineStopped)
-                            .foregroundStyle(.secondary)
-                    }.frame(minHeight: 24)
-                }
-                ForEach(metrics.filter { $0.isAvailable(engineKind: engine.activeKind) }, id: \.self) { metric in
-                    HStack(spacing: 8) {
-                        metricRow(metric, memory: memory)
-                        if let onDetails {
-                            Button(action: onDetails) {
-                                Label(L10n.deckEnergy, systemImage: "arrow.up.forward")
-                                    .labelStyle(.iconOnly).frame(width: 28, height: 28)
-                                    .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.borderless).controlHoverFeedback()
-                            .foregroundStyle(.secondary).help(L10n.deckEnergy)
-                        }
-                    }
-                }
-                if section == .energy {
-                    energyConsumers
-                    if !store.config.settings.batteryMonitoring {
-                        Text(L10n.deckCollectionOff).foregroundStyle(.secondary)
-                            .font(.caption).padding(.leading, compact ? 28 : 0)
-                    }
-                }
-                if section == .mac && !store.config.settings.hostMemoryMonitoring {
-                    Text(L10n.deckCollectionOff).font(.caption).foregroundStyle(.secondary)
-                }
+        VStack(alignment: .leading, spacing: 5) {
+            switch section {
+            case .mac: mac
+            case .containers: containers
+            case .energy: energy
             }
-            .font(.body)
-        }
-    }
-
-    private func metricRow(_ metric: HeaderMetric, memory: SystemMemory) -> some View {
-        let pair = metric == .memory
-            ? (SystemMemory.format(usedBytes: memory.usedBytes, totalBytes: memory.totalBytes), pressureColor(memory.fraction))
-            : cellValue(metric, memory: memory, swapRate: swapRateText())
-        return HStack(spacing: 8) {
-            Label {
-                Text(metric.title(engineName: engine.activeName))
-            } icon: {
-                Image(systemName: symbol(metric)).foregroundStyle(.secondary)
-            }.labelStyle(DeckLabelStyle())
-            Spacer(minLength: 8)
-            Text(pair.0.isEmpty ? "—" : pair.0)
-                .monospacedDigit().foregroundStyle(pair.0.isEmpty ? .secondary : pair.1)
-                .lineLimit(1).minimumScaleFactor(0.85)
-        }
-        .frame(minHeight: 24)
-        .help(metric.help)
-        .accessibilityElement(children: .combine)
-        .accessibilityValue(pair.0.isEmpty ? L10n.deckNoData : pair.0)
-    }
-
-    private func symbol(_ metric: HeaderMetric) -> String {
-        switch metric {
-        case .memory, .vmEngine, .vmMinikube: "memorychip"
-        case .swap, .swapRate: "arrow.up.arrow.down"
-        case .pressure: "waveform.path.ecg"
-        case .cpuLoad: "cpu"
-        case .diskVM: "internaldrive"
-        case .cluster: "server.rack"
-        case .battery: "battery.100percent"
-        }
-    }
-
-    /// Live swap rate (↑ out to disk, ↓ in from disk): distinguishes "full but stable" from
-    /// "actively thrashing". Gate at ~0.1 MB/s so sub-rounding noise doesn't show. Empty when idle.
-    private func swapRateText() -> String {
-        let outRate = manager.cachedSwapOutRatePages ?? 0
-        let inRate = manager.cachedSwapInRatePages ?? 0
-        let gate = 100_000.0
-        let outActive = outRate * Double(hostPageSize) >= gate
-        let inActive = inRate * Double(hostPageSize) >= gate
-        return [
-            outActive ? "↑" + HostMetricsSample.formatRate(pagesPerSec: outRate, pageSize: hostPageSize) : nil,
-            inActive ? "↓" + HostMetricsSample.formatRate(pagesPerSec: inRate, pageSize: hostPageSize) : nil,
-        ].compactMap { $0 }.joined(separator: " ")
-    }
-
-    /// Value and colour of one grid cell; a blank value in the placeholder colour means no data.
-    private func cellValue(_ metric: HeaderMetric, memory: SystemMemory, swapRate: String) -> (String, Color) {
-        switch metric {
-        case .memory:
-            return ("", Self.placeholderColor)   // drawn as the bar above the grid
-        case .cluster:
-            guard store.config.settings.clusterHealthMonitoring else { return ("", Self.placeholderColor) }
-            let health = manager.cachedClusterHealth
-            return (health.map { L10n.clusterHealthValue($0.level) } ?? "",
-                    health.map { clusterColor($0.level) } ?? Self.placeholderColor)
-        case .swap:
-            guard memory.swapUsedBytes > 0 else { return ("", Self.placeholderColor) }
-            let color: Color = switch SystemMemory.swapSeverity(
-                swapUsedBytes: memory.swapUsedBytes, totalRAMBytes: memory.totalBytes) {
-            case .normal: .secondary
-            case .elevated: .orange
-            case .high: .red
-            }
-            return (SystemMemory.formatGiB(memory.swapUsedBytes), color)
-        case .vmEngine:
-            guard store.config.settings.vmMemoryMonitoring else { return ("", Self.placeholderColor) }
-            let vm = manager.vmMemorySample()
-            return (vm?.format() ?? "", vm.map { pressureColor($0.fraction) } ?? Self.placeholderColor)
-        case .vmMinikube:
-            guard store.config.settings.minikubeMemoryMonitoring else { return ("", Self.placeholderColor) }
-            // minikube memory from inside the VM: 1 s sampler during a run, 15 s refresh otherwise.
-            let mk = manager.minikubeSample()
-            return (mk.map { $0.format() + ($0.rustcCount > 0 ? " · rustc \($0.rustcCount)" : "") } ?? "",
-                    mk.map { pressureColor($0.fraction) } ?? Self.placeholderColor)
-        case .pressure:
-            guard store.config.settings.hostMemoryMonitoring else { return ("", Self.placeholderColor) }
-            let host = manager.cachedHostSample
-            return (host.map { L10n.pressureValue($0.pressure) } ?? "",
-                    host.map { pressureLevelColor($0.pressure) } ?? Self.placeholderColor)
-        case .diskVM:
-            guard store.config.settings.vmMemoryMonitoring else { return ("", Self.placeholderColor) }
-            let disk = manager.cachedVMDisk
-            return (disk.map { $0.format() } ?? "", disk.map { pressureColor($0.fraction) } ?? Self.placeholderColor)
-        case .swapRate:
-            guard store.config.settings.hostMemoryMonitoring else { return ("", Self.placeholderColor) }
-            return swapRate.isEmpty ? ("", Self.placeholderColor) : (swapRate, .orange)
-        case .cpuLoad:
-            // 1-minute load average, coloured by load-per-core (thrashing during builds).
-            var loads = [Double](repeating: 0, count: 3)
-            guard getloadavg(&loads, 3) >= 1 else { return ("", Self.placeholderColor) }
-            let cores = Double(max(1, ProcessInfo.processInfo.activeProcessorCount))
-            return (String(format: "%.2f", loads[0]), pressureColor(loads[0] / cores))
-        case .battery:
-            guard store.config.settings.batteryMonitoring else { return ("", Self.placeholderColor) }
-            guard let battery = energy.battery else { return ("", Self.placeholderColor) }
-            let color: Color = !battery.onBattery ? .secondary
-                : battery.percent <= HeaderMetric.lowBatteryCritical ? .red
-                : battery.percent <= HeaderMetric.lowBatteryWarning ? .orange : .green
-            return (battery.format(), color)
-        }
-    }
-
-    /// Who used the battery: live while discharging, frozen as "last discharge" once back on AC.
-    @ViewBuilder
-    private var energyConsumers: some View {
-        if energy.battery != nil, let tally = energy.tally {
-            VStack(alignment: .leading, spacing: 3) {
-                if !compact { Text(energyTitle(tally)).foregroundStyle(.secondary) }
-                if energy.consumers.isEmpty {
-                    Text(L10n.energyNoData).foregroundStyle(Self.placeholderColor)
+            HStack {
+                if let measuredAt {
+                    Text((enabled ? L10n.monitoringUpdated : L10n.monitoringLast) + ": "
+                         + measuredAt.formatted(date: .omitted, time: .standard))
+                } else { Text(L10n.deckNoData) }
+                Spacer(minLength: 0)
+                if let onDetails {
+                    Button(action: onDetails) { Image(systemName: "arrow.up.forward") }
+                        .buttonStyle(.borderless).help(section.title)
                 }
-                ForEach(compact ? Array(energy.consumers.prefix(3)) : energy.consumers, id: \.name) { consumer in
-                    HStack(spacing: 6) {
-                        Text(consumer.name == EnergyTally.vmName
-                             ? HeaderMetric.vmEngine.title(engineName: engine.activeName)
-                             : consumer.name).lineLimit(1).truncationMode(.middle)
-                        Spacer(minLength: 4)
-                        Text("\(Int((consumer.share * 100).rounded()))%")
-                            .monospacedDigit().foregroundStyle(.secondary)
-                        Text(L10n.watts(consumer.averageWatts))
-                            .monospacedDigit()
-                            .frame(minWidth: 46, alignment: .trailing)
-                    }
-                    .padding(.leading, compact ? 0 : 8)
-                }
+            }.font(.caption).foregroundStyle(.secondary)
+            if !enabled { Text(L10n.deckCollectionOff).font(.caption).foregroundStyle(.secondary) }
+        }
+    }
+
+    @ViewBuilder private var mac: some View {
+        let value = monitoring.snapshot.mac?.value
+        row(L10n.monitoringCPU, value?.cpuBusyPercent.map { String(format: "%.1f%%", $0) }, "cpu")
+        row(L10n.monitoringLoad, value?.sample.loadAverage.map { String(format: "%.2f", $0) }, "waveform.path.ecg")
+        if monitoring.context.hostEnabled {
+            row(L10n.memory, value?.sample.memory.map { SystemMemory.format(usedBytes: $0.usedBytes, totalBytes: $0.totalBytes) }, "memorychip")
+            row(HeaderMetric.pressure.title(engineName: nil), value?.sample.host.flatMap {
+                $0.pressureAvailable ? L10n.pressureValue($0.pressure) : nil
+            }, "gauge.with.dots.needle.33percent")
+            row(HeaderMetric.swap.title(engineName: nil), value?.sample.memory.flatMap {
+                $0.swapAvailable ? SystemMemory.formatGiB($0.swapUsedBytes) : nil
+            }, "internaldrive")
+            row(HeaderMetric.swapRate.title(engineName: nil), swapRate(value), "arrow.up.arrow.down")
+        } else { Text(L10n.monitoringMemoryOff).font(.caption).foregroundStyle(.secondary) }
+        row(L10n.monitoringDisk, disk(value?.sample), "internaldrive")
+        row(L10n.monitoringUptime, value?.sample.uptime.map(L10n.monitoringUptimeValue), "clock")
+        if !compact {
+            row("GPU", nil, "cpu", reason: L10n.monitoringUnsupported)
+            row(L10n.monitoringTemperature, nil, "thermometer", reason: L10n.monitoringUnsupported)
+            Text(L10n.monitoringUnsupported).font(.caption).foregroundStyle(.secondary)
+        }
+    }
+    @ViewBuilder private var containers: some View {
+        let value = monitoring.snapshot.containers?.value
+        let name = value?.engineName
+        row(name ?? L10n.deckContainers, value.map { $0.running ? L10n.deckEngineRunning : L10n.deckEngineStopped }, "shippingbox")
+        row(HeaderMetric.vmEngine.title(engineName: name), value?.vm?.format(), "memorychip")
+        row(HeaderMetric.vmMinikube.title(engineName: name), value?.minikube?.format(), "memorychip")
+        row(HeaderMetric.diskVM.title(engineName: name), value?.disk?.format(), "internaldrive")
+        if value?.disk != nil, let date = value?.diskMeasuredAt {
+            Text(HeaderMetric.diskVM.title(engineName: name) + " · " + L10n.monitoringUpdated + ": "
+                 + date.formatted(date: .omitted, time: .standard))
+                .font(.caption2).foregroundStyle(.secondary)
+        }
+        row(HeaderMetric.cluster.title(engineName: name), value?.cluster.map { L10n.clusterHealthValue($0.level) }, "server.rack")
+    }
+    @ViewBuilder private var energy: some View {
+        let value = monitoring.snapshot.energy?.value
+        row(HeaderMetric.battery.title(engineName: nil), value?.battery?.format(), "battery.100percent")
+        if !compact {
+            row(L10n.monitoringCycles, value?.details.cycles.map(String.init), "arrow.trianglehead.2.clockwise.rotate.90")
+            row(L10n.monitoringHealth, value?.details.health, "heart")
+            row(L10n.monitoringAdapter, value?.details.adapterWatts.map(L10n.watts), "powerplug")
+            row(L10n.monitoringBatteryPower, value?.details.batteryWatts.map { ($0 >= 0 ? "+" : "") + L10n.watts($0) }, "bolt")
+            Text(L10n.monitoringPowerHelp).font(.caption).foregroundStyle(.secondary)
+        }
+        if let value, let tally = value.tally {
+            Text(L10n.monitoringEnergyShare).font(.caption).foregroundStyle(.secondary)
+            ForEach(compact ? Array(value.consumers.prefix(3)) : value.consumers, id: \.name) { consumer in
+                HStack {
+                    Text(consumer.name).lineLimit(1).truncationMode(.middle)
+                    Spacer(minLength: 4)
+                    Text(String(format: "%.0f%% · ", consumer.share * 100) + L10n.watts(consumer.averageWatts)).monospacedDigit()
+                }.font(.caption)
             }
-            .font(.caption)
-            .padding(.leading, compact ? 28 : 0)
-            .padding(.trailing, compact && onDetails != nil ? 36 : 0)
-            .padding(.top, 2)
-            .help(energyTitle(tally))
+            if value.consumers.isEmpty { Text(L10n.energyNoData).font(.caption).foregroundStyle(.secondary) }
+            if !compact {
+                Text(value.isDischarging
+                     ? L10n.energySince(tally.since.formatted(date: .omitted, time: .shortened))
+                     : L10n.energyLastDischarge(tally.since.formatted(date: .omitted, time: .shortened),
+                                               tally.lastUpdate.formatted(date: .omitted, time: .shortened)))
+                    .font(.caption).foregroundStyle(.secondary)
+            }
         }
     }
-
-    private func energyTitle(_ tally: EnergyTally) -> String {
-        let since = tally.since.formatted(date: .omitted, time: .shortened)
-        if !energy.isDischarging {
-            return L10n.energyLastDischarge(since, tally.lastUpdate.formatted(date: .omitted, time: .shortened))
-        }
-        return tally.missedUnplug ? L10n.energySinceObserved(since) : L10n.energySince(since)
+    private func row(_ title: String, _ value: String?, _ symbol: String, reason: String = L10n.monitoringMissing) -> some View {
+        HStack(spacing: 8) {
+            Label(title, systemImage: symbol).foregroundStyle(.secondary)
+            Spacer(minLength: 4)
+            Text(value ?? "—").monospacedDigit().lineLimit(1).minimumScaleFactor(0.8)
+        }.frame(minHeight: 23).help(value == nil ? reason : title)
+            .accessibilityElement(children: .combine)
+            .accessibilityValue(value ?? (L10n.monitoringUnavailable + ": " + reason))
     }
-
-    private func pressureLevelColor(_ level: MemoryPressureLevel) -> Color {
-        switch level {
-        case .normal: return .secondary
-        case .warning: return .orange
-        case .critical: return .red
-        }
+    private func swapRate(_ value: MacMonitoringValues?) -> String? {
+        guard let input = value?.swapInBytesPerSecond, let output = value?.swapOutBytesPerSecond else { return nil }
+        return L10n.monitoringSwapRate(input: input, output: output)
     }
-
-    private func pressureColor(_ fraction: Double) -> Color {
-        fraction < 0.70 ? .green : (fraction < 0.85 ? .yellow : .red)
+    private func disk(_ sample: MacMonitoringSample?) -> String? {
+        guard let used = sample?.diskUsedBytes, let total = sample?.diskTotalBytes else { return nil }
+        return L10n.monitoringDiskValue(used: used, total: total)
     }
-
-    private func clusterColor(_ level: ClusterHealthLevel) -> Color {
-        switch level {
-        case .healthy: return .green
-        case .degraded: return .orange
-        case .down: return .red
-        case .unknown: return .gray
-        }
-    }
-
 }

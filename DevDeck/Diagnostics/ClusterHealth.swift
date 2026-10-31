@@ -48,12 +48,12 @@ protocol ClusterHealthProbing: Sendable {
 /// The real probe: cheap `colima list --json` (status) + `minikube status` (node). Blocking → call off-main.
 struct LiveClusterHealthProbe: ClusterHealthProbing {
     func sample() -> ClusterHealth {
-        let colimaJSON = ProcessTree.run("/opt/homebrew/bin/colima", ["list", "--json"])
-            ?? ProcessTree.run("/usr/bin/env", ["colima", "list", "--json"])
+        let colimaJSON = MonitoringCommand.run("/opt/homebrew/bin/colima", ["list", "--json"])
+            ?? MonitoringCommand.run("/usr/bin/env", ["colima", "list", "--json"])
         let colimaRunning = colimaJSON.flatMap(parseColimaRunning)
         // minikube status exits non-zero when stopped but still prints the status text to stdout.
-        let minikube = ProcessTree.run("/opt/homebrew/bin/minikube", ["status"])
-            ?? ProcessTree.run("/usr/bin/env", ["minikube", "status"])
+        let minikube = MonitoringCommand.run("/opt/homebrew/bin/minikube", ["status"])
+            ?? MonitoringCommand.run("/usr/bin/env", ["minikube", "status"])
         return clusterHealthVerdict(colimaRunning: colimaRunning, minikubeStatus: minikube)
     }
 }

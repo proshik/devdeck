@@ -9,7 +9,7 @@ final class PanelConfigurationTests: XCTestCase {
         XCTAssertEqual(config.commands.map(\.name), ["serve"])
         XCTAssertFalse(config.settings.hostMemoryMonitoring)
         XCTAssertTrue(config.settings.proxyShareEnabled)
-        XCTAssertEqual(config.panel.sections.map(\.id), ["environment", "monitoring", "displays"])
+        XCTAssertEqual(config.panel.sections.map(\.id), ["environment", "monitoring", "displays", "clipboard"])
         XCTAssertEqual(config.panel.sections[0].modules.map(\.id), ["commands", "daemons", "chains", "portForwards", "proxy", "agentTabs"])
         XCTAssertEqual(try ConfigCodec.decode(ConfigCodec.encode(config)), config)
     }
@@ -17,12 +17,12 @@ final class PanelConfigurationTests: XCTestCase {
     func testUnknownAndDuplicateIDsCannotDuplicateControlsOrResetPlacement() throws {
         let data = Data(#"{"panel":{"sections":[{"id":"displays","modules":[{"id":"agentTabs","isVisible":false},{"id":"mac"},{"id":"future-module"},{"id":"mac"}]},{"id":"future-section"},{"id":"monitoring","isVisible":false},{"id":"displays","modules":[{"id":"agentTabs"}]}],"initialSection":"unknown","lastSection":"unknown"}}"#.utf8)
         let panel = try ConfigCodec.decode(data).panel
-        XCTAssertEqual(panel.sections.map(\.id), ["displays", "monitoring", "environment"])
-        XCTAssertEqual(panel.sections[0].modules.map(\.id), ["agentTabs", "mac", "awake"])
+        XCTAssertEqual(panel.sections.map(\.id), ["displays", "monitoring", "environment", "clipboard"])
+        XCTAssertEqual(panel.sections[0].modules.map(\.id), ["agentTabs", "mac", "brightness", "awake"])
         XCTAssertFalse(panel.sections[0].modules[0].isVisible)
         XCTAssertFalse(panel.sections[1].isVisible)
         XCTAssertEqual(panel.sections[1].modules.map(\.id), ["containers", "energy"])
-        XCTAssertEqual(panel.sections.flatMap(\.modules).count, 10)
+        XCTAssertEqual(panel.sections.flatMap(\.modules).count, 12)
         XCTAssertEqual(panel.initialSection, "environment")
         XCTAssertNil(panel.lastSection)
         XCTAssertEqual(panel.normalized(), panel, "normalization must be stable on subsequent saves")
@@ -46,14 +46,14 @@ final class PanelConfigurationTests: XCTestCase {
         }
         let restarted = CommandStore(configURL: url)
         restarted.reload()
-        XCTAssertEqual(restarted.config.panel.sections[0].modules.map(\.id), ["proxy", "agentTabs", "awake"])
+        XCTAssertEqual(restarted.config.panel.sections[0].modules.map(\.id), ["brightness", "proxy", "agentTabs", "awake"])
         XCTAssertFalse(restarted.config.panel.isShown(.proxy))
         XCTAssertEqual(restarted.config.panel.openingSection, .displays)
         XCTAssertEqual(restarted.config.commands, original.commands)
         XCTAssertEqual(restarted.config.settings, original.settings, "hiding must not disable the proxy or agent capture")
         XCTAssertEqual((try FileManager.default.attributesOfItem(atPath: url.path)[.posixPermissions] as? NSNumber)?.intValue, 0o600)
         restarted.updatePanel { $0.sections = PanelConfiguration.standard.sections }
-        XCTAssertEqual(restarted.config.panel.sections.map(\.id), ["environment", "monitoring", "displays"])
+        XCTAssertEqual(restarted.config.panel.sections.map(\.id), ["environment", "monitoring", "displays", "clipboard"])
         XCTAssertTrue(restarted.config.panel.isShown(.proxy))
         XCTAssertEqual(restarted.config.panel.lastSection, "displays", "resetting placement should not reset panel behavior")
     }
@@ -89,7 +89,7 @@ final class PanelConfigurationTests: XCTestCase {
         panel.shiftModule(.commands, by: 1)
         XCTAssertEqual(panel.sections[0].modules.last?.id, "commands")
         panel.moveSection(.environment, after: .displays)
-        XCTAssertEqual(panel.sections.map(\.id), ["monitoring", "displays", "environment"])
+        XCTAssertEqual(panel.sections.map(\.id), ["monitoring", "displays", "environment", "clipboard"])
     }
 
     func testCustomTabsAndModuleCatalogueSurviveReloadWithoutRestoringRemovedItems() throws {
@@ -146,7 +146,7 @@ final class PanelConfigurationTests: XCTestCase {
         XCTAssertEqual(panel.visibleSections, [custom])
         XCTAssertEqual(panel.openingSection, custom)
         XCTAssertFalse(panel.availableModules.contains(.awake))
-        XCTAssertEqual(panel.availableModules.count, 9)
+        XCTAssertEqual(panel.availableModules.count, PanelModuleID.allCases.count - 1)
         let previous = panel
         panel.moveModule(.proxy, to: .environment)
         XCTAssertEqual(panel, previous, "a stale drop target must not resurrect a removed tab or consume a catalogue item")
