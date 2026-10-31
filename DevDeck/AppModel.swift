@@ -17,6 +17,8 @@ enum MainSelection: Hashable {
     case energy
     case awake
     case ports
+    case clipboard
+    case displays
 }
 
 /// UI state of the application (separate from data and processes).
@@ -47,10 +49,11 @@ struct PanelSection: RawRepresentable, Hashable, Codable, CaseIterable, Identifi
     static let environment = Self(rawValue: "environment")!
     static let monitoring = Self(rawValue: "monitoring")!
     static let displays = Self(rawValue: "displays")!
-    static let allCases: [Self] = [.environment, .monitoring, .displays]
+    static let clipboard = Self(rawValue: "clipboard")!
+    static let allCases: [Self] = [.environment, .monitoring, .displays, .clipboard]
 
     init?(rawValue: String) {
-        guard ["environment", "monitoring", "displays"].contains(rawValue)
+        guard ["environment", "monitoring", "displays", "clipboard"].contains(rawValue)
                 || (rawValue.hasPrefix("custom-") && UUID(uuidString: String(rawValue.dropFirst(7))) != nil) else { return nil }
         self.rawValue = rawValue
     }
@@ -72,6 +75,7 @@ struct PanelSection: RawRepresentable, Hashable, Codable, CaseIterable, Identifi
         case .environment: L10n.deckEnvironment
         case .monitoring: L10n.deckMonitoring
         case .displays: L10n.deckDisplays
+        case .clipboard: L10n.clipboardTab
         default: L10n.panelNewTab
         }
     }
@@ -80,6 +84,7 @@ struct PanelSection: RawRepresentable, Hashable, Codable, CaseIterable, Identifi
         case .environment: "terminal"
         case .monitoring: "waveform.path.ecg"
         case .displays: "display"
+        case .clipboard: "clipboard"
         default: "square.grid.2x2"
         }
     }

@@ -2,7 +2,7 @@ import Foundation
 import Darwin
 
 /// Kernel verdict on memory shortage (`kern.memorystatus_vm_pressure_level`).
-enum MemoryPressureLevel: Int, Equatable {
+enum MemoryPressureLevel: Int, Equatable, Sendable {
     case normal = 1
     case warning = 2
     case critical = 4
@@ -13,11 +13,13 @@ enum MemoryPressureLevel: Int, Equatable {
 /// Cheap standalone read of the current kernel memory-pressure level — no other probing.
 /// Used by the menu bar badge, which must reflect pressure even when no build is running
 /// (the per-run sampler's `cachedHostSample` is only populated during an active run).
-func currentMemoryPressureLevel() -> MemoryPressureLevel {
+func currentMemoryPressureLevel() -> MemoryPressureLevel { memoryPressureIfAvailable() ?? .normal }
+
+func memoryPressureIfAvailable() -> MemoryPressureLevel? {
     var level: Int32 = 1
     var size = MemoryLayout<Int32>.size
-    _ = sysctlbyname("kern.memorystatus_vm_pressure_level", &level, &size, nil, 0)
-    return MemoryPressureLevel(raw: level)
+    guard sysctlbyname("kern.memorystatus_vm_pressure_level", &level, &size, nil, 0) == 0 else { return nil }
+    return MemoryPressureLevel(rawValue: Int(level))
 }
 
 /// Pages/sec swap rate from two cumulative counter samples. Negative deltas
@@ -32,7 +34,9 @@ func swapRatePagesPerSec(prevIn: UInt64, prevOut: UInt64,
 }
 
 /// A host-side memory snapshot beyond what `SystemMemory` exposes.
-struct HostMetricsSample: Equatable {
+struct HostMetricsSample: Equatable, Sendable {
+    var countersAvailable = true
+    var pressureAvailable = true
     let pressure: MemoryPressureLevel
     let swapInsPages: UInt64       // cumulative since boot
     let swapOutsPages: UInt64      // cumulative since boot
@@ -63,7 +67,7 @@ protocol HostMetricsProbing: Sendable {
 struct LiveHostMetricsProbe: HostMetricsProbing {
     func sample(buildPID: Int32?) -> HostMetricsSample {
         let total = ProcessInfo.processInfo.physicalMemory
-        let pressure = currentMemoryPressureLevel()
+        let pressure = memoryPressureIfAvailable()
 
         var stats = vm_statistics64_data_t()
         var count = mach_msg_type_number_t(
@@ -76,7 +80,8 @@ struct LiveHostMetricsProbe: HostMetricsProbing {
 
         let footprint = buildPID.map { ProcessTree.physFootprint($0) } ?? 0
         return HostMetricsSample(
-            pressure: pressure,
+            countersAvailable: ok, pressureAvailable: pressure != nil,
+            pressure: pressure ?? .normal,
             swapInsPages: ok ? UInt64(stats.swapins) : 0,
             swapOutsPages: ok ? UInt64(stats.swapouts) : 0,
             compressorPages: ok ? UInt64(stats.compressor_page_count) : 0,

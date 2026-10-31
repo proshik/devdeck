@@ -28,7 +28,7 @@ Launch, stop, and monitor local dev commands and long-running daemons
 
 ## Features
 
-- **Menu bar deck** on every display: compact **Environment**, **Monitoring**, and **Displays**
+- **Menu bar deck** on every display: compact **Environment**, **Monitoring**, **Displays**, and **Clipboard**
   sections. Environment contains your **commands**, **daemons**, **chains**, and **port forwards**;
   run/stop buttons and status indicators
   (grey / yellow spinner / green daemon / red).
@@ -39,6 +39,10 @@ Launch, stop, and monitor local dev commands and long-running daemons
   Hiding or removing a service keeps it running and leaves a compact activity summary.
 - **Main window**: grouped sidebar, command editor, chain builder (drag-and-drop ordering),
   live logs, General settings and a separate DevDeck Updates page.
+- **Clipboard history** — opt-in collection of text, PNG/TIFF images and local file references even with the panel closed, type filters, search, copy back,
+  pinned entries, pause, application exclusions and confirmed clearing. Local private storage
+  stays separate from command configuration. Defaults: 500 entries, 30 days, 20 MiB;
+  settings and full history live on the Clipboard page. Optional explicit paste restores the previous app and requires Accessibility. See [clipboard details](docs/devdeck-stage5-result.md).
 - **Chains** — sequential execution, stop on error, the failed step highlighted.
 - **sudo commands** — via the native macOS password dialog (`osascript … with administrator privileges`).
 - **Memory freeing** — gracefully quit memory-hungry GUI apps before a heavy build and

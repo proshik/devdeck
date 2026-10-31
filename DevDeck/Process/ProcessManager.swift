@@ -183,6 +183,8 @@ final class ProcessManager {
     /// Last VM-disk snapshot for the popover; refreshed while the popover is open
     /// (15 s cadence) and by the sampler during runs.
     private(set) var cachedVMDisk: VMDiskInfo?
+    private(set) var cachedVMDiskDate: Date?
+    @ObservationIgnored var monitoringSamplerWait: (Duration) async throws -> Void = { try await Task.sleep(for: $0) }
 
     init(
         runner: any CommandRunner,
@@ -840,6 +842,38 @@ final class ProcessManager {
         states.values.contains(.daemonRunning)
     }
 
+    @ObservationIgnored private var monitoringRevision: UInt64 = 0
+    @ObservationIgnored private var probeOwners: Set<String> = []
+    @ObservationIgnored private var probeWaiters: [String: [CheckedContinuation<Void, Never>]] = [:]
+
+    /// UI waits for the previous owner, including cancellation cleanup, before sampling afresh.
+    private func acquireUIProbe(_ key: String) async -> Bool {
+        while probeOwners.contains(key) {
+            await withCheckedContinuation { probeWaiters[key, default: []].append($0) }
+            if Task.isCancelled { return false }
+        }
+        guard !Task.isCancelled else { return false }
+        return probeOwners.insert(key).inserted
+    }
+    private func releaseProbe(_ key: String) {
+        probeOwners.remove(key)
+        let waiters = probeWaiters.removeValue(forKey: key) ?? []
+        for waiter in waiters { waiter.resume() }
+    }
+
+
+    @ObservationIgnored private var monitoringWork = MonitoringCancellation()
+
+    /// Engine/gate changes invalidate pending UI and run results, without stopping run samplers.
+    func invalidateMonitoringSamples() {
+        monitoringWork.cancel(); monitoringWork = MonitoringCancellation()
+        monitoringRevision &+= 1
+        cachedVMSample = nil; cachedMinikubeSample = nil; cachedVMDisk = nil; cachedVMDiskDate = nil; cachedClusterHealth = nil
+        cachedHostSample = nil; prevHostForRate = nil
+        cachedSwapInRatePages = nil; cachedSwapOutRatePages = nil
+        if !active.isEmpty { startVMSamplerIfNeeded() }
+    }
+
     // MARK: VM sampler methods
 
     /// VM snapshot for the popover — returns the cache without blocking (gated by the flag).
@@ -874,16 +908,25 @@ final class ProcessManager {
     /// No-op (and clears the cache) when disabled. Called while the popover is open.
     func refreshClusterHealth() async {
         guard isClusterHealthEnabled() else { cachedClusterHealth = nil; return }
-        let probe = clusterProbe
-        cachedClusterHealth = await Task.detached(priority: .utility) { probe.sample() }.value
+        guard !Task.isCancelled, probeOwners.insert("cluster").inserted else { return }
+        defer { probeOwners.remove("cluster") }
+        let revision = monitoringRevision, probe = clusterProbe
+        let value = await MonitoringProbeWork.perform(monitoringWork) { probe.sample() }
+        guard !Task.isCancelled, revision == monitoringRevision, isClusterHealthEnabled() else { return }
+        cachedClusterHealth = value
     }
 
-    /// Update cachedVMDisk by running the blocking ssh probe OFF the main thread.
-    /// Gated by the same toggle as the colima memory metric. Called while the popover is open.
+    /// Active builds own disk sampling and alerts; UI readers only consume that cache.
     func refreshVMDisk() async {
-        guard isVMMonitoringEnabled() else { cachedVMDisk = nil; return }
-        let probe = diskProbe
-        cachedVMDisk = await Task.detached(priority: .utility) { probe.sample() }.value
+        guard isVMMonitoringEnabled() else { cachedVMDisk = nil; cachedVMDiskDate = nil; return }
+        guard active.isEmpty, !Task.isCancelled, await acquireUIProbe("disk") else { return }
+        defer { releaseProbe("disk") }
+        guard active.isEmpty else { return }
+        let revision = monitoringRevision, probe = diskProbe
+        let value = await MonitoringProbeWork.perform(monitoringWork) { probe.sample() }
+        guard !Task.isCancelled, revision == monitoringRevision, isVMMonitoringEnabled(), active.isEmpty else { return }
+        cachedVMDisk = value
+        cachedVMDiskDate = value == nil ? nil : Date()
     }
 
     /// Resolve live colima cpus/limit for the `-j` advisory, OFF the main thread. Cached once known.
@@ -899,18 +942,24 @@ final class ProcessManager {
     /// Update cachedVMSample by running the blocking probe OFF the main thread.
     func refreshVMSample() async {
         guard isVMMonitoringEnabled() else { cachedVMSample = nil; return }
-        let probe = vmProbe
-        let s = await Task.detached(priority: .utility) { probe.sample() }.value
-        cachedVMSample = s   // back on the MainActor after the await — the assignment is on main
+        guard active.isEmpty, !Task.isCancelled, await acquireUIProbe("vm") else { return }
+        defer { releaseProbe("vm") }
+        guard active.isEmpty else { return }
+        let revision = monitoringRevision, probe = vmProbe
+        let value = await MonitoringProbeWork.perform(monitoringWork) { probe.sample() }
+        guard !Task.isCancelled, revision == monitoringRevision, isVMMonitoringEnabled(), active.isEmpty else { return }
+        cachedVMSample = value
     }
 
-    /// Update cachedHostSample + the swap rate while the popover is open and no run is active
-    /// (during a run the 1 s sampler owns these caches — two writers would corrupt the rate).
+    /// Active build sampling retains ownership of host rates.
     func refreshHostSample() async {
-        guard isHostMonitoringEnabled(), active.isEmpty else { return }
-        let probe = hostProbe
+        guard isHostMonitoringEnabled(), active.isEmpty, !Task.isCancelled,
+              probeOwners.insert("host").inserted else { return }
+        defer { probeOwners.remove("host") }
+        let revision = monitoringRevision, probe = hostProbe
         let host = await Task.detached(priority: .utility) { probe.sample(buildPID: nil) }.value
-        guard active.isEmpty else { return }   // a run may have started during the await
+        guard !Task.isCancelled, revision == monitoringRevision,
+              isHostMonitoringEnabled(), active.isEmpty else { return }
         cachedHostSample = host
         updateSwapRate(cur: host, now: Date())
     }
@@ -964,11 +1013,14 @@ final class ProcessManager {
     /// two writers would fight over one cache; the sampler's 1 s figure wins for the run's duration.
     func refreshMinikubeSample() async {
         guard isMinikubeMonitoringEnabled() else { cachedMinikubeSample = nil; return }
+        guard minikubeTargetIDs.isEmpty, !Task.isCancelled, await acquireUIProbe("minikube") else { return }
+        defer { releaseProbe("minikube") }
         guard minikubeTargetIDs.isEmpty else { return }
-        let probe = minikubeProbe
-        let s = await Task.detached(priority: .utility) { probe.sample() }.value
-        guard minikubeTargetIDs.isEmpty else { return }   // a build may have started during the await
-        cachedMinikubeSample = s
+        let revision = monitoringRevision, probe = minikubeProbe
+        let value = await MonitoringProbeWork.perform(monitoringWork) { probe.sample() }
+        guard !Task.isCancelled, revision == monitoringRevision,
+              isMinikubeMonitoringEnabled(), minikubeTargetIDs.isEmpty else { return }
+        cachedMinikubeSample = value
     }
 
     /// A single minikube sample for run id (called from tests). Synchronous.
@@ -1093,41 +1145,53 @@ final class ProcessManager {
               isVMMonitoringEnabled() || isMinikubeMonitoringEnabled() || isHostMonitoringEnabled() else { return }
         vmSamplerTask = Task { @MainActor [weak self] in
             var diskTick = 0
-            while let self, !self.active.isEmpty {
-                let vmProbe = self.isVMMonitoringEnabled() ? self.vmProbe : nil
+            while let self, !Task.isCancelled, !self.active.isEmpty {
+                let revision = self.monitoringRevision
+                let vmProbe = self.isVMMonitoringEnabled() && self.probeOwners.insert("vm").inserted ? self.vmProbe : nil
                 let mkTargets = self.isMinikubeMonitoringEnabled() ? self.minikubeTargetIDs : []
-                let mkProbe = mkTargets.isEmpty ? nil : self.minikubeProbe
-                let (s, mk) = await Task.detached(priority: .utility) {
+                let mkProbe = mkTargets.isEmpty || !self.probeOwners.insert("minikube").inserted ? nil : self.minikubeProbe
+                let (rawVM, rawMinikube) = await MonitoringProbeWork.perform(self.monitoringWork) {
                     (vmProbe?.sample(), mkProbe?.sample())
-                }.value
-                self.cachedVMSample = s
+                }
+                if vmProbe != nil { self.releaseProbe("vm") }
+                if mkProbe != nil { self.releaseProbe("minikube") }
+                guard !Task.isCancelled, revision == self.monitoringRevision, !self.active.isEmpty else { continue }
+                let s = self.isVMMonitoringEnabled() ? rawVM : nil
+                let mk = self.isMinikubeMonitoringEnabled() ? rawMinikube : nil
+                if vmProbe != nil { self.cachedVMSample = s }
                 if let s { for id in self.active.keys { self.accumulateVMPeak(s, for: id) } }
                 // Only a real probe overwrites the line. Daemons keep this loop alive for hours
                 // without probing the node; writing nil each tick would blank the popover's own
                 // 15 s refresh (see refreshMinikubeSample).
-                if mkProbe != nil { self.cachedMinikubeSample = mk }
+                if mkProbe != nil, !self.minikubeTargetIDs.isEmpty { self.cachedMinikubeSample = mk }
                 if let mk { for id in mkTargets where self.active[id] != nil { self.absorbMinikube(mk, for: id) } }
                 self.checkMemoryThresholds(vm: s, minikube: mk)
                 // Disk changes slowly and the ssh probe isn't free: every ~15 ticks (≈15 s),
                 // so the disk warning fires even with the popover closed.
-                if self.isVMMonitoringEnabled(), diskTick % 15 == 0 {
+                if self.isVMMonitoringEnabled(), diskTick % 15 == 0, self.probeOwners.insert("disk").inserted {
                     let diskProbe = self.diskProbe
-                    let disk = await Task.detached(priority: .utility) { diskProbe.sample() }.value
-                    if let disk { self.cachedVMDisk = disk }
+                    let disk = await MonitoringProbeWork.perform(self.monitoringWork) { diskProbe.sample() }
+                    self.releaseProbe("disk")
+                    guard !Task.isCancelled, revision == self.monitoringRevision,
+                          self.isVMMonitoringEnabled(), !self.active.isEmpty else { continue }
+                    self.cachedVMDisk = disk
+                    self.cachedVMDiskDate = disk == nil ? nil : Date()
                     self.checkDiskThreshold(disk)
                 }
                 diskTick += 1
-                if self.isHostMonitoringEnabled() {
+                if self.isHostMonitoringEnabled(), !self.probeOwners.contains("host") {
                     let pid = self.primaryBuildPID
                     let hostProbe = self.hostProbe
                     let host = await Task.detached(priority: .utility) {
                         hostProbe.sample(buildPID: pid)
                     }.value
+                    guard !Task.isCancelled, revision == self.monitoringRevision,
+                          self.isHostMonitoringEnabled() else { continue }
                     self.cachedHostSample = host
                     self.updateSwapRate(cur: host, now: Date())
                     for id in self.active.keys { self.accumulateHostPeak(host, for: id) }
                 }
-                try? await Task.sleep(for: .seconds(1))
+                try? await self.monitoringSamplerWait(.seconds(1))
             }
             self?.vmSamplerTask = nil
             // cachedMinikubeSample is left as is: the popover refreshes it every 15 s while open.

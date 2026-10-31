@@ -114,6 +114,19 @@ struct MonitoringPage: View {
     var body: some View {
         Form {
             Section(section.title) { MonitoringMetricsView(section: section) }
+            Section(L10n.monitoringHistoryTitle) { MonitoringHistoryView(section: section) }
+            Section(L10n.monitoringEnabled) {
+                Toggle(L10n.monitoringEnabled, isOn: Binding(
+                    get: { store.config.settings.monitoring.enabled },
+                    set: { value in store.updateMonitoring { $0.enabled = value } }))
+                Stepper(L10n.monitoringInterval + ": \(store.config.settings.monitoring.interval)", value: Binding(
+                    get: { store.config.settings.monitoring.interval },
+                    set: { value in store.updateMonitoring { $0.intervalSeconds = value } }), in: 1...60)
+                Toggle(L10n.monitoringHistory, isOn: Binding(
+                    get: { store.config.settings.monitoring.historyEnabled },
+                    set: { value in store.updateMonitoring { $0.historyEnabled = value } }))
+                Text(L10n.monitoringHistoryHelp).font(.caption).foregroundStyle(.secondary)
+            }
             Section(L10n.memoryMonitoringSection) {
                 switch section {
                 case .mac:

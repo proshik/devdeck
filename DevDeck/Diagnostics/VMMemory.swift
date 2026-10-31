@@ -91,8 +91,8 @@ final class LiveVMMemoryProbe: VMMemoryProbing, @unchecked Sendable {
 
     func sample() -> VMMemoryInfo? {
         let args = ["ssh", "--", "cat", "/proc/meminfo"]
-        let out = ProcessTree.run("/opt/homebrew/bin/colima", args)
-            ?? ProcessTree.run("/usr/bin/env", ["colima"] + args)
+        let out = MonitoringCommand.run("/opt/homebrew/bin/colima", args)
+            ?? MonitoringCommand.run("/usr/bin/env", ["colima"] + args)
         return out.flatMap(VMMemoryInfo.parseMeminfo)
     }
 
@@ -107,8 +107,8 @@ final class LiveVMMemoryProbe: VMMemoryProbing, @unchecked Sendable {
     /// Read `colima list --json` once and cache both the memory limit and the cpu count.
     private func resolveConfig() {
         if cachedLimit != nil && cachedCpus != nil { return }
-        guard let json = ProcessTree.run("/opt/homebrew/bin/colima", ["list", "--json"])
-                ?? ProcessTree.run("/usr/bin/env", ["colima", "list", "--json"]) else { return }
+        guard let json = MonitoringCommand.run("/opt/homebrew/bin/colima", ["list", "--json"])
+                ?? MonitoringCommand.run("/usr/bin/env", ["colima", "list", "--json"]) else { return }
         let line = json.split(whereSeparator: \.isNewline).first.map(String.init) ?? json
         if cachedLimit == nil { cachedLimit = VMMemoryInfo.parseColimaLimitBytes(line) }
         if cachedCpus == nil { cachedCpus = VMMemoryInfo.parseColimaCpus(line) }

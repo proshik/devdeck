@@ -44,8 +44,8 @@ protocol VMDiskProbing: Sendable {
 /// The real probe: `colima ssh -- df -Pk /var/lib/docker`. Blocking (~200-300 ms) → call off-main.
 struct LiveVMDiskProbe: VMDiskProbing {
     func sample() -> VMDiskInfo? {
-        let out = ProcessTree.run("/opt/homebrew/bin/colima", ["ssh", "--", "df", "-Pk", "/var/lib/docker"])
-            ?? ProcessTree.run("/usr/bin/env", ["colima", "ssh", "--", "df", "-Pk", "/var/lib/docker"])
+        let out = MonitoringCommand.run("/opt/homebrew/bin/colima", ["ssh", "--", "df", "-Pk", "/var/lib/docker"])
+            ?? MonitoringCommand.run("/usr/bin/env", ["colima", "ssh", "--", "df", "-Pk", "/var/lib/docker"])
         return out.flatMap(parseDF)
     }
 }

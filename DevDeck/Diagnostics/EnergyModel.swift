@@ -61,6 +61,7 @@ final class EnergyModel {
     /// Re-read the battery and advance the tally. `force` takes a snapshot regardless of how
     /// recent the last one is (power-source change, background tick); otherwise it is throttled.
     func refresh(force: Bool = false) async {
+        guard !Task.isCancelled else { return }
         guard !inFlight else {
             if force { pendingForcedRefresh = true }
             return
@@ -71,7 +72,8 @@ final class EnergyModel {
         inFlight = false
         if pendingForcedRefresh {
             pendingForcedRefresh = false
-            await refresh(force: true)
+            // A cancelled UI reader must not discard a queued power-source event.
+            Task { [weak self] in await self?.refresh(force: true) }
         }
     }
 
@@ -87,14 +89,19 @@ final class EnergyModel {
         if state.onBattery {
             if !isDischarging {
                 let snapshot = await takeSnapshot()
+                guard isEnabled() else { clear(); return }
                 tally = EnergyTally(baseline: snapshot, at: now(), missedUnplug: previous != false)
                 consumers = []
                 isDischarging = true
             } else if force || isStale {
-                record(await takeSnapshot())
+                let snapshot = await takeSnapshot()
+                guard isEnabled() else { clear(); return }
+                record(snapshot)
             }
         } else if isDischarging {
-            record(await takeSnapshot())   // the drain up to the replug, then freeze
+            let snapshot = await takeSnapshot()
+            guard isEnabled() else { clear(); return }
+            record(snapshot)   // the drain up to the replug, then freeze
             isDischarging = false
         }
     }

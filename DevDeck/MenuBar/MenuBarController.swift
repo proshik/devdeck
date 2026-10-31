@@ -1,4 +1,5 @@
 import AppKit
+import Observation
 import SwiftUI
 
 /// Tray icon + popover control panel. Replaces the temporary menu from Stage 0.
@@ -11,7 +12,9 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
     private let engine: EngineModel
     private let appModel: AppModel
     private let monitoring: DeckMonitoringModel
+    private let clipboard: ClipboardModel
     private let monitoringReader = UUID()
+    private var appearanceBinding: PopoverAppearanceBinding?
     private var iconTimer: Timer?
 
     /// Colored pressure dot drawn over the (always-template) tray glyph. Kept as a separate
@@ -38,6 +41,7 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
     init(store: CommandStore, manager: ProcessManager, appModel: AppModel,
          updateController: UpdateController, proxyManager: ProxyManager, claudeTabs: ClaudeTabsModel,
          energy: EnergyModel, engine: EngineModel, awake: AwakeModel, monitoring: DeckMonitoringModel,
+         clipboard: ClipboardModel? = nil, brightness: DisplayBrightnessModel? = nil,
          popover suppliedPopover: NSPopover? = nil) {
         let popover = suppliedPopover ?? NSPopover()
         self.manager = manager
@@ -45,6 +49,7 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
         self.engine = engine
         self.appModel = appModel
         self.monitoring = monitoring
+        self.clipboard = clipboard ?? ClipboardModel()
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         self.popover = popover
         super.init()
@@ -65,9 +70,12 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
                 .environment(engine)
                 .environment(awake)
                 .environment(monitoring)
+                .environment(self.clipboard)
+                .environment(brightness ?? DisplayBrightnessModel())
                 .defaultAppStorage(AppRuntime.preferences)
         )
         popover.contentViewController = hosting
+        appearanceBinding = PopoverAppearanceBinding(popover)
 
         if let button = statusItem.button {
             button.toolTip = AppRuntime.isIsolated ? L10n.deckDevelopmentTitle : "DevDeck"
@@ -173,6 +181,7 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
         if popover.isShown {
             popover.performClose(nil)
         } else {
+            clipboard.capturePasteTarget()
             let screen = NSScreen.screens.first { $0.frame.contains(NSEvent.mouseLocation) }
                 ?? button.window?.screen ?? NSScreen.main
             appModel.panelContentHeightLimit = min(560, max(120, (screen?.visibleFrame.height ?? 800) - 160))
