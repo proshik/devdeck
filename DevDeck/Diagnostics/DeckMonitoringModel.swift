@@ -16,6 +16,7 @@ struct MonitoringContext: Equatable {
 /// A single owner for UI sampling. Cancellation invalidates publication immediately;
 /// the old task retains its slot until blocking probes finish, preventing overlap on reopen.
 @MainActor @Observable final class DeckMonitoringModel {
+    let network: NetworkMonitoringModel
     private(set) var snapshot = DeckMonitoringSnapshot()
     private(set) var history: [MonitoringHistoryPoint] = []
     private(set) var context = MonitoringContext()
@@ -38,15 +39,17 @@ struct MonitoringContext: Equatable {
     @ObservationIgnored private var observers: [NSObjectProtocol] = []
     @ObservationIgnored private var observationGeneration = UUID()
 
-    init(interval: Duration? = nil, now: @escaping () -> Date = Date.init,
+    init(network: NetworkMonitoringModel? = nil, interval: Duration? = nil, now: @escaping () -> Date = Date.init,
          waitForNext: @escaping (Duration) async throws -> Void = { try await Task.sleep(for: $0) },
          refresh: @escaping @MainActor () async -> Void = {},
          refreshHeavy: @escaping @MainActor () async -> Void = {},
          heavySample: (@MainActor () async -> DeckMonitoringSnapshot)? = nil,
          sample: @escaping @MainActor (Bool) async -> DeckMonitoringSnapshot = { _ in .init() }) {
+        self.network = network ?? NetworkMonitoringModel()
         self.waitForNext = waitForNext
         self.heavySample = heavySample
         self.now = now; intervalOverride = interval; self.refresh = refresh; self.refreshHeavy = refreshHeavy; self.sample = sample
+        configureNetwork(context.settings)
     }
 
     convenience init(manager: ProcessManager, energy: EnergyModel, store: CommandStore, engine: EngineModel,
@@ -131,6 +134,7 @@ struct MonitoringContext: Equatable {
         configure(next)
     }
     func configure(_ next: MonitoringContext) {
+        configureNetwork(next.settings)
         guard context != next else { return }
         if context.engine != next.engine || context.engineRunning != next.engineRunning {
             snapshot.containers = nil
@@ -144,9 +148,13 @@ struct MonitoringContext: Equatable {
         if !next.settings.historyEnabled { history.removeAll() }
         invalidate(); launchIfNeeded()
     }
+    private func configureNetwork(_ settings: MonitoringSettings) {
+        network.configure(enabled: settings.enabled && settings.networkEnabled, interface: settings.networkInterface,
+                          interval: settings.interval, historyEnabled: settings.historyEnabled, suspended: suspended)
+    }
     func setSuspended(_ value: Bool) {
         guard suspended != value else { return }
-        suspended = value; invalidate(); launchIfNeeded()
+        suspended = value; configureNetwork(context.settings); invalidate(); launchIfNeeded()
     }
     var memoryStatus: String? {
         guard !context.settings.enabled || suspended || !context.hostEnabled else { return nil }
@@ -160,6 +168,7 @@ struct MonitoringContext: Equatable {
         if readers.isEmpty { invalidate() }
     }
     func stop() {
+        network.stop()
         observationGeneration = UUID(); readers.removeAll(); invalidate()
         for observer in observers { NSWorkspace.shared.notificationCenter.removeObserver(observer) }
         observers.removeAll()

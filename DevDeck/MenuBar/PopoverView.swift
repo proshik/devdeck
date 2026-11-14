@@ -133,6 +133,8 @@ struct PopoverView: View {
             } else { emptyModule(module) }
         case .agentTabs:
             ClaudeTabsSectionView()
+        case .network:
+            NetworkMetricsView(onDetails: { openItem(.network) }).padding(.horizontal, 16).padding(.vertical, 10)
         case .mac: measurementModule(module, section: .mac)
         case .containers: measurementModule(module, section: .containers)
         case .energy:

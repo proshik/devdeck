@@ -67,7 +67,7 @@ enum MonitoringCommand {
 /// posix_spawn creates a dedicated process group atomically, before any CLI can fork.
 /// Nonblocking output avoids waiting for EOF from descendants. Every exit path kills the
 /// owned group and reaps the direct child. No changes to legacy ProcessTree.run callers.
-private final class SpawnedMonitoringChild: MonitoringChild {
+final class SpawnedMonitoringChild: MonitoringChild {
     private let pid: pid_t
     private let output: Int32
     private var status: Int32?

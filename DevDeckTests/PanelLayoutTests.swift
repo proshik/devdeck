@@ -25,7 +25,7 @@ final class PanelLayoutTests: XCTestCase {
         let proxy = ProxyManager(discovering: FakeProxyDiscovering(), advertiser: FakeProxyAdvertising(),
                                  credentials: FakeProxyCredentialStore())
         let root = PopoverView()
-            .environment(DeckMonitoringModel())
+            .environment(DeckMonitoringModel(network: NetworkMonitoringModel(probe: EmptyNetworkProbe(), routes: StaticNetworkRouteProbe())))
             .environment(store).environment(manager).environment(appModel)
             .environment(UpdateController()).environment(energy).environment(engine).environment(proxy)
             .environment(ClaudeTabsModel(defaults: AppRuntime.preferences))
@@ -142,7 +142,7 @@ final class PanelLayoutTests: XCTestCase {
             .environment(AwakeModel(manager: manager, hasJournal: { false }))
             .environment(ClipboardModel()).environment(DisplayBrightnessModel())
             .environment(CleanupModel(manager: manager, probe: FakeDockerUsageProbe([:])))
-            .environment(DeckMonitoringModel(interval: .milliseconds(20), refresh: {}, refreshHeavy: {}))
+            .environment(DeckMonitoringModel(network: NetworkMonitoringModel(probe: EmptyNetworkProbe(), routes: StaticNetworkRouteProbe()), interval: .milliseconds(20), refresh: {}, refreshHeavy: {}))
             .defaultAppStorage(AppRuntime.preferences)
         let mainHosting = NSHostingController(rootView: mainRoot)
         let mainWindow = NSWindow(contentViewController: mainHosting)
@@ -281,7 +281,7 @@ final class PanelLayoutTests: XCTestCase {
             store: store, manager: manager, appModel: appModel, updateController: UpdateController(),
             proxyManager: proxy, claudeTabs: ClaudeTabsModel(defaults: AppRuntime.preferences),
             energy: energy, engine: engine, awake: AwakeModel(manager: manager, hasJournal: { false }),
-            monitoring: DeckMonitoringModel(interval: .milliseconds(20), refresh: {}, refreshHeavy: {}),
+            monitoring: DeckMonitoringModel(network: NetworkMonitoringModel(probe: EmptyNetworkProbe(), routes: StaticNetworkRouteProbe()), interval: .milliseconds(20), refresh: {}, refreshHeavy: {}),
             popover: routedPopover
         )
         defer { routedPopover.performClose(nil); withExtendedLifetime(menuBar) {} }
@@ -347,12 +347,14 @@ final class PanelLayoutTests: XCTestCase {
 
     private func findPicker(in view: NSView) -> NSSegmentedControl? {
         if let picker = view as? NSSegmentedControl { return picker }
-        return view.subviews.lazy.compactMap { self.findPicker(in: $0) }.first
+        for child in view.subviews { if let match = findPicker(in: child) { return match } }
+        return nil
     }
 
     private func findVisibilityCheckbox(in view: NSView, id: String) -> NSButton? {
         if let control = view as? NSButton, control.accessibilityIdentifier() == id { return control }
-        return view.subviews.lazy.compactMap { self.findVisibilityCheckbox(in: $0, id: id) }.first
+        for child in view.subviews { if let match = findVisibilityCheckbox(in: child, id: id) { return match } }
+        return nil
     }
 
     private func saveSnapshot(_ view: NSView, name: String) throws {
@@ -367,4 +369,8 @@ final class PanelLayoutTests: XCTestCase {
         attachment.lifetime = .keepAlways
         add(attachment)
     }
+}
+
+private struct EmptyNetworkProbe: NetworkInterfaceProbing {
+    func sample() -> [NetworkInterfaceSample]? { [] }
 }

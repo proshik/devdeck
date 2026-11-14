@@ -21,6 +21,7 @@ struct MainWindowView: View {
                     navigationRow(L10n.cleanup, icon: "trash", selection: .cleanup)
                 }
                 Section(L10n.deckObservation) {
+                    navigationRow(L10n.networkTitle, icon: "network", selection: .network)
                     navigationRow(L10n.deckThisMac, icon: "waveform.path.ecg", selection: .monitoring)
                     navigationRow(L10n.deckContainers, icon: "shippingbox", selection: .containers)
                     navigationRow(L10n.deckEnergy, icon: "battery.100percent", selection: .energy)
@@ -66,6 +67,8 @@ struct MainWindowView: View {
             PanelSettingsView()
         case .updates:
             UpdatesView()
+        case .network:
+            NetworkPage()
         case .monitoring:
             MonitoringPage(section: .mac)
         case .containers:

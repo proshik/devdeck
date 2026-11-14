@@ -12,6 +12,16 @@ final class MonitoringSettingsTests: XCTestCase {
         XCTAssertEqual(MonitoringSettings(intervalSeconds: Int.max).interval, 60)
     }
 
+    func testNetworkOptionsRoundTripAndDefaultIndependently() throws {
+        let defaults = try JSONDecoder().decode(MonitoringSettings.self, from: Data("{}".utf8))
+        XCTAssertTrue(defaults.networkEnabled); XCTAssertNil(defaults.networkInterface)
+        let input = Data(#"{"networkEnabled":false,"networkInterface":"en7","enabled":true}"#.utf8)
+        let settings = try JSONDecoder().decode(MonitoringSettings.self, from: input)
+        XCTAssertFalse(settings.networkEnabled); XCTAssertTrue(settings.enabled)
+        XCTAssertEqual(settings.networkInterface, "en7")
+        XCTAssertEqual(try JSONDecoder().decode(MonitoringSettings.self, from: JSONEncoder().encode(settings)), settings)
+    }
+
     func testMonitoringOptionsSurviveConfigRoundTripIndependentlyOfHostToggle() throws {
         let input = Data(#"{"settings":{"hostMemoryMonitoring":false,"monitoring":{"enabled":false,"intervalSeconds":5,"historyEnabled":false}}}"#.utf8)
         let config = try JSONDecoder().decode(Config.self, from: input)

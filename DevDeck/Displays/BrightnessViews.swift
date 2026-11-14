@@ -29,7 +29,7 @@ struct BrightnessDisplayRow: View {
                     Image(systemName: "sun.min").foregroundStyle(.secondary)
                     Slider(value: Binding(get: { editing ? (draft ?? value) : (model.pending[display.id] ?? value) }, set: {
                         draft = $0; model.request(id: display.id, value: $0)
-                    }), in: (display.method == .software ? 0.1 : 0)...1, onEditingChanged: {
+                    }), in: 0...1, onEditingChanged: {
                         editing = $0
                         if !$0 { draft = nil }
                     })

@@ -38,19 +38,31 @@ final class DisplayBrightnessTests: XCTestCase {
 private actor BrightnessFakeProvider: DisplayBrightnessProvider {
     var value = 0.5
     var fail = false
+    var unconfirmed: Double?
     func discover(methods: [String: BrightnessMethod]) async -> [BrightnessDisplay] {
         [.init(id: "a", displayID: 1, name: "A", bounds: .init(x: 0, y: 0, width: 100, height: 100), builtIn: true, value: value)]
     }
     func set(_ display: BrightnessDisplay, value: Double) async throws -> Double {
         if fail { throw BrightnessFailure.write }
+        if let unconfirmed { throw BrightnessFailure.unconfirmed(actual: unconfirmed) }
         self.value = (value * 10).rounded() / 10
         return self.value
     }
     func setFailure() { fail = true }
+    func setUnconfirmed(_ actual: Double) { unconfirmed = actual }
     func reset() async {}
 }
 
 @MainActor final class DisplayBrightnessModelTests: XCTestCase {
+    func testUnconfirmedWriteShowsObservedHardwareValueAndError() async {
+        let provider = BrightnessFakeProvider()
+        let model = DisplayBrightnessModel(provider: provider)
+        await model.refresh()
+        await provider.setUnconfirmed(0.99)
+        await model.apply(id: "a", value: 0.94)
+        XCTAssertEqual(model.displays.first?.value, 0.99)
+        XCTAssertNotNil(model.errors["a"])
+    }
     func testShowsConfirmedReadbackAndRestoresValueOnFailure() async {
         let provider = BrightnessFakeProvider()
         let model = DisplayBrightnessModel(provider: provider)

@@ -46,7 +46,7 @@ actor NativeBrightnessProvider: DisplayBrightnessProvider {
                 screen.value = value; routes[screen.id] = .apple
             } else if !screen.builtIn, let connection = ddc[screen.id],
                       let reading = connection.read() {
-                screen.value = Double(reading.current) / Double(reading.maximum)
+                screen.value = BrightnessDDCScale.logicalFraction(Double(reading.current) / Double(reading.maximum))
                 routes[screen.id] = .ddc(connection)
             }
             result.append(screen)
@@ -75,9 +75,10 @@ actor NativeBrightnessProvider: DisplayBrightnessProvider {
             guard let before = connection.read() else { throw BrightnessFailure.write }
             // A method/screen change can cancel this task during the blocking DDC read.
             try Task.checkCancellation()
-            guard connection.write(UInt16((value * Double(before.maximum)).rounded())) else { throw BrightnessFailure.write }
+            let target = try BrightnessDDCScale.rawTarget(value, maximum: before.maximum)
+            try connection.write(target)
             guard let after = connection.read() else { throw BrightnessFailure.readback }
-            return Double(after.current) / Double(after.maximum)
+            return try BrightnessDDCWriteTransaction.confirmLogical(target: target, maximum: before.maximum, reading: after)
         case nil: throw BrightnessFailure.unavailable
         }
     }
@@ -140,22 +141,84 @@ private final class DDCBrightnessConnection {
         return matches.count == 1 ? matches[0] : nil
     }
     func read() -> (current: UInt16, maximum: UInt16)? {
-        for _ in 0..<2 {
-            var request = BrightnessDDC.read
-            let sent = request.withUnsafeMutableBytes { writeFunction(service, 0x37, 0x51, $0.baseAddress!, UInt32($0.count)) }
-            guard sent == 0 else { continue }
-            usleep(50_000)
+        BrightnessDDCReadTransaction.read(send: { bytes in
+            var request = bytes
+            return request.withUnsafeMutableBytes { writeFunction(service, 0x37, 0x51, $0.baseAddress!, UInt32($0.count)) }
+        }, receive: {
             var reply = [UInt8](repeating: 0, count: 11)
-            let received = reply.withUnsafeMutableBytes { readFunction(service, 0x37, 0, $0.baseAddress!, UInt32($0.count)) }
-            if received == 0, let value = BrightnessDDC.decode(reply) { return value }
+            let status = reply.withUnsafeMutableBytes { readFunction(service, 0x37, 0, $0.baseAddress!, UInt32($0.count)) }
+            return (status, reply)
+        })
+    }
+    func write(_ value: UInt16) throws {
+        try BrightnessDDCWriteTransaction.write(value, send: { bytes in
+            var packet = bytes
+            return packet.withUnsafeMutableBytes { writeFunction(service, 0x37, 0x51, $0.baseAddress!, UInt32($0.count)) }
+        })
+    }
+}
+
+enum BrightnessDDCWriteTransaction {
+    static func confirmLogical(target: UInt16, maximum: UInt16, reading: (current: UInt16, maximum: UInt16)) throws -> Double {
+        let hardware: Double
+        do {
+            hardware = try confirm(target: target, maximum: maximum, reading: reading)
+        } catch BrightnessFailure.unconfirmed(let observed) {
+            guard let logical = BrightnessDDCScale.logicalFraction(observed) else { throw BrightnessFailure.readback }
+            throw BrightnessFailure.unconfirmed(actual: logical)
+        }
+        guard let logical = BrightnessDDCScale.logicalFraction(hardware) else { throw BrightnessFailure.readback }
+        guard target == 0 || reading.current > 0 else { throw BrightnessFailure.unconfirmed(actual: logical) }
+        return logical
+    }
+    static func write(_ value: UInt16, send: ([UInt8]) -> Int32,
+                      wait: (UInt32) -> Void = { usleep($0) },
+                      cancelled: () -> Bool = { Task.isCancelled }) throws {
+        if cancelled() { throw CancellationError() }
+        let packet = BrightnessDDC.write(value)
+        guard send(packet) == 0 else { throw BrightnessFailure.write }
+        wait(10_000)
+        if cancelled() { throw CancellationError() }
+        guard send(packet) == 0 else { throw BrightnessFailure.write }
+        wait(50_000)
+        if cancelled() { throw CancellationError() }
+    }
+    static func confirm(target: UInt16, maximum: UInt16, reading: (current: UInt16, maximum: UInt16)) throws -> Double {
+        guard maximum > 0, target <= maximum, reading.maximum == maximum,
+              reading.current <= reading.maximum else { throw BrightnessFailure.readback }
+        let actual = Double(reading.current) / Double(reading.maximum)
+        // Allow one raw step for monitors with at least 100 steps (at most 1%).
+        // Coarser controls must confirm the exact integer we sent.
+        let tolerance = maximum >= 100 ? 1 : 0
+        guard abs(Int(reading.current) - Int(target)) <= tolerance else {
+            throw BrightnessFailure.unconfirmed(actual: actual)
+        }
+        return actual
+    }
+}
+
+/// GET transaction seam; hardware bindings stay in the connection, tests inject transfers/time.
+enum BrightnessDDCReadTransaction {
+    static func read(send: ([UInt8]) -> Int32, receive: () -> (Int32, [UInt8]),
+                     wait: (UInt32) -> Void = { usleep($0) },
+                     cancelled: () -> Bool = { Task.isCancelled }) -> (current: UInt16, maximum: UInt16)? {
+        for _ in 0..<2 {
+            guard !cancelled() else { return nil }
+            guard send(BrightnessDDC.read) == 0 else { continue }
+            // Some displays answer a lone GET with a null packet. Repeat the same
+            // read request, not SET VCP, before collecting its response.
+            guard !cancelled() else { return nil }
+            wait(10_000)
+            guard !cancelled() else { return nil }
+            guard send(BrightnessDDC.read) == 0 else { continue }
+            guard !cancelled() else { return nil }
+            wait(50_000)
+            guard !cancelled() else { return nil }
+            let (status, reply) = receive()
+            guard !cancelled() else { return nil }
+            if status == 0, let value = BrightnessDDC.decode(reply) { return value }
         }
         return nil
-    }
-    func write(_ value: UInt16) -> Bool {
-        var packet = BrightnessDDC.write(value)
-        let result = packet.withUnsafeMutableBytes { writeFunction(service, 0x37, 0x51, $0.baseAddress!, UInt32($0.count)) }
-        usleep(50_000)
-        return result == 0
     }
 }
 

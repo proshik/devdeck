@@ -4,13 +4,13 @@ import Foundation
 /// module goes when loading a layout made by an older application version.
 enum PanelModuleID: String, Codable, CaseIterable, Identifiable, Sendable {
     case commands, daemons, chains, portForwards, proxy, agentTabs
-    case mac, containers, energy, brightness, awake
+    case mac, containers, energy, network, brightness, awake
     case clipboard
     var id: String { rawValue }
     var defaultSection: PanelSection {
         switch self {
         case .commands, .daemons, .chains, .portForwards, .proxy, .agentTabs: .environment
-        case .mac, .containers, .energy: .monitoring
+        case .mac, .containers, .energy, .network: .monitoring
         case .awake, .brightness: .displays
         case .clipboard: .clipboard
         }
@@ -25,6 +25,7 @@ enum PanelModuleID: String, Codable, CaseIterable, Identifiable, Sendable {
         case .agentTabs: L10n.claudeTabsSection
         case .mac: L10n.deckThisMac
         case .containers: L10n.deckContainers
+        case .network: L10n.networkTitle
         case .energy: L10n.deckEnergy
         case .awake: L10n.awakeTitle
         case .brightness: L10n.brightnessTitle
@@ -41,6 +42,7 @@ enum PanelModuleID: String, Codable, CaseIterable, Identifiable, Sendable {
         case .agentTabs: "macwindow"
         case .mac: "waveform.path.ecg"
         case .containers: "shippingbox"
+        case .network: "network"
         case .energy: "battery.100percent"
         case .awake: "cup.and.saucer"
         case .brightness: "sun.max"
@@ -55,6 +57,7 @@ enum PanelModuleID: String, Codable, CaseIterable, Identifiable, Sendable {
         case .agentTabs: .claudeTabs
         case .mac: .monitoring
         case .containers: .containers
+        case .network: .network
         case .energy: .energy
         case .brightness: .displays
         case .awake: .awake

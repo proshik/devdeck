@@ -13,6 +13,7 @@ enum MainSelection: Hashable {
     case panel
     case updates
     case monitoring
+    case network
     case containers
     case energy
     case awake

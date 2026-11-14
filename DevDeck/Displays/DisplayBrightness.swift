@@ -32,7 +32,7 @@ struct BrightnessDisplay: Identifiable, Equatable, Sendable {
     var method: BrightnessMethod = .hardware
 }
 
-enum BrightnessFailure: Error { case unavailable, write, readback }
+enum BrightnessFailure: Error { case unavailable, write, readback, unconfirmed(actual: Double) }
 
 protocol DisplayBrightnessProvider: Sendable {
     func discover(methods: [String: BrightnessMethod]) async -> [BrightnessDisplay]
@@ -45,6 +45,26 @@ protocol DisplayBrightnessProvider: Sendable {
 enum BrightnessRouting {
     static func target(at point: CGPoint, displays: [BrightnessDisplay]) -> BrightnessDisplay? {
         displays.first { $0.bounds.contains(point) && $0.value != nil }
+    }
+}
+
+/// Approximate control scale for external DDC only, not measured luminance.
+enum BrightnessDDCScale {
+    private static let exponent = log(0.1) / log(0.5)
+    static func hardwareFraction(_ logical: Double) -> Double? {
+        guard logical.isFinite else { return nil }
+        return pow(min(1, max(0, logical)), exponent)
+    }
+    static func logicalFraction(_ hardware: Double) -> Double? {
+        guard hardware.isFinite else { return nil }
+        return pow(min(1, max(0, hardware)), 1 / exponent)
+    }
+    static func rawTarget(_ logical: Double, maximum: UInt16) throws -> UInt16 {
+        guard maximum > 0, let hardware = hardwareFraction(logical) else { throw BrightnessFailure.write }
+        let rounded = UInt16((hardware * Double(maximum)).rounded())
+        // Zero belongs to the black-image endpoint. Positive keys must escape it,
+        // even when the curve's low end is below one physical hardware step.
+        return logical > 0 ? max(1, rounded) : 0
     }
 }
 

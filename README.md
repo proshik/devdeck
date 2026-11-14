@@ -22,6 +22,8 @@ Launch, stop, and monitor local dev commands and long-running daemons
 
 </div>
 
+**Продолжение разработки (14 ноября 2026): [docs/CONTINUE.md](docs/CONTINUE.md).**
+
 > Swift + SwiftUI/AppKit · `NSStatusItem` + `NSPopover` · sandbox-free · menu bar launch, Dock and ⌘Tab while the full window is open.
 
 ---

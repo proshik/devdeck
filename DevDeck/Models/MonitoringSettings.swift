@@ -1,6 +1,8 @@
 import Foundation
 
 struct MonitoringSettings: Codable, Equatable, Sendable {
+    var networkEnabled = true
+    var networkInterface: String?
     var enabled = true
     var intervalSeconds = 2
     var historyEnabled = true
@@ -15,6 +17,8 @@ struct MonitoringSettings: Codable, Equatable, Sendable {
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
+        networkEnabled = try c.decodeIfPresent(Bool.self, forKey: .networkEnabled) ?? true
+        networkInterface = try c.decodeIfPresent(String.self, forKey: .networkInterface)
         enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
         intervalSeconds = try c.decodeIfPresent(Int.self, forKey: .intervalSeconds) ?? 2
         historyEnabled = try c.decodeIfPresent(Bool.self, forKey: .historyEnabled) ?? true

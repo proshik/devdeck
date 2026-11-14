@@ -24,6 +24,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let brightness = DisplayBrightnessModel()
 
     private var menuBar: MenuBarController?
+    private lazy var termination = AppTerminationCoordinator(network: monitoring.network)
 
     override init() {
         manager = ProcessManager(runner: RoutingCommandRunner(), notifier: notifier)
@@ -143,30 +144,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 && $0 != RemoteProxy.bridgeDaemonID
                 && $0 != AwakeHelper.daemonID   // this lease always ends with the app
         }
-        guard !daemons.isEmpty else {
-            DiagnosticLog.shared.log("Quit (no live daemons)")
-            return .terminateNow
-        }
+        return termination.request(daemons: daemons, choose: { self.chooseDaemonQuit(count: daemons.count) },
+                                   stopDaemon: { self.manager.stop($0) },
+                                   reply: { sender.reply(toApplicationShouldTerminate: $0) })
+    }
 
+    private func chooseDaemonQuit(count: Int) -> AppTerminationCoordinator.DaemonChoice {
         NSApp.activate()   // bring the dialog to the front for an accessory app
         let alert = NSAlert()
-        alert.messageText = L10n.exitDaemonsActive(daemons.count)
+        alert.messageText = L10n.exitDaemonsActive(count)
         alert.informativeText = L10n.exitDaemonsQuestion
-        alert.addButton(withTitle: L10n.exitKill)            // .alertFirstButtonReturn
-        alert.addButton(withTitle: L10n.exitKeepInBackground)  // .alertSecondButtonReturn
-        alert.addButton(withTitle: L10n.cancel)              // .alertThirdButtonReturn
-
+        alert.addButton(withTitle: L10n.exitKill)
+        alert.addButton(withTitle: L10n.exitKeepInBackground)
+        alert.addButton(withTitle: L10n.cancel)
         switch alert.runModal() {
-        case .alertFirstButtonReturn:
-            DiagnosticLog.shared.log("Quit: kill \(daemons.count) daemons", level: .warn)
-            daemons.forEach { manager.stop($0) }   // SIGTERM synchronously → ports are freed
-            return .terminateNow
-        case .alertSecondButtonReturn:
-            DiagnosticLog.shared.log("Quit: keep \(daemons.count) daemons in background")
-            return .terminateNow                   // daemons reparent to launchd and keep running
-        default:
-            DiagnosticLog.shared.log("Quit cancelled")
-            return .terminateCancel
+        case .alertFirstButtonReturn: return .kill
+        case .alertSecondButtonReturn: return .leaveBackground
+        default: return .cancel
         }
     }
 
