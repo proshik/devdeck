@@ -54,10 +54,16 @@ final class PanelSegmentedControl: NSSegmentedControl {
     }
 }
 
-/// Named native tabs keep every available section visible below the panel header.
+/// Icon-only native tabs keep every available section visible below the panel header.
+/// The section title stays reachable as the tooltip and as the VoiceOver label.
 struct PanelSectionPicker: NSViewRepresentable {
     @Binding var selection: PanelSection
     var sections: [PanelSectionLayout] = PanelConfiguration.standard.sections
+
+    /// Narrowest equal segment that still shows its symbol with a comfortable hit area.
+    static let minimumSegmentWidth: CGFloat = 32
+    private static let fallbackSymbol = "square.grid.2x2"
+    private static let symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 14, weight: .regular)
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -66,8 +72,7 @@ struct PanelSectionPicker: NSViewRepresentable {
         control.controlSize = .regular
         control.segmentStyle = .rounded
         control.selectedSegmentBezelColor = .controlAccentColor
-        control.segmentDistribution = .fill
-        control.font = .systemFont(ofSize: NSFont.systemFontSize)
+        control.segmentDistribution = .fillEqually
         control.trackingMode = .selectOne
         control.target = context.coordinator
         control.action = #selector(Coordinator.selectSection(_:))
@@ -76,14 +81,22 @@ struct PanelSectionPicker: NSViewRepresentable {
 
     func updateNSView(_ control: NSSegmentedControl, context: Context) {
         context.coordinator.parent = self
-        let sections = self.sections
+        Self.configure(control, sections: sections)
+        control.selectedSegment = sections.firstIndex { $0.id == selection.rawValue } ?? 0
+    }
+
+    /// One segment per section: its symbol only, the title as tooltip and accessibility label.
+    static func configure(_ control: NSSegmentedControl, sections: [PanelSectionLayout]) {
         control.segmentCount = sections.count
         control.setAccessibilityLabel(L10n.deckSection)
         for (index, section) in sections.enumerated() {
-            control.setLabel(section.title, forSegment: index)
+            let image = NSImage(systemSymbolName: section.symbol, accessibilityDescription: section.title)
+                ?? NSImage(systemSymbolName: fallbackSymbol, accessibilityDescription: section.title)
+            control.setImage(image?.withSymbolConfiguration(symbolConfiguration) ?? image, forSegment: index)
+            control.setImageScaling(.scaleProportionallyDown, forSegment: index)
+            control.setLabel("", forSegment: index)
             control.setToolTip(section.title, forSegment: index)
         }
-        control.selectedSegment = sections.firstIndex { $0.id == selection.rawValue } ?? 0
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, nsView: NSSegmentedControl, context: Context) -> CGSize? {
@@ -101,17 +114,14 @@ struct PanelSectionPicker: NSViewRepresentable {
     }
 }
 
-/// User-defined tabs can exceed the tray width; every tab remains reachable by scrolling.
+/// Equal icon segments share the tray width. Only an unusually long list of tabs, whose
+/// segments would fall below the minimum width, scrolls horizontally to stay reachable.
 struct PanelSectionTabs: View {
     @Binding var selection: PanelSection
     let sections: [PanelSectionLayout]
     @State private var viewportWidth: CGFloat = 0
 
-    private var requiredWidth: CGFloat {
-        sections.reduce(0) { width, section in
-            width + (section.title as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: NSFont.systemFontSize)]).width + 24
-        }
-    }
+    private var requiredWidth: CGFloat { CGFloat(sections.count) * PanelSectionPicker.minimumSegmentWidth }
     var body: some View {
         ScrollView(.horizontal) {
             PanelSectionPicker(selection: $selection, sections: sections)

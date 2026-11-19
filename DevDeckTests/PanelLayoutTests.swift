@@ -13,7 +13,7 @@ final class PanelLayoutTests: XCTestCase {
         let store = CommandStore(configURL: directory.appendingPathComponent("config.json"))
         try store.save(.empty)
         // Keep the three-tab minimum-width regression fixture. Additional built-in/custom
-        // tabs use the existing horizontal scroller and are exercised separately.
+        // tabs are exercised separately: icon segments in the tray, wrapped columns in settings.
         store.updatePanel { $0.removeSection(.clipboard) }
         let testedSections: [PanelSection] = [.environment, .monitoring, .displays]
         let manager = ProcessManager(runner: FakeCommandRunner(), vmMonitoringEnabled: { false },
@@ -56,7 +56,7 @@ final class PanelLayoutTests: XCTestCase {
             $0.setSectionVisible(.monitoring, false)
         }
         try await Task.sleep(for: .milliseconds(100))
-        XCTAssertEqual((0..<picker.segmentCount).map { picker.label(forSegment: $0) }, [L10n.deckDisplays, L10n.deckEnvironment])
+        XCTAssertEqual((0..<picker.segmentCount).map { picker.toolTip(forSegment: $0) }, [L10n.deckDisplays, L10n.deckEnvironment])
         picker.selectedSegment = 1
         NSApp.sendAction(action, to: picker.target, from: picker)
         XCTAssertEqual(appModel.panelSection, .environment, "selection must follow reordered visible IDs, not enum indexes")
@@ -92,6 +92,28 @@ final class PanelLayoutTests: XCTestCase {
                 }
             }
         }
+        // All four standard tabs plus custom ones fit the tray as equal icon segments.
+        // The tray lists only tabs with a visible module, so each custom tab gets one.
+        store.updatePanel {
+            $0 = .standard
+            $0.moveModule(.proxy, to: $0.addSection(name: "First custom", icon: "star"))
+            $0.moveModule(.chains, to: $0.addSection(name: "Second custom", icon: "hammer"))
+        }
+        try await Task.sleep(for: .milliseconds(150))
+        hosting.view.layoutSubtreeIfNeeded()
+        let iconPicker = try XCTUnwrap(findPicker(in: hosting.view))
+        XCTAssertEqual(iconPicker.segmentCount, 6)
+        let segmentFrames = try segmentRects(of: iconPicker)
+        XCTAssertEqual(segmentFrames.count, 6)
+        let trayFrame = hosting.view.convert(hosting.view.bounds, to: nil)
+        for rect in segmentFrames {
+            XCTAssertEqual(rect.width, segmentFrames[0].width, accuracy: 1.5, "icon tabs must share the width equally")
+            XCTAssertGreaterThanOrEqual(rect.width, PanelSectionPicker.minimumSegmentWidth)
+            XCTAssertGreaterThanOrEqual(rect.minX, trayFrame.minX)
+            XCTAssertLessThanOrEqual(rect.maxX, trayFrame.maxX, "every icon tab must be visible without scrolling")
+        }
+        try saveSnapshot(hosting.view, name: "panel-icon-tabs")
+        store.updatePanel { $0 = .standard; $0.removeSection(.clipboard) }
         appModel.panelSection = .environment
         for index in 0..<50 {
             store.upsert(Command(id: UUID(), name: "Command \(index)", command: "echo ok"))
@@ -171,9 +193,6 @@ final class PanelLayoutTests: XCTestCase {
                                                                            id: "panel-section-\(section.rawValue)"))
                         return checkbox.convert(checkbox.bounds, to: mainHosting.view)
                     }
-                    for rect in headers.dropFirst() {
-                        XCTAssertEqual(rect.midY, headers[0].midY, accuracy: 1, "tabs must not wrap onto a second row")
-                    }
                     for section in testedSections {
                         let checkbox = try XCTUnwrap(findVisibilityCheckbox(in: mainHosting.view,
                                                                            id: "panel-section-\(section.rawValue)"))
@@ -201,10 +220,38 @@ final class PanelLayoutTests: XCTestCase {
                                            "tab and module visibility controls must share one column")
                         }
                     }
-                    XCTAssertLessThan(headers[0].midX, headers[1].midX)
-                    XCTAssertLessThan(headers[1].midX, headers[2].midX)
+                    XCTAssertEqual(readingOrder(headers, flipped: mainHosting.view.isFlipped), [0, 1, 2])
                     try saveSnapshot(mainHosting.view, name: "window-panel-\(Int(width))")
                 }
+                // More tabs than one row holds wrap onto further rows instead of scrolling
+                // sideways, so every tab and its drop zone stays on screen while dragging.
+                store.updatePanel {
+                    $0 = .standard
+                    _ = $0.addSection(name: "First custom", icon: "star")
+                    _ = $0.addSection(name: "Second custom", icon: "hammer")
+                }
+                for width in [minimumWidth, 1080.0] {
+                    mainWindow.setContentSize(NSSize(width: width, height: 580))
+                    try await Task.sleep(for: .milliseconds(150))
+                    mainHosting.view.layoutSubtreeIfNeeded()
+                    let wrapped = try store.config.panel.sections.map { layout in
+                        let checkbox = try XCTUnwrap(findVisibilityCheckbox(in: mainHosting.view,
+                                                                           id: "panel-section-\(layout.id)"))
+                        return checkbox.convert(checkbox.bounds, to: mainHosting.view)
+                    }
+                    for rect in wrapped {
+                        XCTAssertGreaterThanOrEqual(rect.minX, mainHosting.view.bounds.minX)
+                        XCTAssertLessThanOrEqual(rect.maxX + 20, mainHosting.view.bounds.maxX,
+                                                 "every tab column must be visible without horizontal scrolling (\(width))")
+                    }
+                    XCTAssertGreaterThan(Set(wrapped.map { Int($0.midY.rounded()) }).count, 1,
+                                         "six columns cannot share one row at \(width) pt")
+                    XCTAssertEqual(readingOrder(wrapped, flipped: mainHosting.view.isFlipped),
+                                   Array(wrapped.indices), "columns read left to right, top to bottom in tab order")
+                    try saveSnapshot(mainHosting.view, name: "window-panel-wrapped-\(Int(width))")
+                }
+                store.updatePanel { $0 = .standard; $0.removeSection(.clipboard) }
+                try await Task.sleep(for: .milliseconds(100))
                 let settings = store.config.settings
                 let toggle = try XCTUnwrap(findVisibilityCheckbox(in: mainHosting.view, id: "panel-module-proxy"))
                 XCTAssertEqual(toggle.accessibilityLabel(), L10n.panelShowModule(PanelModuleID.proxy.title))
@@ -228,7 +275,7 @@ final class PanelLayoutTests: XCTestCase {
                 }
                 try await Task.sleep(for: .milliseconds(150))
                 let customPicker = try XCTUnwrap(findPicker(in: hosting.view))
-                XCTAssertEqual((0..<customPicker.segmentCount).map { customPicker.label(forSegment: $0) },
+                XCTAssertEqual((0..<customPicker.segmentCount).map { customPicker.toolTip(forSegment: $0) },
                                [L10n.deckEnvironment, "Focused tools", L10n.deckMonitoring])
                 customPicker.selectedSegment = 1
                 NSApp.sendAction(try XCTUnwrap(customPicker.action), to: customPicker.target, from: customPicker)
@@ -237,7 +284,7 @@ final class PanelLayoutTests: XCTestCase {
                                custom.rawValue)
                 store.updatePanel { $0.renameSection(custom, name: "Renamed tools", icon: "network") }
                 try await Task.sleep(for: .milliseconds(100))
-                XCTAssertEqual(customPicker.label(forSegment: 1), "Renamed tools")
+                XCTAssertEqual(customPicker.toolTip(forSegment: 1), "Renamed tools")
                 XCTAssertEqual(customPicker.selectedSegment, 1, "renaming must preserve the selected identity")
                 try saveSnapshot(mainHosting.view, name: "window-panel-custom-catalogue")
                 store.updatePanel { $0.removeSection(custom) }
@@ -349,6 +396,23 @@ final class PanelLayoutTests: XCTestCase {
         if let picker = view as? NSSegmentedControl { return picker }
         for child in view.subviews { if let match = findPicker(in: child) { return match } }
         return nil
+    }
+
+    /// Indexes of `rects` sorted top to bottom, then left to right.
+    private func readingOrder(_ rects: [CGRect], flipped: Bool) -> [Int] {
+        rects.indices.sorted { a, b in
+            let ya = rects[a].midY.rounded(), yb = rects[b].midY.rounded()
+            if abs(ya - yb) > 1 { return flipped ? ya < yb : ya > yb }
+            return rects[a].midX < rects[b].midX
+        }
+    }
+
+    /// Window-space frames of the native segments, as AppKit hit-tests them.
+    private func segmentRects(of control: NSSegmentedControl) throws -> [CGRect] {
+        let window = try XCTUnwrap(control.window)
+        let cell = try XCTUnwrap(control.cell as? NSSegmentedCell)
+        return (cell.accessibilityChildren() ?? []).compactMap { $0 as? any NSAccessibilityProtocol }
+            .map { window.convertFromScreen($0.accessibilityFrame()) }
     }
 
     private func findVisibilityCheckbox(in view: NSView, id: String) -> NSButton? {

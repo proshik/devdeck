@@ -93,34 +93,27 @@ struct PanelSettingsView: View {
     @Environment(CommandStore.self) private var store
     @State private var targetedSection: String?
     @State private var targetedModule: String?
-    @State private var cardsViewportWidth: CGFloat = 0
     @State private var tabDraft: PanelTabDraft?
 
-    private var cardWidth: CGFloat {
-        let count = max(store.config.panel.sections.count, 1)
-        let fittingWidth = (cardsViewportWidth - CGFloat(count - 1) * 12) / CGFloat(count)
-        return min(260, max(220, fittingWidth))
-    }
+    /// Tab columns wrap onto further rows instead of scrolling sideways, so every tab and
+    /// its drop zone stays on screen while dragging. Order runs left to right, top to bottom.
+    private let cardColumns = [GridItem(.adaptive(minimum: 220, maximum: 260), spacing: 12, alignment: .top)]
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 Text(L10n.panelArrangementHelp).font(.callout).foregroundStyle(.secondary)
-                ScrollView(.horizontal) {
-                    HStack(alignment: .top, spacing: 12) {
-                        if store.config.panel.sections.isEmpty {
-                            Text(L10n.panelNoTabs).foregroundStyle(.secondary).padding(.vertical, 12)
-                        }
+                if store.config.panel.sections.isEmpty {
+                    Text(L10n.panelNoTabs).foregroundStyle(.secondary).padding(.vertical, 12)
+                } else {
+                    LazyVGrid(columns: cardColumns, alignment: .leading, spacing: 12) {
                         ForEach(store.config.panel.sections) { layout in
                             if let section = PanelSection(rawValue: layout.id) {
-                                sectionCard(layout, section: section).frame(width: cardWidth)
+                                sectionCard(layout, section: section)
                             }
                         }
-                    }.fixedSize(horizontal: false, vertical: true).padding(.vertical, 2)
+                    }.padding(.vertical, 2)
                 }
-                .fixedSize(horizontal: false, vertical: true)
-                .scrollBounceBehavior(.basedOnSize)
-                .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { cardsViewportWidth = $0 }
                 Button(L10n.panelAddTab, systemImage: "plus") { tabDraft = PanelTabDraft() }
                 moduleCatalogue
                 Text(L10n.panelVisibilityHelp).font(.callout).foregroundStyle(.secondary)
