@@ -13,7 +13,7 @@ final class PanelLayoutTests: XCTestCase {
         let store = CommandStore(configURL: directory.appendingPathComponent("config.json"))
         try store.save(.empty)
         // Keep the three-tab minimum-width regression fixture. Additional built-in/custom
-        // tabs are exercised separately: icon segments in the tray, wrapped columns in settings.
+        // tabs are exercised separately: icon segments in the tray, a scrolling row in settings.
         store.updatePanel { $0.removeSection(.clipboard) }
         let testedSections: [PanelSection] = [.environment, .monitoring, .displays]
         let manager = ProcessManager(runner: FakeCommandRunner(), vmMonitoringEnabled: { false },
@@ -193,6 +193,9 @@ final class PanelLayoutTests: XCTestCase {
                                                                            id: "panel-section-\(section.rawValue)"))
                         return checkbox.convert(checkbox.bounds, to: mainHosting.view)
                     }
+                    for rect in headers.dropFirst() {
+                        XCTAssertEqual(rect.midY, headers[0].midY, accuracy: 1, "tabs must not wrap onto a second row")
+                    }
                     for section in testedSections {
                         let checkbox = try XCTUnwrap(findVisibilityCheckbox(in: mainHosting.view,
                                                                            id: "panel-section-\(section.rawValue)"))
@@ -220,36 +223,33 @@ final class PanelLayoutTests: XCTestCase {
                                            "tab and module visibility controls must share one column")
                         }
                     }
-                    XCTAssertEqual(readingOrder(headers, flipped: mainHosting.view.isFlipped), [0, 1, 2])
+                    XCTAssertLessThan(headers[0].midX, headers[1].midX)
+                    XCTAssertLessThan(headers[1].midX, headers[2].midX)
                     try saveSnapshot(mainHosting.view, name: "window-panel-\(Int(width))")
                 }
-                // More tabs than one row holds wrap onto further rows instead of scrolling
-                // sideways, so every tab and its drop zone stays on screen while dragging.
+                // More tabs than the window holds stay in one row in tab order; the row scrolls
+                // horizontally, and the drag autoscroller is attached to that scroll view.
                 store.updatePanel {
                     $0 = .standard
                     _ = $0.addSection(name: "First custom", icon: "star")
                     _ = $0.addSection(name: "Second custom", icon: "hammer")
                 }
-                for width in [minimumWidth, 1080.0] {
-                    mainWindow.setContentSize(NSSize(width: width, height: 580))
-                    try await Task.sleep(for: .milliseconds(150))
-                    mainHosting.view.layoutSubtreeIfNeeded()
-                    let wrapped = try store.config.panel.sections.map { layout in
-                        let checkbox = try XCTUnwrap(findVisibilityCheckbox(in: mainHosting.view,
-                                                                           id: "panel-section-\(layout.id)"))
-                        return checkbox.convert(checkbox.bounds, to: mainHosting.view)
-                    }
-                    for rect in wrapped {
-                        XCTAssertGreaterThanOrEqual(rect.minX, mainHosting.view.bounds.minX)
-                        XCTAssertLessThanOrEqual(rect.maxX + 20, mainHosting.view.bounds.maxX,
-                                                 "every tab column must be visible without horizontal scrolling (\(width))")
-                    }
-                    XCTAssertGreaterThan(Set(wrapped.map { Int($0.midY.rounded()) }).count, 1,
-                                         "six columns cannot share one row at \(width) pt")
-                    XCTAssertEqual(readingOrder(wrapped, flipped: mainHosting.view.isFlipped),
-                                   Array(wrapped.indices), "columns read left to right, top to bottom in tab order")
-                    try saveSnapshot(mainHosting.view, name: "window-panel-wrapped-\(Int(width))")
+                mainWindow.setContentSize(NSSize(width: minimumWidth, height: 580))
+                try await Task.sleep(for: .milliseconds(150))
+                mainHosting.view.layoutSubtreeIfNeeded()
+                let row = try store.config.panel.sections.map { layout in
+                    let checkbox = try XCTUnwrap(findVisibilityCheckbox(in: mainHosting.view,
+                                                                       id: "panel-section-\(layout.id)"))
+                    return checkbox.convert(checkbox.bounds, to: mainHosting.view)
                 }
+                for rect in row { XCTAssertEqual(rect.midY, row[0].midY, accuracy: 1, "columns must stay in one row") }
+                XCTAssertEqual(row.map(\.midX), row.map(\.midX).sorted(), "columns read left to right in tab order")
+                let locator = try XCTUnwrap(findView(in: mainHosting.view, of: PanelRowScrollViewLocator.LocatorView.self))
+                let rowScroll = try XCTUnwrap(locator.enclosingScrollView)
+                let rowDocument = try XCTUnwrap(rowScroll.documentView)
+                XCTAssertGreaterThan(rowDocument.frame.width, rowScroll.contentView.bounds.width,
+                                     "six columns overflow the minimum window, so the row must scroll")
+                try saveSnapshot(mainHosting.view, name: "window-panel-row-\(Int(minimumWidth))")
                 store.updatePanel { $0 = .standard; $0.removeSection(.clipboard) }
                 try await Task.sleep(for: .milliseconds(100))
                 let settings = store.config.settings
@@ -398,21 +398,18 @@ final class PanelLayoutTests: XCTestCase {
         return nil
     }
 
-    /// Indexes of `rects` sorted top to bottom, then left to right.
-    private func readingOrder(_ rects: [CGRect], flipped: Bool) -> [Int] {
-        rects.indices.sorted { a, b in
-            let ya = rects[a].midY.rounded(), yb = rects[b].midY.rounded()
-            if abs(ya - yb) > 1 { return flipped ? ya < yb : ya > yb }
-            return rects[a].midX < rects[b].midX
-        }
-    }
-
     /// Window-space frames of the native segments, as AppKit hit-tests them.
     private func segmentRects(of control: NSSegmentedControl) throws -> [CGRect] {
         let window = try XCTUnwrap(control.window)
         let cell = try XCTUnwrap(control.cell as? NSSegmentedCell)
         return (cell.accessibilityChildren() ?? []).compactMap { $0 as? any NSAccessibilityProtocol }
             .map { window.convertFromScreen($0.accessibilityFrame()) }
+    }
+
+    private func findView<T: NSView>(in view: NSView, of type: T.Type) -> T? {
+        if let match = view as? T { return match }
+        for child in view.subviews { if let match = findView(in: child, of: type) { return match } }
+        return nil
     }
 
     private func findVisibilityCheckbox(in view: NSView, id: String) -> NSButton? {

@@ -93,27 +93,37 @@ struct PanelSettingsView: View {
     @Environment(CommandStore.self) private var store
     @State private var targetedSection: String?
     @State private var targetedModule: String?
+    @State private var cardsViewportWidth: CGFloat = 0
     @State private var tabDraft: PanelTabDraft?
+    /// Scrolls the row of tab columns when a drag lingers at its left or right edge.
+    @State private var autoscroller = PanelRowAutoscroller()
 
-    /// Tab columns wrap onto further rows instead of scrolling sideways, so every tab and
-    /// its drop zone stays on screen while dragging. Order runs left to right, top to bottom.
-    private let cardColumns = [GridItem(.adaptive(minimum: 220, maximum: 260), spacing: 12, alignment: .top)]
+    private var cardWidth: CGFloat {
+        let count = max(store.config.panel.sections.count, 1)
+        let fittingWidth = (cardsViewportWidth - CGFloat(count - 1) * 12) / CGFloat(count)
+        return min(260, max(220, fittingWidth))
+    }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 Text(L10n.panelArrangementHelp).font(.callout).foregroundStyle(.secondary)
-                if store.config.panel.sections.isEmpty {
-                    Text(L10n.panelNoTabs).foregroundStyle(.secondary).padding(.vertical, 12)
-                } else {
-                    LazyVGrid(columns: cardColumns, alignment: .leading, spacing: 12) {
+                ScrollView(.horizontal) {
+                    HStack(alignment: .top, spacing: 12) {
+                        if store.config.panel.sections.isEmpty {
+                            Text(L10n.panelNoTabs).foregroundStyle(.secondary).padding(.vertical, 12)
+                        }
                         ForEach(store.config.panel.sections) { layout in
                             if let section = PanelSection(rawValue: layout.id) {
-                                sectionCard(layout, section: section)
+                                sectionCard(layout, section: section).frame(width: cardWidth)
                             }
                         }
-                    }.padding(.vertical, 2)
+                    }.fixedSize(horizontal: false, vertical: true).padding(.vertical, 2)
+                        .background(PanelRowScrollViewLocator(autoscroller: autoscroller))
                 }
+                .fixedSize(horizontal: false, vertical: true)
+                .scrollBounceBehavior(.basedOnSize)
+                .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { cardsViewportWidth = $0 }
                 Button(L10n.panelAddTab, systemImage: "plus") { tabDraft = PanelTabDraft() }
                 moduleCatalogue
                 Text(L10n.panelVisibilityHelp).font(.callout).foregroundStyle(.secondary)
@@ -184,7 +194,7 @@ struct PanelSettingsView: View {
                     guard let item = items.first, item.kind == .section,
                           let source = PanelSection(rawValue: item.id) else { return false }
                     store.updatePanel { $0.moveSection(source, before: section) }; return true
-                }
+                } isTargeted: { if $0 { autoscroller.beginTracking() } }
             ForEach(layout.modules) { placement in
                 if let module = PanelModuleID(rawValue: placement.id) { moduleRow(placement, module: module, section: section) }
             }
@@ -214,7 +224,7 @@ struct PanelSettingsView: View {
             }
             return true
         } isTargeted: { targeted in
-            if targeted { targetedSection = section.rawValue }
+            if targeted { autoscroller.beginTracking(); targetedSection = section.rawValue }
             else if targetedSection == section.rawValue { targetedSection = nil }
         }
     }
@@ -274,7 +284,7 @@ struct PanelSettingsView: View {
             guard let item = items.first, item.kind == .module, let source = PanelModuleID(rawValue: item.id) else { return false }
             store.updatePanel { $0.moveModule(source, to: section, before: module) }; return true
         } isTargeted: { targeted in
-            if targeted { targetedModule = module.rawValue }
+            if targeted { autoscroller.beginTracking(); targetedModule = module.rawValue }
             else if targetedModule == module.rawValue { targetedModule = nil }
         }
     }
