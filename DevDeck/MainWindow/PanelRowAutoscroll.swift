@@ -67,10 +67,13 @@ struct PanelEdgeAutoscroll {
     private var timer: Timer?
     private var policy = PanelEdgeAutoscroll()
     private var lastTick: TimeInterval = 0
+    private var onRelease: [() -> Void] = []
 
     var isTracking: Bool { timer != nil }
 
-    func beginTracking() {
+    /// `onRelease` runs once the mouse button is up, whether or not anything was dropped.
+    func beginTracking(onRelease: (() -> Void)? = nil) {
+        if let onRelease { self.onRelease.append(onRelease) }
         guard timer == nil, scrollView != nil else { return }
         policy = PanelEdgeAutoscroll()
         lastTick = ProcessInfo.processInfo.systemUptime
@@ -85,6 +88,9 @@ struct PanelEdgeAutoscroll {
     func endTracking() {
         timer?.invalidate()
         timer = nil
+        let callbacks = onRelease
+        onRelease = []
+        callbacks.forEach { $0() }
     }
 
     private func tick() {

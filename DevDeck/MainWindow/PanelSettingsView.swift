@@ -97,6 +97,10 @@ struct PanelSettingsView: View {
     @State private var tabDraft: PanelTabDraft?
     /// Scrolls the row of tab columns when a drag lingers at its left or right edge.
     @State private var autoscroller = PanelRowAutoscroller()
+    /// Preview of a tab heading drag; the configuration changes only when it is dropped.
+    @State private var tabReorder: PanelTabReorder?
+    @State private var tabDragSession = 0
+    private let cardSpacing: CGFloat = 12
 
     private var cardWidth: CGFloat {
         let count = max(store.config.panel.sections.count, 1)
@@ -109,16 +113,30 @@ struct PanelSettingsView: View {
             VStack(alignment: .leading, spacing: 20) {
                 Text(L10n.panelArrangementHelp).font(.callout).foregroundStyle(.secondary)
                 ScrollView(.horizontal) {
-                    HStack(alignment: .top, spacing: 12) {
+                    HStack(alignment: .top, spacing: cardSpacing) {
                         if store.config.panel.sections.isEmpty {
                             Text(L10n.panelNoTabs).foregroundStyle(.secondary).padding(.vertical, 12)
                         }
-                        ForEach(store.config.panel.sections) { layout in
+                        ForEach(rowLayouts) { layout in
                             if let section = PanelSection(rawValue: layout.id) {
-                                sectionCard(layout, section: section).frame(width: cardWidth)
+                                if tabReorder?.dragged == layout.id {
+                                    tabPlaceholder(layout, section: section)
+                                } else {
+                                    sectionCard(layout, section: section).frame(width: cardWidth)
+                                }
                             }
                         }
-                    }.fixedSize(horizontal: false, vertical: true).padding(.vertical, 2)
+                    }.fixedSize(horizontal: false, vertical: true)
+                        .overlay {
+                            if tabReorder != nil {
+                                Color.clear.contentShape(Rectangle())
+                                    .onDrop(of: [.devDeckPanelItem], delegate: PanelTabRowDropDelegate(
+                                        reorder: $tabReorder, columnWidth: cardWidth, spacing: cardSpacing,
+                                        onEnter: { autoscroller.beginTracking() },
+                                        commit: commitTabDrag))
+                            }
+                        }
+                        .padding(.vertical, 2)
                         .background(PanelRowScrollViewLocator(autoscroller: autoscroller))
                 }
                 .fixedSize(horizontal: false, vertical: true)
@@ -163,11 +181,53 @@ struct PanelSettingsView: View {
         }
     }
 
+    /// Columns in the previewed order while a tab heading is dragged, otherwise as configured.
+    private var rowLayouts: [PanelSectionLayout] {
+        let sections = store.config.panel.sections
+        guard let tabReorder else { return sections }
+        let byID = Dictionary(sections.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        return tabReorder.previewOrder.compactMap { byID[$0] }
+    }
+
+    /// The dragged column keeps its size as an empty dashed slot where the tab will land.
+    private func tabPlaceholder(_ layout: PanelSectionLayout, section: PanelSection) -> some View {
+        sectionCard(layout, section: section).frame(width: cardWidth).hidden()
+            .overlay(RoundedRectangle(cornerRadius: 8)
+                .strokeBorder(Color(nsColor: .separatorColor), style: StrokeStyle(lineWidth: 1.5, dash: [6, 4])))
+            .allowsHitTesting(false)
+    }
+
+    private func beginTabDrag(_ section: PanelSection) {
+        tabDragSession += 1
+        let session = tabDragSession
+        tabReorder = PanelTabReorder(order: store.config.panel.sections.map(\.id), dragged: section.rawValue)
+        autoscroller.beginTracking {
+            // A drop may still be delivered right after the button goes up; only a drag
+            // that ended without one (released outside the row, Esc) is cleared here.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                if tabDragSession == session { withAnimation { tabReorder = nil } }
+            }
+        }
+    }
+
+    private func commitTabDrag(_ reorder: PanelTabReorder) {
+        tabDragSession += 1
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            if !reorder.isNoOp { store.updatePanel { reorder.apply(to: &$0) } }
+            tabReorder = nil
+        }
+    }
+
     private func sectionCard(_ layout: PanelSectionLayout, section: PanelSection) -> some View {
         VStack(spacing: 6) {
             HStack(spacing: 6) {
                 Label(layout.title, systemImage: layout.symbol).fontWeight(.medium).lineLimit(1)
-                    .draggable(PanelDragItem(kind: .section, id: section.rawValue))
+                    .onDrag {
+                        beginTabDrag(section)
+                        return PanelDragItem(kind: .section, id: section.rawValue).itemProvider()
+                    }
                     .help(layout.title + "\n" + L10n.panelDragSection)
                 Spacer(minLength: 4)
                 Button(L10n.panelRemoveTab, systemImage: "xmark") {
@@ -190,11 +250,6 @@ struct PanelSettingsView: View {
                 ), title: L10n.panelShowSection, identifier: "panel-section-\(section.rawValue)")
             }.padding(.horizontal, 6).frame(minHeight: 28)
                 .contentShape(Rectangle())
-                .dropDestination(for: PanelDragItem.self) { items, _ in
-                    guard let item = items.first, item.kind == .section,
-                          let source = PanelSection(rawValue: item.id) else { return false }
-                    store.updatePanel { $0.moveSection(source, before: section) }; return true
-                } isTargeted: { if $0 { autoscroller.beginTracking() } }
             ForEach(layout.modules) { placement in
                 if let module = PanelModuleID(rawValue: placement.id) { moduleRow(placement, module: module, section: section) }
             }
@@ -219,8 +274,7 @@ struct PanelSettingsView: View {
                 guard let module = PanelModuleID(rawValue: item.id) else { return false }
                 store.updatePanel { $0.moveModule(module, to: section) }
             case .section:
-                guard let source = PanelSection(rawValue: item.id) else { return false }
-                store.updatePanel { $0.moveSection(source, after: section) }
+                return false // tab headings are reordered by the row's own drop delegate
             }
             return true
         } isTargeted: { targeted in
