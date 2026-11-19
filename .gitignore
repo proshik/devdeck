@@ -29,6 +29,10 @@ DerivedData/
 .build/
 .swiftpm/
 
+# sourcekit-lsp's bridge to Xcode — written by `xcode-build-server config`,
+# holds absolute paths of one machine's DerivedData
+buildServer.json
+
 # Sparkle EdDSA private key — must never be committed (lives in the SPARKLE_PRIVATE_KEY CI secret)
 *private-key*.pem
 *private_key*.pem
