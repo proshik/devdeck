@@ -24,6 +24,37 @@ final class PanelSectionPickerTests: XCTestCase {
         }
     }
 
+    func testSegmentsGetExplicitEqualWidthsThatFillTheControl() {
+        // Symbols of different widths: equal segments must come from the control itself,
+        // not from whatever a given macOS does with `.fillEqually`.
+        let mixed = [
+            PanelSectionLayout(id: PanelSection.environment.rawValue),
+            PanelSectionLayout(id: PanelSection.monitoring.rawValue),
+            PanelSectionLayout(id: PanelSection.displays.rawValue),
+            PanelSectionLayout(id: PanelSection.clipboard.rawValue),
+            PanelSectionLayout(id: "custom-\(UUID().uuidString)", name: "Star", icon: "star"),
+            PanelSectionLayout(id: "custom-\(UUID().uuidString)", name: "Hammer", icon: "hammer"),
+        ]
+        let control = PanelSegmentedControl(frame: NSRect(x: 0, y: 0, width: 348, height: 24))
+        PanelSectionPicker.configure(control, sections: mixed)
+        for width in [348.0, 300.0, 200.0] {
+            control.setFrameSize(NSSize(width: width, height: 24))
+            let widths = (0..<control.segmentCount).map { control.width(forSegment: $0) }
+            XCTAssertEqual(widths.count, mixed.count)
+            for segment in widths {
+                XCTAssertGreaterThan(segment, 0, "every segment needs an explicit width")
+                XCTAssertEqual(segment, widths[0], accuracy: 0.01, "segments must be equal at \(width)")
+            }
+            XCTAssertEqual(control.intrinsicContentSize.width, width, accuracy: 1,
+                           "the equal segments must fill the control at \(width)")
+        }
+        PanelSectionPicker.configure(control, sections: Array(mixed.prefix(3)))
+        let three = (0..<control.segmentCount).map { control.width(forSegment: $0) }
+        XCTAssertEqual(three.count, 3)
+        XCTAssertEqual(control.intrinsicContentSize.width, 200, accuracy: 1, "a new tab count re-divides the width")
+        for segment in three { XCTAssertEqual(segment, three[0], accuracy: 0.01) }
+    }
+
     func testReconfiguringFollowsRemovedAndRenamedTabs() throws {
         let control = NSSegmentedControl()
         PanelSectionPicker.configure(control, sections: sections)

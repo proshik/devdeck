@@ -2,9 +2,43 @@ import AppKit
 import SwiftUI
 
 /// AppKit keeps selection, keyboard navigation and accessibility; hover only adds a tint.
+/// Segments get explicit equal widths that fill the control: `.fillEqually` alone is not
+/// honored on every supported macOS (on 15 the segments kept their content widths).
 final class PanelSegmentedControl: NSSegmentedControl {
     private var hoverArea: NSTrackingArea?
     private var hoverPoint: NSPoint?
+    /// Width the bezel and separators add on top of the segment widths, per segment count.
+    private var chromeWidth: (count: Int, width: CGFloat)?
+
+    override var segmentCount: Int {
+        didSet { equalizeSegmentWidths() }
+    }
+
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        equalizeSegmentWidths()
+    }
+
+    override func layout() {
+        super.layout()
+        equalizeSegmentWidths()
+    }
+
+    /// Gives every segment the same explicit width so that together they fill `bounds`.
+    func equalizeSegmentWidths() {
+        let count = segmentCount
+        guard count > 0, bounds.width > 0 else { return }
+        if chromeWidth?.count != count {
+            // Measure the fixed overhead once: intrinsic width minus known segment widths.
+            let probe: CGFloat = 40
+            for index in 0..<count { setWidth(probe, forSegment: index) }
+            chromeWidth = (count, max(intrinsicContentSize.width - probe * CGFloat(count), 0))
+        }
+        let width = max((bounds.width - (chromeWidth?.width ?? 0)) / CGFloat(count), 1)
+        for index in 0..<count where abs(self.width(forSegment: index) - width) > 0.01 {
+            setWidth(width, forSegment: index)
+        }
+    }
 
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
@@ -72,7 +106,8 @@ struct PanelSectionPicker: NSViewRepresentable {
         control.controlSize = .regular
         control.segmentStyle = .rounded
         control.selectedSegmentBezelColor = .controlAccentColor
-        control.segmentDistribution = .fillEqually
+        // Explicit widths from PanelSegmentedControl decide the layout on every macOS.
+        control.segmentDistribution = .fit
         control.trackingMode = .selectOne
         control.target = context.coordinator
         control.action = #selector(Coordinator.selectSection(_:))
