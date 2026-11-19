@@ -162,9 +162,11 @@ import Observation
                 uncover(id: id)
                 actual = try await provider.set(display, value: requested)
             }
+            let reported = requested > 0 && display.builtIn ? await provider.reportedNits(display) : nil
             guard epoch == generation, let index = displays.firstIndex(where: { $0.id == id }) else { return }
             guard actual.isFinite, (0...1).contains(actual) else { throw BrightnessFailure.readback }
             displays[index].value = actual
+            if requested > 0 && display.builtIn { displays[index].reportedNits = reported }
             observeOwnValue(id: id)
             errors.removeValue(forKey: id)
             if let feedback, feedback == latestFeedback, feedback.targetID == id, !Task.isCancelled {
@@ -244,9 +246,9 @@ import Observation
         observers.removeAll()
     }
 
-    /// Approximate nits for the panel row and OSD; nil means show the percentage only.
+    /// Nits for the panel row and OSD; nil means show the percentage only.
     func nits(for display: BrightnessDisplay) -> Double? {
-        BrightnessLuminance.estimate(display, settings: settings())
+        BrightnessLuminance.value(display, settings: settings())
     }
 
     func handleKey(increase: Bool, fine: Bool, at point: CGPoint) {

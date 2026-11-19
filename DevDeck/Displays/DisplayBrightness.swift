@@ -46,6 +46,8 @@ struct BrightnessDisplay: Identifiable, Equatable, Sendable {
     /// EDID manufacturer and product code (CGDisplayVendorNumber / CGDisplayModelNumber).
     var edidVendor: UInt32 = 0
     var edidProduct: UInt32 = 0
+    /// Panel luminance macOS reports for the built-in display (cd/m²); nil when unavailable.
+    var reportedNits: Double? = nil
 }
 
 enum BrightnessFailure: Error { case unavailable, write, readback, unconfirmed(actual: Double) }
@@ -55,7 +57,13 @@ protocol DisplayBrightnessProvider: Sendable {
     /// Returns actual readback. Check task cancellation immediately before each physical
     /// write (also after any preceding suspension/read), so invalidated work cannot commit.
     func set(_ display: BrightnessDisplay, value: Double) async throws -> Double
+    /// Current macOS-reported panel luminance of a built-in display, read after any write.
+    func reportedNits(_ display: BrightnessDisplay) async -> Double?
     func reset() async
+}
+
+extension DisplayBrightnessProvider {
+    func reportedNits(_ display: BrightnessDisplay) async -> Double? { nil }
 }
 
 enum BrightnessRouting {
@@ -107,9 +115,25 @@ enum BrightnessDDCScale {
     }
 }
 
-/// Approximate nits for external DDC displays: linear in the confirmed raw level between
-/// datasheet endpoints. Never invented: without a known or user range there is no value.
+/// Nits next to the percentage. Built-in: the luminance macOS reports for the panel.
+/// External DDC: linear in the confirmed raw level between datasheet endpoints.
+/// Never invented: without a reported value or a known/user range there is no value.
 enum BrightnessLuminance {
+    static func value(_ display: BrightnessDisplay, settings: DisplayBrightnessSettings) -> Double? {
+        guard display.builtIn else { return estimate(display, settings: settings) }
+        guard display.method == .hardware, let value = display.value, value > 0,
+              let nits = display.reportedNits, nits.isFinite, nits >= 0 else { return nil }
+        return nits
+    }
+    /// IOMFBBrightnessLevel of the backlit (BLNitsCap) framebuffer, 16.16 fixed-point cd/m².
+    /// External pipes publish a 1.0 placeholder without a cap and are rejected.
+    static func panelNits(_ properties: [String: Any]) -> Double? {
+        guard properties["BLNitsCap"] is NSNumber,
+              let level = properties["IOMFBBrightnessLevel"] as? NSNumber else { return nil }
+        let nits = level.doubleValue / 65536
+        return nits.isFinite && nits >= 0 ? nits : nil
+    }
+
     /// Defaults keyed by EDID manufacturer and product code, not by the (localizable,
     /// de-duplicated) screen name.
     static let defaults: [UInt64: BrightnessLuminanceRange] = [

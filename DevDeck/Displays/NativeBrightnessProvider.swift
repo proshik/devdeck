@@ -10,6 +10,30 @@ actor NativeBrightnessProvider: DisplayBrightnessProvider {
     private let displayServices = dlopen("/System/Library/PrivateFrameworks/DisplayServices.framework/DisplayServices", RTLD_LAZY)
     private var routes: [String: Route] = [:]
     private enum Route { case apple, ddc(DDCBrightnessConnection) }
+    /// macOS updates the panel level ~10–25 ms after a DisplayServices write (measured 2026-11-19).
+    private static let panelSettle = Duration.milliseconds(60)
+    private var appleWrites: [String: ContinuousClock.Instant] = [:]
+
+    /// Luminance macOS reports for a built-in panel: its own framebuffer, matched by IODisplayLocation.
+    private func readPanelNits(_ id: UInt32) -> Double? {
+        guard let location = DDCBrightnessConnection.location(displayID: id) else { return nil }
+        let entry = IORegistryEntryFromPath(kIOMainPortDefault, location)
+        guard entry != 0 else { return nil }
+        defer { IOObjectRelease(entry) }
+        var properties: Unmanaged<CFMutableDictionary>?
+        guard IORegistryEntryCreateCFProperties(entry, &properties, nil, 0) == KERN_SUCCESS,
+              let values = properties?.takeRetainedValue() as? [String: Any] else { return nil }
+        return BrightnessLuminance.panelNits(values)
+    }
+
+    func reportedNits(_ display: BrightnessDisplay) async -> Double? {
+        guard display.builtIn, display.method == .hardware, case .apple = routes[display.id] else { return nil }
+        if let written = appleWrites[display.id] {
+            let remaining = written + Self.panelSettle - ContinuousClock.now
+            if remaining > .zero { try? await Task.sleep(for: remaining) }
+        }
+        return readPanelNits(display.displayID)
+    }
 
     private func readApple(_ id: UInt32) -> Double? {
         guard let symbol = displayServices.flatMap({ dlsym($0, "DisplayServicesGetBrightness") }) else { return nil }
@@ -45,6 +69,7 @@ actor NativeBrightnessProvider: DisplayBrightnessProvider {
                 screen.value = await SoftwareBrightness.shared.value(for: screen.id)
             } else if let value = readApple(screen.displayID) {
                 screen.value = value; routes[screen.id] = .apple
+                if screen.builtIn { screen.reportedNits = readPanelNits(screen.displayID) }
             } else if !screen.builtIn, let connection = ddc[screen.id],
                       let reading = connection.read() {
                 screen.value = BrightnessDDCScale.logical(raw: reading.current, maximum: reading.maximum)
@@ -71,6 +96,7 @@ actor NativeBrightnessProvider: DisplayBrightnessProvider {
             guard let symbol = displayServices.flatMap({ dlsym($0, "DisplayServicesSetBrightness") }) else { throw BrightnessFailure.write }
             try Task.checkCancellation()
             guard unsafeBitCast(symbol, to: SetBrightness.self)(display.displayID, Float(value)) == 0 else { throw BrightnessFailure.write }
+            appleWrites[display.id] = .now
             guard let actual = readApple(display.displayID) else { throw BrightnessFailure.readback }
             return actual
         case .ddc(let connection):
@@ -84,7 +110,7 @@ actor NativeBrightnessProvider: DisplayBrightnessProvider {
         case nil: throw BrightnessFailure.unavailable
         }
     }
-    func reset() async { routes.removeAll(); await SoftwareBrightness.shared.retainOnly([]) }
+    func reset() async { routes.removeAll(); appleWrites.removeAll(); await SoftwareBrightness.shared.retainOnly([]) }
 }
 
 /// IOAV DDC on Apple Silicon. Only an exact, unique IODisplayLocation match is accepted.
@@ -135,10 +161,14 @@ private final class DDCBrightnessConnection {
         return []
         #endif
     }
-    static func match(displayID: UInt32, connections: [DDCBrightnessConnection]) -> DDCBrightnessConnection? {
+    /// IORegistry path of the display's framebuffer (CoreDisplay IODisplayLocation).
+    static func location(displayID: UInt32) -> String? {
         guard let symbol = core.flatMap({ dlsym($0, "CoreDisplay_DisplayCreateInfoDictionary") }),
-              let info = unsafeBitCast(symbol, to: Info.self)(displayID)?.takeRetainedValue() as? [String: Any],
-              let location = info["IODisplayLocation"] as? String else { return nil }
+              let info = unsafeBitCast(symbol, to: Info.self)(displayID)?.takeRetainedValue() as? [String: Any] else { return nil }
+        return info["IODisplayLocation"] as? String
+    }
+    static func match(displayID: UInt32, connections: [DDCBrightnessConnection]) -> DDCBrightnessConnection? {
+        guard let location = location(displayID: displayID) else { return nil }
         let matches = connections.filter { $0.location == location }
         return matches.count == 1 ? matches[0] : nil
     }

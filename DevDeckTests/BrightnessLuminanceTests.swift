@@ -52,6 +52,35 @@ final class BrightnessLuminanceTests: XCTestCase {
                      "built-in has no live macOS nits on this hardware and is never estimated")
     }
 
+    func testBuiltInShowsTheLuminanceMacOSReportsForThePanel() {
+        let settings = DisplayBrightnessSettings()
+        var builtIn = BrightnessDisplay(id: "mac", displayID: 1, name: "Built-in", bounds: .zero, builtIn: true,
+                                        value: 0.75, reportedNits: 224.75)
+        XCTAssertEqual(BrightnessLuminance.value(builtIn, settings: settings), 224.75)
+        builtIn.value = 0
+        XCTAssertNil(BrightnessLuminance.value(builtIn, settings: settings), "0% is the black cover, not the backlight")
+        builtIn.value = 0.75; builtIn.method = .software
+        XCTAssertNil(BrightnessLuminance.value(builtIn, settings: settings), "software dimming is not the panel luminance")
+        builtIn.method = .hardware
+        for reported in [nil, -1, .nan, .infinity] as [Double?] {
+            builtIn.reportedNits = reported
+            XCTAssertNil(BrightnessLuminance.value(builtIn, settings: settings), "\(String(describing: reported))")
+        }
+        XCTAssertEqual(try XCTUnwrap(BrightnessLuminance.value(external(raw: 24), settings: settings)), 29 + 321 * 0.24,
+                       accuracy: 1e-9, "external displays keep the datasheet estimate")
+    }
+
+    func testBuiltInPanelLuminanceIsReadFromTheBacklitFramebufferOnly() {
+        let level = NSNumber(value: Int64(224.75 * 65536)), cap = NSNumber(value: 26227508)
+        XCTAssertEqual(BrightnessLuminance.panelNits(["IOMFBBrightnessLevel": level, "BLNitsCap": cap]), 224.75)
+        XCTAssertEqual(BrightnessLuminance.panelNits(["IOMFBBrightnessLevel": NSNumber(value: 0), "BLNitsCap": cap]), 0)
+        XCTAssertNil(BrightnessLuminance.panelNits(["IOMFBBrightnessLevel": NSNumber(value: 65536)]),
+                     "external pipes publish a 1.0 placeholder without a backlight cap")
+        XCTAssertNil(BrightnessLuminance.panelNits(["BLNitsCap": cap]))
+        XCTAssertNil(BrightnessLuminance.panelNits(["IOMFBBrightnessLevel": NSNumber(value: -65536), "BLNitsCap": cap]))
+        XCTAssertNil(BrightnessLuminance.panelNits(["IOMFBBrightnessLevel": "400", "BLNitsCap": cap]))
+    }
+
     @MainActor func testLevelTextShowsApproximateNitsOnlyWhenKnown() {
         let language = LocalizationManager.shared.language
         defer { LocalizationManager.shared.language = language }
@@ -100,6 +129,23 @@ private actor NitsProvider: DisplayBrightnessProvider {
     func reset() async {}
 }
 
+/// Built-in panel: macOS-reported luminance follows the confirmed brightness only after the write.
+private actor BuiltInNitsProvider: DisplayBrightnessProvider {
+    private var value = 1.0
+    private var nits = 400.0
+    private let table: [Double: Double] = [1: 400, 0.9375: 343.75]
+    func discover(methods: [String: BrightnessMethod]) async -> [BrightnessDisplay] {
+        [BrightnessDisplay(id: "mac", displayID: 1, name: "Built-in", bounds: CGRect(x: 0, y: 0, width: 100, height: 100),
+                           builtIn: true, value: value, method: methods["mac"] ?? .hardware, reportedNits: nits)]
+    }
+    func set(_ display: BrightnessDisplay, value: Double) async throws -> Double {
+        self.value = value; nits = table[value] ?? 0
+        return value
+    }
+    func reportedNits(_ display: BrightnessDisplay) async -> Double? { nits }
+    func reset() async {}
+}
+
 @MainActor final class BrightnessLuminanceModelTests: XCTestCase {
     private func settle(_ model: DisplayBrightnessModel) async {
         for _ in 0..<1000 {
@@ -107,6 +153,21 @@ private actor NitsProvider: DisplayBrightnessProvider {
             try? await Task.sleep(for: .milliseconds(2))
         }
         XCTFail("model did not settle")
+    }
+
+    func testBuiltInKeyPressShowsTheNitsMacOSReportsAfterTheWrite() async throws {
+        let provider = BuiltInNitsProvider(), osd = NitsOSDRecorder()
+        let model = DisplayBrightnessModel(provider: provider, osd: osd)
+        let settings = DisplayBrightnessSettings()
+        model.start { settings }
+        await model.refresh(); await settle(model)
+        XCTAssertEqual(try XCTUnwrap(model.nits(for: try XCTUnwrap(model.displays.first))), 400)
+        model.handleKey(increase: false, fine: false, at: CGPoint(x: 50, y: 50)); await settle(model)
+        let shown = try XCTUnwrap(osd.shown.last)
+        XCTAssertEqual(shown.value, 0.9375)
+        XCTAssertEqual(shown.nits, 343.75, "nits read after the write, not the stale pre-write level")
+        XCTAssertEqual(model.nits(for: try XCTUnwrap(model.displays.first)), 343.75, "panel row matches the OSD")
+        model.stop()
     }
 
     func testOSDAndPanelGetEstimatedNitsForKnownMonitorOnly() async throws {
