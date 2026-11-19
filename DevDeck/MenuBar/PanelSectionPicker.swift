@@ -2,13 +2,19 @@ import AppKit
 import SwiftUI
 
 /// AppKit keeps selection, keyboard navigation and accessibility; hover only adds a tint.
-/// Segments get explicit equal widths that fill the control: `.fillEqually` alone is not
-/// honored on every supported macOS (on 15 the segments kept their content widths).
+///
+/// Segments get explicit widths so that the actual segment areas are equal and fill the
+/// control on every supported macOS. `.fillEqually` alone is not honored everywhere (on 15
+/// the segments kept their content widths), and on 15 AppKit also adds a fixed end inset
+/// to the first segment's area, so equal explicit widths still left it 3 pt wider. The
+/// control therefore measures the real segment areas once per size and compensates.
 final class PanelSegmentedControl: NSSegmentedControl {
     private var hoverArea: NSTrackingArea?
     private var hoverPoint: NSPoint?
     /// Width the bezel and separators add on top of the segment widths, per segment count.
     private var chromeWidth: (count: Int, width: CGFloat)?
+    /// Size whose widths were already compensated against the measured segment areas.
+    private var calibrated: (count: Int, width: CGFloat)?
 
     override var segmentCount: Int {
         didSet { equalizeSegmentWidths() }
@@ -19,15 +25,21 @@ final class PanelSegmentedControl: NSSegmentedControl {
         equalizeSegmentWidths()
     }
 
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        equalizeSegmentWidths()
+    }
+
     override func layout() {
         super.layout()
         equalizeSegmentWidths()
     }
 
-    /// Gives every segment the same explicit width so that together they fill `bounds`.
+    /// Gives every segment an explicit width so that their areas are equal and fill `bounds`.
     func equalizeSegmentWidths() {
         let count = segmentCount
         guard count > 0, bounds.width > 0 else { return }
+        if calibrated?.count == count, calibrated?.width == bounds.width { return }
         if chromeWidth?.count != count {
             // Measure the fixed overhead once: intrinsic width minus known segment widths.
             let probe: CGFloat = 40
@@ -35,9 +47,36 @@ final class PanelSegmentedControl: NSSegmentedControl {
             chromeWidth = (count, max(intrinsicContentSize.width - probe * CGFloat(count), 0))
         }
         let width = max((bounds.width - (chromeWidth?.width ?? 0)) / CGFloat(count), 1)
-        for index in 0..<count where abs(self.width(forSegment: index) - width) > 0.01 {
-            setWidth(width, forSegment: index)
+        for index in 0..<count { setWidth(width, forSegment: index) }
+        // The real segment areas (the same ones AppKit hit-tests and highlights) are only
+        // known in a window; without one, keep the equal widths and calibrate later.
+        let areas = segmentAreaWidths()
+        guard window != nil, areas.count == count else { return }
+        let compensated = Self.compensatedWidths(equalWidth: width, areaWidths: areas)
+        for index in 0..<count where compensated[index] != width {
+            setWidth(compensated[index], forSegment: index)
         }
+        calibrated = (count, bounds.width)
+    }
+
+    /// Widths of the segment areas as AppKit lays them out, from their accessibility frames.
+    func segmentAreaWidths() -> [CGFloat] {
+        guard let cell = cell as? NSSegmentedCell else { return [] }
+        return (cell.accessibilityChildren() ?? []).compactMap { $0 as? any NSAccessibilityProtocol }
+            .map { $0.accessibilityFrame().width }
+    }
+
+    /// Explicit widths that make every segment area equal while keeping their total.
+    /// `areaWidths` were measured with every segment set to `equalWidth`; whole-point
+    /// differences are fixed insets AppKit adds to a segment (sub-point ones are pixel
+    /// rounding and are left alone).
+    static func compensatedWidths(equalWidth: CGFloat, areaWidths: [CGFloat]) -> [CGFloat] {
+        let insets = areaWidths.map { ($0 - equalWidth).rounded() }
+        guard let first = insets.first, insets.contains(where: { $0 != first }) else {
+            return Array(repeating: equalWidth, count: areaWidths.count)
+        }
+        let target = equalWidth + insets.reduce(0, +) / CGFloat(insets.count)
+        return insets.map { max(target - $0, 1) }
     }
 
     override func updateTrackingAreas() {
