@@ -11,15 +11,26 @@ struct DisplayBrightnessSettings: Codable, Equatable, Sendable {
     var linkSliders = false
     var linkKeys = false
     var methods: [String: BrightnessMethod] = [:]
+    /// Per-display (UUID) luminance range for the approximate nits estimate of DDC displays.
+    var luminance: [String: BrightnessLuminanceRange] = [:]
     init() {}
-    enum CodingKeys: CodingKey { case keyboardEnabled, linkSliders, linkKeys, methods }
+    enum CodingKeys: CodingKey { case keyboardEnabled, linkSliders, linkKeys, methods, luminance }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         keyboardEnabled = try c.decodeIfPresent(Bool.self, forKey: .keyboardEnabled) ?? false
         linkSliders = try c.decodeIfPresent(Bool.self, forKey: .linkSliders) ?? false
         linkKeys = try c.decodeIfPresent(Bool.self, forKey: .linkKeys) ?? false
         methods = try c.decodeIfPresent([String: BrightnessMethod].self, forKey: .methods) ?? [:]
+        luminance = try c.decodeIfPresent([String: BrightnessLuminanceRange].self, forKey: .luminance) ?? [:]
     }
+}
+
+/// Datasheet-style luminance endpoints in cd/m². A missing field falls back to the
+/// built-in default for the monitor model, if there is one.
+struct BrightnessLuminanceRange: Codable, Equatable, Sendable {
+    var minimum: Double?
+    var maximum: Double?
+    init(minimum: Double? = nil, maximum: Double? = nil) { self.minimum = minimum; self.maximum = maximum }
 }
 
 struct BrightnessDisplay: Identifiable, Equatable, Sendable {
@@ -30,6 +41,11 @@ struct BrightnessDisplay: Identifiable, Equatable, Sendable {
     let builtIn: Bool
     var value: Double?
     var method: BrightnessMethod = .hardware
+    /// VCP 0x10 maximum reported by the monitor; set only for the external DDC route.
+    var hardwareMaximum: UInt16? = nil
+    /// EDID manufacturer and product code (CGDisplayVendorNumber / CGDisplayModelNumber).
+    var edidVendor: UInt32 = 0
+    var edidProduct: UInt32 = 0
 }
 
 enum BrightnessFailure: Error { case unavailable, write, readback, unconfirmed(actual: Double) }
@@ -48,23 +64,81 @@ enum BrightnessRouting {
     }
 }
 
-/// Approximate control scale for external DDC only, not measured luminance.
+/// Control scale for external DDC only, not measured luminance. Logical 0 is the black
+/// image cover (no hardware write); the positive range p ∈ [1%, 100%] spans every hardware
+/// level raw0…rawMax: raw = round(rawMax·((p−1)/99)²), so raw0 (darkest visible) is 1%.
 enum BrightnessDDCScale {
-    private static let exponent = log(0.1) / log(0.5)
+    /// Logical value of hardware raw0, the lowest positive level.
+    static let minimumPositive = 0.01
     static func hardwareFraction(_ logical: Double) -> Double? {
         guard logical.isFinite else { return nil }
-        return pow(min(1, max(0, logical)), exponent)
+        let positive = max(0, min(1, logical) - minimumPositive) / (1 - minimumPositive)
+        return positive * positive
     }
     static func logicalFraction(_ hardware: Double) -> Double? {
         guard hardware.isFinite else { return nil }
-        return pow(min(1, max(0, hardware)), 1 / exponent)
+        return minimumPositive + (1 - minimumPositive) * min(1, max(0, hardware)).squareRoot()
+    }
+    static func logical(raw: UInt16, maximum: UInt16) -> Double? {
+        guard maximum > 0, raw <= maximum else { return nil }
+        return logicalFraction(Double(raw) / Double(maximum))
     }
     static func rawTarget(_ logical: Double, maximum: UInt16) throws -> UInt16 {
         guard maximum > 0, let hardware = hardwareFraction(logical) else { throw BrightnessFailure.write }
-        let rounded = UInt16((hardware * Double(maximum)).rounded())
-        // Zero belongs to the black-image endpoint. Positive keys must escape it,
-        // even when the curve's low end is below one physical hardware step.
-        return logical > 0 ? max(1, rounded) : 0
+        return UInt16((hardware * Double(maximum)).rounded())
+    }
+    /// Next key request from `base`: the plain logical step, unless it would land on the same
+    /// hardware level, in which case the neighbouring raw level in the step's direction.
+    /// Up from black always starts at raw0; only raw0 steps down to black.
+    static func keyTarget(from base: Double, step: Double, maximum: UInt16) -> Double {
+        let candidate = min(1, max(0, base + step))
+        guard maximum > 0, base.isFinite, step.isFinite, step != 0 else { return candidate }
+        guard base > 0 else { return step > 0 ? minimumPositive : 0 }
+        guard let from = try? rawTarget(base, maximum: maximum) else { return candidate }
+        if candidate == 0 { return from > 0 ? minimumPositive : 0 }
+        guard let to = try? rawTarget(candidate, maximum: maximum) else { return candidate }
+        if step > 0, to <= from {
+            return from < maximum ? logical(raw: from + 1, maximum: maximum) ?? candidate : candidate
+        }
+        if step < 0, to >= from {
+            return from > 0 ? logical(raw: from - 1, maximum: maximum) ?? candidate : 0
+        }
+        return candidate
+    }
+}
+
+/// Approximate nits for external DDC displays: linear in the confirmed raw level between
+/// datasheet endpoints. Never invented: without a known or user range there is no value.
+enum BrightnessLuminance {
+    /// Defaults keyed by EDID manufacturer and product code, not by the (localizable,
+    /// de-duplicated) screen name.
+    static let defaults: [UInt64: BrightnessLuminanceRange] = [
+        // DELL U2720Q: 350 cd/m² datasheet maximum, 29 cd/m² RTINGS minimum measurement.
+        key(vendor: 0x10AC, product: 0x41B5): BrightnessLuminanceRange(minimum: 29, maximum: 350),
+    ]
+    static func key(vendor: UInt32, product: UInt32) -> UInt64 { UInt64(vendor) << 32 | UInt64(product) }
+
+    static func range(for display: BrightnessDisplay, settings: DisplayBrightnessSettings) -> (minimum: Double, maximum: Double)? {
+        let fallback = defaults[key(vendor: display.edidVendor, product: display.edidProduct)]
+        let user = settings.luminance[display.id]
+        guard let minimum = user?.minimum ?? fallback?.minimum, let maximum = user?.maximum ?? fallback?.maximum,
+              minimum.isFinite, maximum.isFinite, minimum >= 0, maximum > minimum else { return nil }
+        return (minimum, maximum)
+    }
+    static func estimate(_ display: BrightnessDisplay, settings: DisplayBrightnessSettings) -> Double? {
+        guard !display.builtIn, display.method == .hardware, let maximum = display.hardwareMaximum,
+              let value = display.value, value > 0,
+              let raw = try? BrightnessDDCScale.rawTarget(value, maximum: maximum),
+              let range = range(for: display, settings: settings) else { return nil }
+        return range.minimum + (range.maximum - range.minimum) * Double(raw) / Double(maximum)
+    }
+}
+
+enum BrightnessLevelText {
+    static func text(value: Double, nits: Double?) -> String {
+        let percent = value.formatted(.percent.precision(.fractionLength(0)))
+        guard let nits, nits.isFinite else { return percent }
+        return percent + " • " + L10n.brightnessNits(Int(nits.rounded()))
     }
 }
 

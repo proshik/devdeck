@@ -168,7 +168,7 @@ import Observation
             observeOwnValue(id: id)
             errors.removeValue(forKey: id)
             if let feedback, feedback == latestFeedback, feedback.targetID == id, !Task.isCancelled {
-                osd.show(display: displays[index], value: actual)
+                osd.show(display: displays[index], value: actual, nits: nits(for: displays[index]))
             }
         } catch BrightnessFailure.unconfirmed(let actual) {
             guard epoch == generation, let index = displays.firstIndex(where: { $0.id == id }) else { return }
@@ -244,6 +244,11 @@ import Observation
         observers.removeAll()
     }
 
+    /// Approximate nits for the panel row and OSD; nil means show the percentage only.
+    func nits(for display: BrightnessDisplay) -> Double? {
+        BrightnessLuminance.estimate(display, settings: settings())
+    }
+
     func handleKey(increase: Bool, fine: Bool, at point: CGPoint) {
         // CGEvent.location and CGDisplayBounds share the upper-left coordinate space.
         guard let target = BrightnessRouting.target(at: point, displays: displays),
@@ -260,7 +265,12 @@ import Observation
             // A slider in flight is a new baseline; old key sessions are not.
             base = pendingFeedback[target.id] == nil ? (pending[target.id] ?? actual) : actual
         }
-        request(id: target.id, value: base + step, fromKeys: true)
+        // External DDC: every press must move the hardware by at least one raw level.
+        if target.method == .hardware, let maximum = target.hardwareMaximum {
+            request(id: target.id, value: BrightnessDDCScale.keyTarget(from: base, step: step, maximum: maximum), fromKeys: true)
+        } else {
+            request(id: target.id, value: base + step, fromKeys: true)
+        }
     }
 
     func updateKeyboard() {

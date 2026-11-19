@@ -20,7 +20,7 @@ struct BrightnessDisplayRow: View {
                         .accessibilityLabel(L10n.brightnessApplying)
                 }
                 if let value = display.value {
-                    Text(value, format: .percent.precision(.fractionLength(0)))
+                    Text(BrightnessLevelText.text(value: value, nits: model.nits(for: display)))
                         .monospacedDigit().foregroundStyle(.secondary)
                 }
             }
@@ -84,6 +84,9 @@ struct DisplayBrightnessSettingsView: View {
                         })) {
                             ForEach(BrightnessMethod.allCases, id: \.self) { Text($0.title).tag($0) }
                         }.controlSize(.small)
+                        if display.method == .hardware, display.hardwareMaximum != nil {
+                            BrightnessLuminanceFields(display: display)
+                        }
                     }.padding(.vertical, 6)
                 }
                 Toggle(L10n.brightnessLink, isOn: setting(\.linkSliders))
@@ -108,5 +111,33 @@ struct DisplayBrightnessSettingsView: View {
             store.updateDisplays { $0[keyPath: keyPath] = value }
             model.updateKeyboard()
         })
+    }
+}
+
+/// Per-display datasheet luminance for the ≈ nits estimate; empty fields use the model default.
+struct BrightnessLuminanceFields: View {
+    @Environment(CommandStore.self) private var store
+    let display: BrightnessDisplay
+    var body: some View {
+        let fallback = BrightnessLuminance.defaults[BrightnessLuminance.key(vendor: display.edidVendor, product: display.edidProduct)]
+        VStack(alignment: .leading, spacing: 6) {
+            field(L10n.brightnessMaxNits, \.maximum, placeholder: fallback?.maximum)
+            field(L10n.brightnessMinNits, \.minimum, placeholder: fallback?.minimum)
+            Text(L10n.brightnessNitsHelp).font(.caption).foregroundStyle(.secondary)
+        }.controlSize(.small)
+    }
+    private func field(_ title: String, _ keyPath: WritableKeyPath<BrightnessLuminanceRange, Double?>, placeholder: Double?) -> some View {
+        let id = display.id
+        return LabeledContent(title) {
+            TextField(title, value: Binding(get: { store.config.settings.displays.luminance[id]?[keyPath: keyPath] }, set: { value in
+                store.updateDisplays { settings in
+                    var range = settings.luminance[id] ?? BrightnessLuminanceRange()
+                    range[keyPath: keyPath] = value.flatMap { $0.isFinite && $0 >= 0 ? $0 : nil }
+                    settings.luminance[id] = range.minimum == nil && range.maximum == nil ? nil : range
+                }
+            }), format: .number.precision(.fractionLength(0...1)),
+            prompt: Text(placeholder.map { $0.formatted(.number.precision(.fractionLength(0...1))) } ?? "—"))
+            .labelsHidden().multilineTextAlignment(.trailing).frame(width: 90)
+        }
     }
 }

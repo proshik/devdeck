@@ -5,7 +5,7 @@ import AppKit
 @MainActor private final class OSDRecorder: BrightnessOSDPresenting {
     var shown: [(String, Double)] = []
     var visible: String?
-    func show(display: BrightnessDisplay, value: Double) { shown.append((display.id, value)); visible = display.id }
+    func show(display: BrightnessDisplay, value: Double, nits: Double?) { shown.append((display.id, value)); visible = display.id }
     func hide() { visible = nil }
 }
 
@@ -223,7 +223,7 @@ private actor OSDProvider: DisplayBrightnessProvider {
         window.isReleasedWhenClosed = false; window.makeKeyAndOrderFront(nil)
         defer { controller.hide(); window.close() }
         let key = NSApp.keyWindow, frontmost = NSWorkspace.shared.frontmostApplication?.processIdentifier
-        controller.show(display: display, value: 0.54)
+        controller.show(display: display, value: 0.54, nits: nil)
         let panel = try XCTUnwrap(controller.panel)
         XCTAssertTrue(panel.isVisible); XCTAssertTrue(panel.ignoresMouseEvents)
         XCTAssertFalse(panel.canBecomeKey); XCTAssertFalse(panel.canBecomeMain)
@@ -232,7 +232,7 @@ private actor OSDProvider: DisplayBrightnessProvider {
         XCTAssertEqual(NSApp.keyWindow, key)
         XCTAssertEqual(NSWorkspace.shared.frontmostApplication?.processIdentifier, frontmost)
         XCTAssertTrue(screen.visibleFrame.contains(panel.frame))
-        controller.show(display: display, value: 0.63)
+        controller.show(display: display, value: 0.63, nits: nil)
         XCTAssertTrue(controller.panel === panel); XCTAssertEqual(controller.content?.value, 0.63)
         controller.hide()
         XCTAssertNil(controller.panel); XCTAssertNil(controller.content); XCTAssertFalse(panel.isVisible)
@@ -253,20 +253,20 @@ private actor OSDProvider: DisplayBrightnessProvider {
         let controller = BrightnessOSDController(screen: { _ in available ? screen : nil })
         defer { controller.hide() }
         for value in [Double.nan, .infinity, -0.1, 1.1] {
-            controller.show(display: display, value: 0.5)
-            controller.show(display: display, value: value)
+            controller.show(display: display, value: 0.5, nits: nil)
+            controller.show(display: display, value: value, nits: nil)
             XCTAssertNil(controller.panel)
         }
-        controller.show(display: display, value: 0.5); available = false
-        controller.show(display: display, value: 0.6); XCTAssertNil(controller.panel)
+        controller.show(display: display, value: 0.5, nits: nil); available = false
+        controller.show(display: display, value: 0.6, nits: nil); XCTAssertNil(controller.panel)
     }
     func testLatestConfirmationRestartsHideDeadlineAndOldFadeCannotHideNewValue() async throws {
         let screen = try XCTUnwrap(NSScreen.screens.first), clock = OSDClock()
         let controller = BrightnessOSDController(screen: { _ in screen }, wait: clock.sleep)
         defer { controller.hide(); clock.finish() }
-        controller.show(display: display, value: 0.5)
+        controller.show(display: display, value: 0.5, nits: nil)
         for _ in 0..<10 { await Task.yield() }
-        controller.show(display: display, value: 0.6)
+        controller.show(display: display, value: 0.6, nits: nil)
         for _ in 0..<10 { await Task.yield() }
         XCTAssertEqual(clock.waits.map(\.0), [.seconds(1), .seconds(1)])
         clock.advance() // Old cancelled deadline.
@@ -275,7 +275,7 @@ private actor OSDProvider: DisplayBrightnessProvider {
         clock.advance() // Current deadline starts fade.
         for _ in 0..<10 { await Task.yield() }
         XCTAssertEqual(clock.waits.first?.0, .milliseconds(180))
-        controller.show(display: display, value: 0.7)
+        controller.show(display: display, value: 0.7, nits: nil)
         for _ in 0..<10 { await Task.yield() }
         clock.advance() // Old fade completion must not close current panel.
         for _ in 0..<10 { await Task.yield() }
@@ -289,7 +289,7 @@ private actor OSDProvider: DisplayBrightnessProvider {
     func testReleasingControllerCannotLeaveAnOrphanPanel() async throws {
         let screen = try XCTUnwrap(NSScreen.screens.first)
         var controller: BrightnessOSDController? = BrightnessOSDController(screen: { _ in screen })
-        controller?.show(display: display, value: 0.5)
+        controller?.show(display: display, value: 0.5, nits: nil)
         let panel = try XCTUnwrap(controller?.panel)
         weak var released = controller
         controller = nil

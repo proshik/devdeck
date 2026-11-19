@@ -3,14 +3,16 @@ import SwiftUI
 import Observation
 
 @MainActor protocol BrightnessOSDPresenting: AnyObject {
-    func show(display: BrightnessDisplay, value: Double)
+    func show(display: BrightnessDisplay, value: Double, nits: Double?)
     func hide()
 }
 
 @MainActor @Observable final class BrightnessOSDContent {
     var name: String
     var value: Double
-    init(name: String, value: Double) { self.name = name; self.value = value }
+    var nits: Double?
+    init(name: String, value: Double, nits: Double? = nil) { self.name = name; self.value = value; self.nits = nits }
+    var level: String { BrightnessLevelText.text(value: value, nits: nits) }
 }
 
 struct BrightnessOSDView: View {
@@ -20,7 +22,7 @@ struct BrightnessOSDView: View {
             HStack(spacing: 8) {
                 Text(content.name).font(.system(size: 13, weight: .semibold))
                     .lineLimit(1).truncationMode(.middle)
-                Text(content.value, format: .percent.precision(.fractionLength(0)))
+                Text(content.level)
                     .font(.system(size: 12, weight: .semibold, design: .rounded))
                     .monospacedDigit().fixedSize()
                     .foregroundStyle(Color.accentColor)
@@ -53,7 +55,7 @@ struct BrightnessOSDView: View {
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).strokeBorder(.primary.opacity(0.12), lineWidth: 0.5))
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(content.name + ", " + content.value.formatted(.percent.precision(.fractionLength(0))))
+        .accessibilityLabel(content.name + ", " + content.level)
     }
 }
 
@@ -98,14 +100,14 @@ final class BrightnessOSDPanel: NSPanel {
                       y: max(visible.minY, visible.maxY - height - 16), width: width, height: height)
     }
 
-    func show(display: BrightnessDisplay, value: Double) {
+    func show(display: BrightnessDisplay, value: Double, nits: Double?) {
         guard value.isFinite, (0...1).contains(value), let screen = screen(display) else { hide(); return }
         hideTask?.cancel(); revision += 1
         let epoch = revision
         let frame = Self.frame(in: screen.visibleFrame)
         guard frame.width > 0, frame.height > 0 else { hide(); return }
-        let content = self.content ?? BrightnessOSDContent(name: display.name, value: value)
-        content.name = display.name; content.value = value; self.content = content
+        let content = self.content ?? BrightnessOSDContent(name: display.name, value: value, nits: nits)
+        content.name = display.name; content.value = value; content.nits = nits; self.content = content
         let panel: BrightnessOSDPanel
         if let existing = self.panel { panel = existing }
         else {

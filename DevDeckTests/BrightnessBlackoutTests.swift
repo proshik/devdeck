@@ -31,7 +31,7 @@ private actor ZeroProvider: DisplayBrightnessProvider {
 @MainActor private final class ZeroOSD: BrightnessOSDPresenting {
     var shown: [Double] = []
     var visible = false
-    func show(display: BrightnessDisplay, value: Double) { shown.append(value); visible = true }
+    func show(display: BrightnessDisplay, value: Double, nits: Double?) { shown.append(value); visible = true }
     func hide() { visible = false }
 }
 
@@ -159,7 +159,7 @@ private actor ZeroProvider: DisplayBrightnessProvider {
         XCTAssertEqual(NSWorkspace.shared.frontmostApplication?.processIdentifier, front)
         let screen = try XCTUnwrap(NSScreen.screens.first)
         let osd = BrightnessOSDController(screen: { _ in screen }); defer { osd.hide() }
-        osd.show(display: display, value: 0)
+        osd.show(display: display, value: 0, nits: nil)
         XCTAssertGreaterThan(try XCTUnwrap(osd.panel).level.rawValue, panel.level.rawValue)
         var observed = display; observed.value = 0.6
         XCTAssertEqual(blackout.reconcile([observed]).first?.value, 0)

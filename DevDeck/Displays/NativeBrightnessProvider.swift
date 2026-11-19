@@ -25,7 +25,8 @@ actor NativeBrightnessProvider: DisplayBrightnessProvider {
             guard let uuid = CGDisplayCreateUUIDFromDisplayID(displayID)?.takeRetainedValue() else { return nil }
             let id = CFUUIDCreateString(nil, uuid) as String
             return BrightnessDisplay(id: id, displayID: displayID, name: screen.localizedName,
-                                     bounds: CGDisplayBounds(displayID), builtIn: CGDisplayIsBuiltin(displayID) != 0, value: nil)
+                                     bounds: CGDisplayBounds(displayID), builtIn: CGDisplayIsBuiltin(displayID) != 0, value: nil,
+                                     edidVendor: CGDisplayVendorNumber(displayID), edidProduct: CGDisplayModelNumber(displayID))
         } }
         let connections = DDCBrightnessConnection.discover()
         // Refuse a transport if multiple active screens claim the same registry location.
@@ -46,7 +47,8 @@ actor NativeBrightnessProvider: DisplayBrightnessProvider {
                 screen.value = value; routes[screen.id] = .apple
             } else if !screen.builtIn, let connection = ddc[screen.id],
                       let reading = connection.read() {
-                screen.value = BrightnessDDCScale.logicalFraction(Double(reading.current) / Double(reading.maximum))
+                screen.value = BrightnessDDCScale.logical(raw: reading.current, maximum: reading.maximum)
+                screen.hardwareMaximum = reading.maximum
                 routes[screen.id] = .ddc(connection)
             }
             result.append(screen)
@@ -167,8 +169,8 @@ enum BrightnessDDCWriteTransaction {
             guard let logical = BrightnessDDCScale.logicalFraction(observed) else { throw BrightnessFailure.readback }
             throw BrightnessFailure.unconfirmed(actual: logical)
         }
+        // raw0 is a visible positive level; black is the image cover and never reaches here.
         guard let logical = BrightnessDDCScale.logicalFraction(hardware) else { throw BrightnessFailure.readback }
-        guard target == 0 || reading.current > 0 else { throw BrightnessFailure.unconfirmed(actual: logical) }
         return logical
     }
     static func write(_ value: UInt16, send: ([UInt8]) -> Int32,
