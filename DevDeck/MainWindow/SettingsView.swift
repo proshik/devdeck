@@ -36,6 +36,13 @@ struct SettingsView: View {
                     Label(startupError, systemImage: "exclamationmark.triangle").foregroundStyle(.red)
                 }
             }
+            Section(L10n.automationSection) {
+                Toggle(L10n.automationToggle, isOn: Binding(
+                    get: { store.config.settings.automationEnabled },
+                    set: { store.setAutomationEnabled($0) }
+                ))
+                Text(L10n.automationHelp).font(.caption).foregroundStyle(.secondary)
+            }
             Section(L10n.deckPanel) {
                 Button(L10n.deckPanelSettings) { appModel.selection = .panel }
             }

@@ -30,6 +30,7 @@ struct ChainEditorView: View {
                         Text(L10n.terminalTab).tag(TerminalLaunchMode.tab.rawValue)
                     }
                 }
+                Toggle(L10n.allowFromShortcutsToggle, isOn: $draft.allowAutomation)
             }
 
             Section(L10n.stepsSection) {

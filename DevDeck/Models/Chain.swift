@@ -12,23 +12,27 @@ struct Chain: Codable, Identifiable, Hashable {
     var stopOnError: Bool
     /// Run the entire chain as a single script in one Ghostty tab (live output view).
     var openInTerminal: Bool
+    /// May be run, stopped and read from Shortcuts. The grant covers the chain's steps.
+    var allowAutomation: Bool
 
     init(
         id: UUID = UUID(),
         name: String,
         commandIDs: [UUID] = [],
         stopOnError: Bool = true,
-        openInTerminal: Bool = false
+        openInTerminal: Bool = false,
+        allowAutomation: Bool = false
     ) {
         self.id = id
         self.name = name
         self.commandIDs = commandIDs
         self.stopOnError = stopOnError
         self.openInTerminal = openInTerminal
+        self.allowAutomation = allowAutomation
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, name, commandIDs, stopOnError, openInTerminal
+        case id, name, commandIDs, stopOnError, openInTerminal, allowAutomation
     }
 
     init(from decoder: Decoder) throws {
@@ -38,5 +42,6 @@ struct Chain: Codable, Identifiable, Hashable {
         commandIDs = try c.decodeIfPresent([UUID].self, forKey: .commandIDs) ?? []
         stopOnError = try c.decodeIfPresent(Bool.self, forKey: .stopOnError) ?? true
         openInTerminal = try c.decodeIfPresent(Bool.self, forKey: .openInTerminal) ?? false
+        allowAutomation = try c.decodeIfPresent(Bool.self, forKey: .allowAutomation) ?? false
     }
 }

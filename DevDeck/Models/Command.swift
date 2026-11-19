@@ -37,6 +37,9 @@ struct Command: Codable, Identifiable, Hashable {
     /// same directory instead of waiting for Enter and closing. For tools you re-run by hand, or
     /// when you want to poke around where the command ran.
     var keepTerminalOpen: Bool
+    /// May be run, stopped and read from Shortcuts (App Intents). Off by default: a command is
+    /// reachable from outside only when the user opts it in and turns automation on in Settings.
+    var allowAutomation: Bool
 
     init(
         id: UUID = UUID(),
@@ -52,7 +55,8 @@ struct Command: Codable, Identifiable, Hashable {
         port: Int? = nil,
         routeThroughProxy: Bool = false,
         promptForDirectory: Bool = false,
-        keepTerminalOpen: Bool = false
+        keepTerminalOpen: Bool = false,
+        allowAutomation: Bool = false
     ) {
         self.id = id
         self.name = name
@@ -68,11 +72,12 @@ struct Command: Codable, Identifiable, Hashable {
         self.routeThroughProxy = routeThroughProxy
         self.promptForDirectory = promptForDirectory
         self.keepTerminalOpen = keepTerminalOpen
+        self.allowAutomation = allowAutomation
     }
 
     enum CodingKeys: String, CodingKey {
         case id, name, command, workingDirectory, isDaemon, needsSudo, env, appsToQuit, openInTerminal,
-             watchdogEnabled, port, routeThroughProxy, promptForDirectory, keepTerminalOpen
+             watchdogEnabled, port, routeThroughProxy, promptForDirectory, keepTerminalOpen, allowAutomation
     }
 
     init(from decoder: Decoder) throws {
@@ -91,6 +96,7 @@ struct Command: Codable, Identifiable, Hashable {
         routeThroughProxy = try c.decodeIfPresent(Bool.self, forKey: .routeThroughProxy) ?? false
         promptForDirectory = try c.decodeIfPresent(Bool.self, forKey: .promptForDirectory) ?? false
         keepTerminalOpen = try c.decodeIfPresent(Bool.self, forKey: .keepTerminalOpen) ?? false
+        allowAutomation = try c.decodeIfPresent(Bool.self, forKey: .allowAutomation) ?? false
     }
 
     /// A copy bound to a directory chosen at launch time. `nil`/empty returns an unchanged copy so

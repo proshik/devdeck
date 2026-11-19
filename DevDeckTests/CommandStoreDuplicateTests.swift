@@ -28,7 +28,7 @@ final class CommandStoreDuplicateTests: XCTestCase {
                                workingDirectory: "/tmp", isDaemon: true, needsSudo: true,
                                env: ["A": "1"], appsToQuit: [], openInTerminal: true,
                                watchdogEnabled: true, port: 5432, routeThroughProxy: true,
-                               promptForDirectory: true, keepTerminalOpen: true)
+                               promptForDirectory: true, keepTerminalOpen: true, allowAutomation: true)
         store.upsert(original)
 
         let copyID = try XCTUnwrap(store.duplicate(commandID: original.id))

@@ -123,6 +123,10 @@ final class ProcessManager {
     @ObservationIgnored private var adoptedPollTask: Task<Void, Never>?
     /// Token of the current proactive port pre-check — a rapid re-run preempts the older check.
     @ObservationIgnored private var portPrecheckTokens: [UUID: UUID] = [:]
+    /// Bumped at the top of every `startRun`, rejected launches included. A caller that issued
+    /// `run(_:)` compares it with the value it saw before, to tell its own run's state from a
+    /// previous run's leftover — a launch after `appsToQuit` or the port pre-check is deferred.
+    @ObservationIgnored private(set) var launchCounts: [UUID: Int] = [:]
 
     // MARK: VM sampler
     @ObservationIgnored private let vmProbe: any VMMemoryProbing
@@ -290,6 +294,7 @@ final class ProcessManager {
     /// or nil if the launch is rejected (sudo daemon).
     @discardableResult
     private func startRun(_ command: Command, isWatchdogRestart: Bool = false) -> UUID? {
+        launchCounts[command.id, default: 0] += 1
         // Hard rule: a sudo daemon is impossible (no stream/pid/stop).
         guard !(command.needsSudo && command.isDaemon) else {
             logs[command.id] = RingBuffer(capacity: maxLogLines)

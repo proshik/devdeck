@@ -72,6 +72,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             proxyManager?.ingestDaemonOutput(commandID, line, stream)
         }
         if !AppRuntime.isIsolated { proxyManager.start() }
+        // Shortcuts actions (App Intents) reach saved commands and chains through this service.
+        // It reads the config live, so the settings switch and the per-item flags apply at once.
+        AutomationHost.service = AutomationService(manager: manager,
+                                                   config: { [weak store] in store?.config ?? .empty })
         // Start Sparkle with the persisted auto-update preference; populates the indicator when off.
         if !AppRuntime.isIsolated {
             updateController.configure(autoUpdateEnabled: store.config.settings.autoUpdateEnabled)

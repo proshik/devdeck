@@ -59,6 +59,8 @@ struct Settings: Codable, Equatable {
     var activeRemoteProxyID: UUID?
     /// The container engine to watch; `auto` detects it. A hand-edited unknown value reads as `auto`.
     var containerEngine: EnginePreference
+    /// Accept requests from Shortcuts (App Intents) for commands and chains that allow it. Off by default.
+    var automationEnabled: Bool
 
     init(vmMemoryMonitoring: Bool = true, minikubeMemoryMonitoring: Bool = true,
          hostMemoryMonitoring: Bool = true, globalHotkeyEnabled: Bool = false,
@@ -68,7 +70,8 @@ struct Settings: Codable, Equatable {
          activeProxyHost: String? = nil, activeProxyPort: Int? = nil,
          activeProxyAuthRequired: Bool = false, activeProxyLANPrefix: String? = nil,
          activeRemoteProxyID: UUID? = nil, claudeTabsRestore: Bool = false,
-         claudeTabsCaptureSeconds: Int = 15, batteryMonitoring: Bool = true, containerEngine: EnginePreference = .auto) {
+         claudeTabsCaptureSeconds: Int = 15, batteryMonitoring: Bool = true, containerEngine: EnginePreference = .auto,
+         automationEnabled: Bool = false) {
         self.vmMemoryMonitoring = vmMemoryMonitoring
         self.minikubeMemoryMonitoring = minikubeMemoryMonitoring
         self.hostMemoryMonitoring = hostMemoryMonitoring
@@ -88,6 +91,7 @@ struct Settings: Codable, Equatable {
         self.claudeTabsRestore = claudeTabsRestore
         self.claudeTabsCaptureSeconds = claudeTabsCaptureSeconds
         self.containerEngine = containerEngine
+        self.automationEnabled = automationEnabled
     }
 
     enum CodingKeys: String, CodingKey {
@@ -96,7 +100,7 @@ struct Settings: Codable, Equatable {
              clusterHealthMonitoring, autoUpdateEnabled, proxyShareEnabled, proxyDiscoveryEnabled,
              activeProxyName, activeProxyUsername, activeProxyHost, activeProxyPort,
              activeProxyAuthRequired, activeProxyLANPrefix, activeRemoteProxyID, claudeTabsRestore,
-             claudeTabsCaptureSeconds, batteryMonitoring, containerEngine
+             claudeTabsCaptureSeconds, batteryMonitoring, containerEngine, automationEnabled
     }
 
     init(from decoder: Decoder) throws {
@@ -124,6 +128,7 @@ struct Settings: Codable, Equatable {
         claudeTabsCaptureSeconds = try c.decodeIfPresent(Int.self, forKey: .claudeTabsCaptureSeconds) ?? 15
         // `try?`: an unknown string (a future engine, a typo) must not fail the whole config.
         containerEngine = (try? c.decodeIfPresent(EnginePreference.self, forKey: .containerEngine)) ?? .auto
+        automationEnabled = try c.decodeIfPresent(Bool.self, forKey: .automationEnabled) ?? false
     }
 }
 
@@ -181,4 +186,10 @@ struct Config: Codable, Equatable {
     /// Older files still load unchanged: every new key decodes to its default.
     static let currentSchemaVersion = 2
     static let empty = Config()
+
+    /// Commands by id — for running chains (`ProcessManager.run(chain, commands:)`).
+    /// On a duplicate id (manual edit) the first command wins — don't crash the app.
+    var commandsByID: [UUID: Command] {
+        Dictionary(commands.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+    }
 }

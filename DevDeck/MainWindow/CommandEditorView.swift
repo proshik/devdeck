@@ -93,6 +93,7 @@ struct CommandEditorView: View {
                             .foregroundStyle(.secondary)
                     }
                 }
+                Toggle(L10n.allowFromShortcutsToggle, isOn: $draft.allowAutomation)
                 if draft.command.contains("cargo") || draft.command.contains("dev-build") {
                     let cfg = effectiveVMConfig(manager.vmBuildConfig)
                     let advice = adviseJobs(command: draft.command, env: assembledDraft.env,

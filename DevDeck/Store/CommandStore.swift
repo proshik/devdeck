@@ -27,10 +27,7 @@ final class CommandStore {
     }
 
     /// Commands by id — for running chains (`ProcessManager.run(chain, commands:)`).
-    /// On a duplicate id (manual edit) the first command wins — don't crash the app.
-    var commandsByID: [UUID: Command] {
-        Dictionary(config.commands.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-    }
+    var commandsByID: [UUID: Command] { config.commandsByID }
 
     /// `~/Library/Application Support/DevDeck/config.json`.
     nonisolated static var defaultConfigURL: URL {
@@ -201,6 +198,14 @@ final class CommandStore {
               config.commands[index].watchdogEnabled != enabled else { return }
         var updated = config
         updated.commands[index].watchdogEnabled = enabled
+        persist(updated)
+    }
+
+    /// Toggle the Shortcuts automation master switch and save atomically.
+    func setAutomationEnabled(_ on: Bool) {
+        guard config.settings.automationEnabled != on else { return }
+        var updated = config
+        updated.settings.automationEnabled = on
         persist(updated)
     }
 
