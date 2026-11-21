@@ -40,16 +40,20 @@ struct FormActionRow<Leading: View, Actions: View>: View {
     }
 }
 
-/// A row that opens another page of this window.
+/// A row that opens another page of this window, with an optional leading icon and a secondary
+/// value before the chevron.
 struct FormNavigationRow: View {
     let title: String
+    var icon: String?
+    var value: String?
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
             HStack {
-                Text(title)
+                if let icon { Label(title, systemImage: icon) } else { Text(title) }
                 Spacer()
+                if let value { Text(value).monospacedDigit().foregroundStyle(.secondary) }
                 Image(systemName: "chevron.right").foregroundStyle(.tertiary)
             }
             .contentShape(Rectangle())

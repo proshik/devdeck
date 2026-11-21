@@ -574,7 +574,7 @@ final class ClaudeTabsModel {
     ///
     /// `RestoreAction.newTab` carries only a directory, a session id and a provider — no title, no
     /// activity timestamp — so this is the shape a caller with just those three actually has. The
-    /// `AgentSession` overload below exists for callers (the history table) that already hold a
+    /// `AgentSession` overload below exists for callers (the history list) that already hold a
     /// real session with real values; a caller with no `lastActivity` of its own (the open-tabs
     /// row, which only ever fabricated `Date()` to satisfy the old `AgentSession`-only signature)
     /// should call this one instead of inventing one.
@@ -586,7 +586,7 @@ final class ClaudeTabsModel {
         }
     }
 
-    /// Convenience for a caller that already holds a full `AgentSession` (the history table) —
+    /// Convenience for a caller that already holds a full `AgentSession` (the history list) —
     /// delegates to the directory/session-id/provider overload above, which is all `open` ever
     /// actually needs.
     func open(_ session: AgentSession, providerID: String) {

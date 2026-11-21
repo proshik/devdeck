@@ -31,7 +31,7 @@ struct CatalogEntry: Codable, Equatable, Sendable {
 
 extension CatalogEntry: Identifiable {
     /// (provider, sessionID) together — the same compound key `merge` keys entries by, so two
-    /// providers reusing the same raw session id never collide as one row in the history table.
+    /// providers reusing the same raw session id never collide as one row in the history list.
     var id: String { "\(provider)-\(sessionID)" }
 }
 
@@ -174,7 +174,7 @@ extension SessionCatalog {
     /// What the history section of `ClaudeTabsView` actually lists: the catalogue, freshest
     /// activity first, with every entry whose session is already an open tab removed — matched on
     /// `sessionID` alone, per the plan's decision #5, since a session open right now is already
-    /// visible in the table above it and repeating it below would just be noise.
+    /// visible in the open-tabs list above it and repeating it below would just be noise.
     ///
     /// Pure so the exclusion is testable on its own, without a model, a snapshot, or a fake
     /// provider anywhere in sight.

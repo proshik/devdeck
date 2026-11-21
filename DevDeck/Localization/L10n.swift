@@ -32,6 +32,7 @@ enum L10n {
     }
     static var quitButton: String { t("Quit", "Выйти") }
     static var cancel: String { t("Cancel", "Отмена") }
+    static var done: String { t("Done", "Готово") }
 
     // MARK: - Closed-lid keep-awake
 
@@ -863,16 +864,12 @@ enum L10n {
         t("What DevDeck would reopen in Ghostty after a restart. A tab whose agent session could not be identified still comes back — as a shell in its directory.",
           "Что DevDeck вернёт в Ghostty после перезагрузки. Вкладка, чью сессию агента опознать не удалось, всё равно вернётся — шеллом в своём каталоге.")
     }
-    static func claudeTabsCapturedAt(_ when: String) -> String {
-        t("Snapshot taken \(when)", "Снимок снят \(when)")
-    }
-    static var claudeTabsColumnTitle: String { t("Tab", "Вкладка") }
-    static var claudeTabsColumnDirectory: String { t("Directory", "Каталог") }
-    static var claudeTabsColumnAgent: String { t("Agent", "Агент") }
-    static var claudeTabsColumnSession: String { t("Session", "Сессия") }
+    static var claudeTabsRestoreSection: String { t("Restore", "Восстановление") }
+    static var claudeTabsOpenSection: String { t("Open tabs", "Открытые вкладки") }
+    static var claudeTabsSnapshotTaken: String { t("Snapshot taken", "Снимок снят") }
     /// Display name for a `ClaudeTabEntry.provider` id. Falls back to the raw id for one this
     /// build does not know — a future provider id in an old snapshot must still show something,
-    /// not crash the table.
+    /// not crash the page.
     static func claudeTabsAgentName(_ providerID: String) -> String {
         switch providerID {
         case AgentProviderID.claude: return t("Claude", "Claude")
@@ -920,7 +917,7 @@ enum L10n {
         t("Replace", "Заменить")
     }
 
-    /// The action on every row of both the open-tabs table and the history list below it — opening
+    /// The action on every row of both the open-tabs list and the history list below it — opening
     /// one entry as a brand-new Ghostty tab. One label for both, since it is the same action.
     static var claudeTabsOpen: String { t("Open", "Открыть") }
 
@@ -933,7 +930,6 @@ enum L10n {
     static var claudeTabsHistorySearchPlaceholder: String {
         t("Search by title or directory", "Поиск по названию или каталогу")
     }
-    static var claudeTabsColumnLastActive: String { t("Last active", "Последняя активность") }
     /// Shown once a rebuild has run and found nothing — as opposed to `claudeTabsHistoryBuilding`,
     /// which covers the first build still in flight.
     static var claudeTabsHistoryEmpty: String {

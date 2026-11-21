@@ -14,25 +14,18 @@ enum SnapshotRowAction {
     }
 }
 
-/// Two lists: the tabs open right now (as before), and — new — the session history: everything
-/// the catalogue remembers within the window, minus whatever is already in the first list. Every
-/// row in either list can be opened on its own; there is no "restore everything" button here, only
-/// the full restore that already lives in the toolbar.
+/// Three groups on the window's grouped form: the restore switch and its page-wide actions, the
+/// tabs open right now, and the session history — everything the catalogue remembers within the
+/// window, minus whatever is already in the second group. Every row in either list can be opened
+/// on its own; there is no "restore everything" button there, only the full restore in the first
+/// group.
 ///
 /// A row without a session still restores — as a shell in its directory — and saying so plainly
 /// is what keeps that from reading as a bug.
-///
-/// Laid out like `CleanupView` and the window's other pages: the page title and its page-wide
-/// actions live in the window toolbar, one caption explaining what the page is for opens the
-/// content. The history section has a headline with its own action on the same line, rather than
-/// borrowing `CleanupView`'s `GroupBox` styling — the two sections belong to the same page and read
-/// better sharing one vocabulary than mixing two.
 struct ClaudeTabsView: View {
     @Environment(CommandStore.self) private var store
     @Environment(ClaudeTabsModel.self) private var claudeTabs
     @State private var historyQuery = ""
-    /// What the open-tabs table needs for its rows, as measured from the table itself.
-    @State private var snapshotTableHeight: CGFloat?
 
     private var entries: [ClaudeTabEntry] { claudeTabs.snapshot?.tabs ?? [] }
 
@@ -47,79 +40,61 @@ struct ClaudeTabsView: View {
     }
 
     var body: some View {
-        // No ScrollView around either `Table`: `Table` scrolls itself, and nesting the two breaks
-        // its sizing. The open-tabs table is as tall as its rows up to a cap instead, so the history
-        // table below it — usually the longer of the two — gets the rest of the page.
-        VStack(alignment: .leading, spacing: 12) {
-            header
+        Form {
+            restoreSection
+            openTabsSection
+            historySection
+        }
+        .formStyle(.grouped)
+        .navigationTitle(L10n.claudeTabsSection)
+        .task { await claudeTabs.rebuildHistory() }
+    }
+
+    private var restoreSection: some View {
+        Section {
             Toggle(L10n.claudeTabsRestoreToggle, isOn: Binding(
                 get: { store.config.settings.claudeTabsRestore },
                 set: { store.setClaudeTabsRestore($0) }
             ))
-
-            if entries.isEmpty {
-                Text(L10n.claudeTabsNoSnapshot).foregroundStyle(.secondary)
-            } else {
-                Table(entries) {
-                    TableColumn("#") { entry in
-                        Text("\(entry.order + 1)").background {
-                            if entry.id == entries.first?.id {
-                                TableContentHeightReader { snapshotTableHeight = $0 }
-                            }
-                        }
-                    }.width(24)
-                    TableColumn(L10n.claudeTabsColumnTitle) { Text($0.title) }
-                    TableColumn(L10n.claudeTabsColumnDirectory) {
-                        Text($0.workingDirectory).foregroundStyle(.secondary)
-                    }
-                    TableColumn(L10n.claudeTabsColumnAgent) { entry in
-                        Text(L10n.claudeTabsAgentName(entry.provider)).foregroundStyle(.secondary)
-                    }
-                    TableColumn(L10n.claudeTabsColumnSession) { entry in
-                        Text(entry.sessionID == nil
-                             ? L10n.claudeTabsDirectoryOnly
-                             : L10n.claudeTabsSessionFound)
-                            .foregroundStyle(entry.sessionID == nil ? .secondary : .primary)
-                    }
-                    TableColumn("") { entry in openTabButton(entry) }.width(70)
+            if let capturedAt = claudeTabs.snapshot?.capturedAt, !entries.isEmpty {
+                LabeledContent(L10n.claudeTabsSnapshotTaken) {
+                    Text(AppDateFormat.string(capturedAt, date: .abbreviated, time: .shortened))
+                        .monospacedDigit()
                 }
-                // As tall as its rows, up to a cap: a table framed taller than its content pads
-                // itself out with empty striped rows. Until the first measurement, a close guess.
-                .frame(height: min(220, snapshotTableHeight ?? CGFloat(38 + 28 * entries.count)))
             }
-
-            Divider()
-
-            historySection
-        }
-        .padding(20)
-        // Short content starts at the top of the page instead of floating in the middle.
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .navigationTitle(L10n.claudeTabsSection)
-        .toolbar {
-            ToolbarItemGroup {
+            if let error = claudeTabs.lastError {
+                Text(error)
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            FormActionRow {
                 Button(L10n.claudeTabsCaptureNow) { captureNow() }
                 Button(L10n.claudeTabsRestoreNow) { claudeTabs.restoreNow() }
                     .disabled(entries.isEmpty)
             }
+        } header: {
+            Text(L10n.claudeTabsRestoreSection)
+        } footer: {
+            FormFooter(L10n.claudeTabsIntro)
         }
-        .task { await claudeTabs.rebuildHistory() }
     }
 
-    private var header: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(L10n.claudeTabsIntro).font(.caption).foregroundStyle(.secondary)
-            if let capturedAt = claudeTabs.snapshot?.capturedAt, !entries.isEmpty {
-                Text(L10n.claudeTabsCapturedAt(AppDateFormat.string(capturedAt, date: .abbreviated, time: .shortened)))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
-            }
-            if let error = claudeTabs.lastError {
-                Text(error)
-                    .font(.caption)
-                    .foregroundStyle(.orange)
-                    .fixedSize(horizontal: false, vertical: true)
+    private var openTabsSection: some View {
+        Section(L10n.claudeTabsOpenSection) {
+            if entries.isEmpty {
+                Text(L10n.claudeTabsNoSnapshot).foregroundStyle(.secondary)
+            } else {
+                ForEach(entries) { entry in
+                    HStack(spacing: 12) {
+                        SessionRowText(title: entry.title, directory: entry.workingDirectory,
+                                       details: [L10n.claudeTabsAgentName(entry.provider)])
+                        Spacer(minLength: 8)
+                        Text(entry.sessionID == nil ? L10n.claudeTabsDirectoryOnly : L10n.claudeTabsSessionFound)
+                            .foregroundStyle(entry.sessionID == nil ? .secondary : .primary)
+                            .fixedSize()
+                        openTabButton(entry)
+                    }
+                }
             }
         }
     }
@@ -141,53 +116,47 @@ struct ClaudeTabsView: View {
                 claudeTabs.open(directory: entry.workingDirectory, sessionID: sessionID,
                                 providerID: entry.provider)
             }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
         }
     }
 
     private var historySection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text(L10n.claudeTabsHistorySection).font(.headline)
-                Spacer()
-                if claudeTabs.isBuildingHistory { ProgressView().controlSize(.small) }
-                Button(L10n.claudeTabsHistoryRefresh) { Task { await claudeTabs.rebuildHistory() } }
-                    .disabled(claudeTabs.isBuildingHistory)
+        Section {
+            HStack(spacing: 6) {
+                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                TextField(L10n.claudeTabsHistorySearchPlaceholder, text: $historyQuery,
+                          prompt: Text(L10n.claudeTabsHistorySearchPlaceholder))
+                    .textFieldStyle(.plain)
+                    .labelsHidden()
             }
-            Text(L10n.claudeTabsHistoryIntro).font(.caption).foregroundStyle(.secondary)
-            TextField(L10n.claudeTabsHistorySearchPlaceholder, text: $historyQuery)
-                .textFieldStyle(.roundedBorder)
-                .frame(maxWidth: 320)
-
             if filteredHistory.isEmpty {
-                Text(emptyHistoryMessage).font(.caption).foregroundStyle(.secondary)
+                Text(emptyHistoryMessage).foregroundStyle(.secondary)
             } else {
-                Table(filteredHistory) {
-                    TableColumn(L10n.claudeTabsColumnTitle) { Text($0.title) }
-                    TableColumn(L10n.claudeTabsColumnDirectory) {
-                        Text($0.directory).foregroundStyle(.secondary)
-                    }
-                    TableColumn(L10n.claudeTabsColumnAgent) { entry in
-                        Text(L10n.claudeTabsAgentName(entry.provider)).foregroundStyle(.secondary)
-                    }
-                    TableColumn(L10n.claudeTabsColumnLastActive) { entry in
-                        Text(AppDateFormat.string(entry.lastActivity, date: .abbreviated, time: .shortened))
-                            .foregroundStyle(.secondary)
-                            .monospacedDigit()
-                    }
-                    TableColumn("") { entry in
+                ForEach(filteredHistory) { entry in
+                    HStack(spacing: 12) {
+                        SessionRowText(title: entry.title, directory: entry.directory,
+                                       details: [L10n.claudeTabsAgentName(entry.provider),
+                                                 AppDateFormat.string(entry.lastActivity, date: .abbreviated,
+                                                                      time: .shortened)])
+                        Spacer(minLength: 8)
                         Button(L10n.claudeTabsOpen) {
                             claudeTabs.open(AgentSession(id: entry.sessionID, title: entry.title,
                                                          lastActivity: entry.lastActivity,
                                                          directory: entry.directory),
                                             providerID: entry.provider)
                         }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-                    }.width(70)
+                    }
                 }
             }
+        } header: {
+            HStack {
+                Text(L10n.claudeTabsHistorySection)
+                Spacer()
+                if claudeTabs.isBuildingHistory { ProgressView().controlSize(.small) }
+                Button(L10n.claudeTabsHistoryRefresh) { Task { await claudeTabs.rebuildHistory() } }
+                    .disabled(claudeTabs.isBuildingHistory)
+            }
+        } footer: {
+            FormFooter(L10n.claudeTabsHistoryIntro)
         }
     }
 
@@ -217,5 +186,26 @@ struct ClaudeTabsView: View {
         alert.addButton(withTitle: L10n.claudeTabsOverwriteConfirmButton)
         guard alert.runModal() == .alertSecondButtonReturn else { return }
         claudeTabs.captureNow()
+    }
+}
+
+/// A tab or session row: the title, and under it "directory · details" in a caption. A long
+/// directory is cut in the middle so both its root and its last component stay readable, and the
+/// details after it stay whole; the full strings are in the tooltip.
+private struct SessionRowText: View {
+    let title: String
+    let directory: String
+    let details: [String]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title).lineLimit(1).truncationMode(.tail).help(title)
+            HStack(spacing: 0) {
+                Text(directory).lineLimit(1).truncationMode(.middle)
+                Text(details.map { " · " + $0 }.joined()).lineLimit(1).fixedSize()
+            }
+            .font(.caption).foregroundStyle(.secondary)
+            .help(([directory] + details).joined(separator: " · "))
+        }
     }
 }

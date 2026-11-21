@@ -127,44 +127,40 @@ struct MainWindowView: View {
 
     private var commandWorkspace: some View {
         HSplitView {
-            VStack(spacing: 0) {
-                List(selection: commandSelection) {
-                    if store.config.commands.isEmpty && store.config.chains.isEmpty {
-                        Text(L10n.noCommandsYet).foregroundStyle(.secondary)
-                    }
-                    if !commands.isEmpty {
-                        Section(L10n.commands) {
-                            ForEach(commands) { sidebarRow($0, icon: "terminal") }
-                                .onMove { store.moveCommands($0, to: $1, daemons: false) }
-                        }
-                    }
-                    if !daemons.isEmpty {
-                        Section(L10n.daemons) {
-                            ForEach(daemons) { sidebarRow($0, icon: "infinity") }
-                                .onMove { store.moveCommands($0, to: $1, daemons: true) }
-                        }
-                    }
-                    if !store.config.chains.isEmpty {
-                        Section(L10n.chains) {
-                            ForEach(store.config.chains) { chain in
-                                Label(chain.name.isEmpty ? L10n.untitled : chain.name, systemImage: "link")
-                                    .tag(MainSelection.chain(chain.id))
-                                    .contextMenu {
-                                        Button(L10n.duplicate) { duplicateChain(chain.id) }
-                                    }
-                            }.onMove { store.moveChains($0, to: $1) }
-                        }
+            List(selection: commandSelection) {
+                if !commands.isEmpty {
+                    Section(L10n.commands) {
+                        ForEach(commands) { sidebarRow($0, icon: "terminal") }
+                            .onMove { store.moveCommands($0, to: $1, daemons: false) }
                     }
                 }
-                Divider()
-                Menu {
-                    Button(L10n.newCommand) { addCommand() }
-                    Button(L10n.newDaemon) { addCommand(daemon: true) }
-                    Button(L10n.newChain) { addChain() }
-                } label: { Label(L10n.deckAdd, systemImage: "plus") }
-                    .fixedSize().padding(12).frame(maxWidth: .infinity, alignment: .leading)
-                    .background(.bar)
-            }.frame(minWidth: 190, idealWidth: 230, maxWidth: 300)
+                if !daemons.isEmpty {
+                    Section(L10n.daemons) {
+                        ForEach(daemons) { sidebarRow($0, icon: "infinity") }
+                            .onMove { store.moveCommands($0, to: $1, daemons: true) }
+                    }
+                }
+                if !store.config.chains.isEmpty {
+                    Section(L10n.chains) {
+                        ForEach(store.config.chains) { chain in
+                            Label(chain.name.isEmpty ? L10n.untitled : chain.name, systemImage: "link")
+                                .tag(MainSelection.chain(chain.id))
+                                .contextMenu {
+                                    Button(L10n.duplicate) { duplicateChain(chain.id) }
+                                }
+                        }.onMove { store.moveChains($0, to: $1) }
+                    }
+                }
+            }
+            // The same look as the window's sidebar next to it; adding lives in its "+" menu.
+            .listStyle(.sidebar)
+            .overlay {
+                if store.config.commands.isEmpty && store.config.chains.isEmpty {
+                    // No icon of its own: the placeholder beside it already carries one.
+                    ContentUnavailableView {} description: { Text(L10n.noCommandsYet) }
+                }
+            }
+            .frame(minWidth: 190, idealWidth: 230, maxWidth: 300)
             commandDetail.frame(minWidth: 350, maxWidth: .infinity, maxHeight: .infinity)
         }.navigationTitle(L10n.deckCommands)
     }
@@ -184,9 +180,12 @@ struct MainWindowView: View {
     }
 
     private var placeholder: some View {
-        Text(L10n.selectPlaceholder)
-            .foregroundStyle(.secondary)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // A sentence, not a title: it reads as a hint under the icon rather than a headline.
+        ContentUnavailableView {
+            Image(systemName: "terminal")
+        } description: {
+            Text(L10n.selectPlaceholder)
+        }
     }
 
     private var commands: [Command] { store.config.commands.filter { !$0.isDaemon } }
@@ -206,23 +205,22 @@ struct MainWindowView: View {
 
     private var portForwards: some View {
         let ports = store.config.commands.filter { $0.port != nil }
-        return List {
-            ForEach(ports) { command in
-                Button {
-                    appModel.selection = .command(command.id)
-                } label: {
-                    HStack {
-                        Label(command.name, systemImage: "arrow.left.arrow.right")
-                        Spacer()
-                        if let port = command.port { Text(String(port)).monospacedDigit().foregroundStyle(.secondary) }
-                        Image(systemName: "chevron.right").foregroundStyle(.tertiary)
-                    }
-                }.buttonStyle(.plain).controlHoverFeedback()
-            }
-        }
-        .overlay {
+        return Group {
             if ports.isEmpty {
                 ContentUnavailableView(L10n.deckNoPortForwards, systemImage: "arrow.left.arrow.right")
+            } else {
+                Form {
+                    Section {
+                        ForEach(ports) { command in
+                            FormNavigationRow(title: command.name.isEmpty ? L10n.untitled : command.name,
+                                              icon: "arrow.left.arrow.right",
+                                              value: command.port.map { String($0) }) {
+                                appModel.selection = .command(command.id)
+                            }
+                        }
+                    }
+                }
+                .formStyle(.grouped)
             }
         }
         .navigationTitle(L10n.deckPorts)
@@ -259,40 +257,60 @@ struct MainWindowView: View {
     }
 }
 
-/// Command detail: "Command" (editor) and "Logs" tabs.
+/// Command detail: "Command" (editor) and "Logs", switched in the window toolbar.
 struct CommandDetailView: View {
     let command: Command
-    @Environment(AppModel.self) private var appModel
 
     var body: some View {
-        @Bindable var appModel = appModel
-        TabView(selection: $appModel.detailTab) {
+        EditorWithLog(editorTitle: L10n.commandTab, logID: command.id) {
             CommandEditorView(command: command)
-                .tabItem { Label(L10n.commandTab, systemImage: "slider.horizontal.3") }
-                .tag(DetailTab.editor)
-            LogView(id: command.id)
-                .tabItem { Label(L10n.logs, systemImage: "list.bullet.rectangle") }
-                .tag(DetailTab.logs)
         }
-        .padding()
     }
 }
 
-/// Chain detail: "Chain" (editor) and "Logs" tabs.
+/// Chain detail: "Chain" (editor) and "Logs", switched in the window toolbar.
 struct ChainDetailView: View {
     let chain: Chain
+
+    var body: some View {
+        EditorWithLog(editorTitle: L10n.chainTab, logID: chain.id) {
+            ChainEditorView(chain: chain)
+        }
+    }
+}
+
+/// An editor and its run log on one page, switched by a segmented control in the window toolbar
+/// through `AppModel.detailTab` — which adding, duplicating and the popover's "Logs" link also set.
+/// The editor stays mounted, only hidden, while the log is shown: its unsaved draft lives in the
+/// editor's own state, and switching to the log must not throw it away. The editor shows its own
+/// toolbar actions only while it is the visible tab.
+private struct EditorWithLog<Editor: View>: View {
+    let editorTitle: String
+    let logID: UUID
+    @ViewBuilder let editor: Editor
     @Environment(AppModel.self) private var appModel
 
     var body: some View {
         @Bindable var appModel = appModel
-        TabView(selection: $appModel.detailTab) {
-            ChainEditorView(chain: chain)
-                .tabItem { Label(L10n.chainTab, systemImage: "slider.horizontal.3") }
-                .tag(DetailTab.editor)
-            LogView(id: chain.id)
-                .tabItem { Label(L10n.logs, systemImage: "list.bullet.rectangle") }
-                .tag(DetailTab.logs)
+        let showsLog = appModel.detailTab == .logs
+        ZStack {
+            editor
+                .opacity(showsLog ? 0 : 1)
+                .disabled(showsLog)
+                .allowsHitTesting(!showsLog)
+                .accessibilityHidden(showsLog)
+            if showsLog { LogView(id: logID) }
         }
-        .padding()
+        .toolbar {
+            ToolbarItem(placement: .principal) {
+                Picker(editorTitle, selection: $appModel.detailTab) {
+                    Text(editorTitle).tag(DetailTab.editor)
+                    Text(L10n.logs).tag(DetailTab.logs)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .fixedSize()
+            }
+        }
     }
 }

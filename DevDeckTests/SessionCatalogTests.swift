@@ -466,7 +466,7 @@ final class SessionCatalogTests: XCTestCase {
     /// directory is the symlinked form of the one the catalogue recorded for the SAME session.
     /// Against the old `$0.directory == tab.workingDirectory`, this would miss and defeat both
     /// features that depend on `liveOpenSessionIDs` — the row action would reappear for a tab that
-    /// IS open, and the session would show in the snapshot table and in history simultaneously.
+    /// IS open, and the session would show in the snapshot list and in history simultaneously.
     func testLiveOpenSessionIDsMatchesThroughASymlinkedWorkingDirectory() throws {
         let (real, symlink) = try makeSymlinkedDirectories()
         let catalog = [entry(provider: AgentProviderID.claude, sessionID: "s1", title: "foo", directory: real)]

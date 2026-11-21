@@ -128,58 +128,83 @@ struct ClipboardSectionView: View {
     }
 }
 
+/// The history as master-detail filling the page; search, filters, clearing and the settings sheet
+/// live in the window toolbar, as on the window's other pages.
 struct ClipboardView: View {
     @Environment(ClipboardModel.self) private var model
     @Environment(CommandStore.self) private var store
-    @State private var page = 0
     @State private var query = ""
     @State private var kind: ClipboardContent.Kind?
     @State private var pinnedOnly = false
     @State private var selected: UUID?
     @State private var clearRequested = false
     @State private var clearAll = false
+    @State private var showsSettings = false
 
     var body: some View {
-        VStack(spacing: 0) {
-            Picker(L10n.clipboardTitle, selection: $page) {
-                Text(L10n.clipboardHistory).tag(0)
-                Text(L10n.settings).tag(1)
-            }.pickerStyle(.segmented).labelsHidden().frame(maxWidth: 350).padding(20)
-            if page == 0 { historyPage } else { settingsPage }
-        }
-        .navigationTitle(L10n.clipboardTitle)
-        .onChange(of: query) { _, _ in clearHiddenSelection() }
-        .onChange(of: kind) { _, _ in clearHiddenSelection() }
-        .onChange(of: pinnedOnly) { _, _ in clearHiddenSelection() }
-        .onChange(of: model.entries.map(\.id)) { _, _ in
-            clearHiddenSelection()
-
-        }
-        .task { await model.synchronize(store.config.settings.clipboard) }
-        .onChange(of: store.config.settings.clipboard) { _, settings in
-            Task { await model.synchronize(settings) }
-        }
-        .alert(L10n.clipboardClearTitle, isPresented: $clearRequested) {
-            Button(L10n.clipboardConfirmDelete, role: .destructive) {
-                Task { await model.clear(includingPinned: clearAll) }
+        historyPage
+            .navigationTitle(L10n.clipboardTitle)
+            .searchable(text: $query, placement: .toolbar, prompt: L10n.clipboardSearch)
+            .toolbar {
+                ToolbarItemGroup {
+                    ClipboardTypePicker(kind: $kind)
+                    Toggle(isOn: $pinnedOnly) {
+                        Label(L10n.clipboardPinnedOnly, systemImage: pinnedOnly ? "pin.fill" : "pin")
+                    }
+                    .toggleStyle(.button)
+                    .help(L10n.clipboardPinnedOnly)
+                    Menu {
+                        Button(L10n.clipboardClear) { clearAll = false; clearRequested = true }
+                            .disabled(model.entries.allSatisfy(\.isPinned))
+                        Button(L10n.clipboardClearAll, role: .destructive) { clearAll = true; clearRequested = true }
+                    } label: { Label(L10n.clipboardClearTitle, systemImage: "trash") }
+                        .disabled(model.isBusy || (model.entries.isEmpty && model.error == nil))
+                        .help(L10n.clipboardClearTitle)
+                    Button { showsSettings = true } label: { Label(L10n.settings, systemImage: "gearshape") }
+                        .help(L10n.settings)
+                }
             }
-            Button(L10n.cancel, role: .cancel) {}
-        } message: { Text(clearAll ? L10n.clipboardClearAllMessage : L10n.clipboardClearMessage) }
+            .sheet(isPresented: $showsSettings) {
+                VStack(spacing: 0) {
+                    ClipboardSettingsView()
+                    Divider()
+                    HStack {
+                        Spacer()
+                        Button(L10n.done) { showsSettings = false }.keyboardShortcut(.defaultAction)
+                    }.padding(12)
+                }
+                .frame(minWidth: 560, idealWidth: 600, minHeight: 520, idealHeight: 640)
+            }
+            .onChange(of: query) { _, _ in clearHiddenSelection() }
+            .onChange(of: kind) { _, _ in clearHiddenSelection() }
+            .onChange(of: pinnedOnly) { _, _ in clearHiddenSelection() }
+            .onChange(of: model.entries.map(\.id)) { _, _ in clearHiddenSelection() }
+            .task { await model.synchronize(store.config.settings.clipboard) }
+            .onChange(of: store.config.settings.clipboard) { _, settings in
+                Task { await model.synchronize(settings) }
+            }
+            .alert(L10n.clipboardClearTitle, isPresented: $clearRequested) {
+                Button(L10n.clipboardConfirmDelete, role: .destructive) {
+                    Task { await model.clear(includingPinned: clearAll) }
+                }
+                Button(L10n.cancel, role: .cancel) {}
+            } message: { Text(clearAll ? L10n.clipboardClearAllMessage : L10n.clipboardClearMessage) }
     }
+
+    /// Mirrors the branches of `ClipboardStatusView`, so the strip above the list is there only
+    /// when it has something to say.
+    private var showsStatus: Bool {
+        let settings = store.config.settings.clipboard
+        return !settings.enabled || model.access != .allowed || settings.paused || model.errorMessage != nil
+    }
+
     private var historyPage: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            ClipboardStatusView()
-            HStack(spacing: 12) {
-                TextField(L10n.clipboardSearch, text: $query).textFieldStyle(.roundedBorder)
-                ClipboardTypePicker(kind: $kind)
-                Toggle(L10n.clipboardPinnedOnly, isOn: $pinnedOnly).toggleStyle(.checkbox).fixedSize()
-                Menu {
-                    Button(L10n.clipboardClear) { clearAll = false; clearRequested = true }
-                        .disabled(model.entries.allSatisfy(\.isPinned))
-                    Button(L10n.clipboardClearAll, role: .destructive) { clearAll = true; clearRequested = true }
-                } label: { Image(systemName: "trash") }
-                    .disabled(model.isBusy || (model.entries.isEmpty && model.error == nil))
-                    .help(L10n.clipboardClearTitle).accessibilityLabel(L10n.clipboardClearTitle)
+        VStack(spacing: 0) {
+            if showsStatus {
+                ClipboardStatusView()
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 20).padding(.vertical, 12)
+                Divider()
             }
             HSplitView {
                 List(selection: $selected) {
@@ -229,10 +254,9 @@ struct ClipboardView: View {
                     }
                 }.padding(16).frame(minWidth: 260, maxWidth: .infinity, maxHeight: .infinity)
             }
-        }.padding(.horizontal, 20).padding(.bottom, 20)
+        }
     }
     private func clearHiddenSelection() {
         if let selected, !model.search(query, pinnedOnly: pinnedOnly, kind: kind).contains(where: { $0.id == selected }) { self.selected = nil }
     }
-    private var settingsPage: some View { ClipboardSettingsView() }
 }

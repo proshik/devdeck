@@ -153,23 +153,26 @@ struct CommandEditorView: View {
         }
         // Launching happens from the popover/list; the editor only has explicit "Delete" (with
         // confirmation) and "Save" (enabled only when there are unsaved changes).
+        // Only while the editor is the visible tab: `EditorWithLog` keeps it mounted under the log.
         .toolbar {
-            ToolbarItemGroup {
-                Button(role: .destructive) { confirmDelete = true } label: {
-                    Label(L10n.delete, systemImage: "trash")
-                        .labelStyle(.titleAndIcon)
-                        .foregroundStyle(.red)
-                }
-                .help(L10n.deleteCommandHelp)
+            if appModel.detailTab == .editor {
+                ToolbarItemGroup {
+                    Button(role: .destructive) { confirmDelete = true } label: {
+                        Label(L10n.delete, systemImage: "trash")
+                            .labelStyle(.titleAndIcon)
+                            .foregroundStyle(.red)
+                    }
+                    .help(L10n.deleteCommandHelp)
 
-                Button { save() } label: {
-                    Label(hasChanges ? L10n.save : L10n.saved, systemImage: hasChanges ? "checkmark.circle.fill" : "checkmark")
-                        .labelStyle(.titleAndIcon)
+                    Button { save() } label: {
+                        Label(hasChanges ? L10n.save : L10n.saved, systemImage: hasChanges ? "checkmark.circle.fill" : "checkmark")
+                            .labelStyle(.titleAndIcon)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(!hasChanges)
+                    .keyboardShortcut("s")
+                    .help(L10n.saveHelp)
                 }
-                .buttonStyle(.borderedProminent)
-                .disabled(!hasChanges)
-                .keyboardShortcut("s")
-                .help(L10n.saveHelp)
             }
         }
         .confirmationDialog(L10n.deleteCommandTitle(command.name), isPresented: $confirmDelete) {
