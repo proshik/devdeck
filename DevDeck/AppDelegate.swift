@@ -1,11 +1,12 @@
 import AppKit
+import ServiceManagement
 
 /// Application delegate. Owns the shared observable objects (store/manager/UI model)
 /// and the menu bar controller. Both the popover and the main window receive them — single state.
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let store = CommandStore(defaultConfigData: AppRuntime.isIsolated ? nil : AppDelegate.bundledDefaultConfig())
-    let notifier = LiveNotifier()
+    let notifier = LiveNotifier(asksOnFirstRun: !AppRuntime.isIsolated)
     let manager: ProcessManager
     let appModel = AppModel()
     let updateController = UpdateController()
@@ -22,6 +23,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let monitoring: DeckMonitoringModel
     let clipboard = ClipboardModel(paster: ClipboardPasteController())
     let brightness = DisplayBrightnessModel()
+    private(set) lazy var permissions = PermissionsModel(probe: LivePermissionProbe(), flags: { [weak store] in
+        PermissionFeatureFlags(config: store?.config ?? .empty,
+                               launchAtLogin: SMAppService.mainApp.status == .enabled)
+    })
 
     private var menuBar: MenuBarController?
     private var automationSocket: AutomationSocketServer?
@@ -39,7 +44,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard !AppRuntime.isTesting else { return }
         DiagnosticLog.shared.installCrashHandlers()
         AppearanceManager.shared.apply()   // apply the persisted Light/Dark/System choice app-wide
-        if !AppRuntime.isIsolated { notifier.requestAuthorization() }
         store.start()
         DiagnosticLog.shared.log("DevDeck launch: \(store.config.commands.count) commands, \(store.config.chains.count) chains")
         // The engine is known before the first probe asks for it; the tray timer keeps it fresh.

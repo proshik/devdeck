@@ -7,6 +7,7 @@ enum MainSelection: Hashable {
     case chain(UUID)
     case commands
     case settings
+    case permissions
     case proxy
     case cleanup
     case claudeTabs

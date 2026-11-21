@@ -4,12 +4,14 @@ import SwiftUI
 struct MainWindowView: View {
     @Environment(CommandStore.self) private var store
     @Environment(AppModel.self) private var appModel
+    @Environment(PermissionsModel.self) private var permissions
 
     var body: some View {
         NavigationSplitView {
             List(selection: sidebarSelection) {
                 Section(L10n.settings) {
                     navigationRow(L10n.deckGeneral, icon: "gearshape", selection: .settings)
+                    navigationRow(L10n.permissionsTitle, icon: "lock.shield", selection: .permissions)
                     navigationRow(L10n.deckPanel, icon: "square.grid.2x2", selection: .panel)
                     navigationRow(L10n.deckUpdates, icon: "arrow.down.circle", selection: .updates)
                 }
@@ -63,6 +65,8 @@ struct MainWindowView: View {
             commandWorkspace
         case .settings:
             SettingsView()
+        case .permissions:
+            PermissionsView(model: permissions)
         case .panel:
             PanelSettingsView()
         case .updates:

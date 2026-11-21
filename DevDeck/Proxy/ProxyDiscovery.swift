@@ -126,6 +126,10 @@ final class LiveProxyDiscovery: ProxyDiscovering, @unchecked Sendable {
                     continuation.finish()
                 case .ready:
                     DiagnosticLog.shared.log("Proxy discovery browsing \(proxyBonjourServiceType)")
+                    MainActor.assumeIsolated { LocalNetworkAccess.shared.browserBecameReady() }
+                case .waiting(let error):
+                    let denied = Self.isPolicyDenied(error)
+                    MainActor.assumeIsolated { LocalNetworkAccess.shared.browserWaiting(policyDenied: denied) }
                 default:
                     break
                 }
@@ -145,6 +149,12 @@ final class LiveProxyDiscovery: ProxyDiscovering, @unchecked Sendable {
         browser = nil
         lock.unlock()
         current?.cancel()
+    }
+
+    /// `kDNSServiceErr_PolicyDenied`: the user (or policy) refused local network access.
+    static func isPolicyDenied(_ error: NWError) -> Bool {
+        if case .dns(let code) = error { return code == DNSServiceErrorType(kDNSServiceErr_PolicyDenied) }
+        return false
     }
 
     /// Map a browse result set to proxies, dropping anything without a parseable TXT endpoint.

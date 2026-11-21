@@ -163,6 +163,7 @@ final class PanelLayoutTests: XCTestCase {
             .environment(ClaudeTabsModel(defaults: AppRuntime.preferences))
             .environment(AwakeModel(manager: manager, hasJournal: { false }))
             .environment(ClipboardModel()).environment(DisplayBrightnessModel())
+            .environment(PermissionsModel(probe: FakePermissionProbe(), flags: { .init() }))
             .environment(CleanupModel(manager: manager, probe: FakeDockerUsageProbe([:])))
             .environment(DeckMonitoringModel(network: NetworkMonitoringModel(probe: EmptyNetworkProbe(), routes: StaticNetworkRouteProbe()), interval: .milliseconds(20), refresh: {}, refreshHeavy: {}))
             .defaultAppStorage(AppRuntime.preferences)
@@ -173,7 +174,7 @@ final class PanelLayoutTests: XCTestCase {
         mainWindow.setFrameOrigin(NSPoint(x: -2500, y: -2500))
         mainWindow.orderFront(nil)
         defer { mainWindow.close() }
-        for selection in [MainSelection.settings, .commands, .panel, .updates, .monitoring, .containers, .energy, .awake, .clipboard, .displays, .ports, .proxy, .claudeTabs, .cleanup] {
+        for selection in [MainSelection.settings, .permissions, .commands, .panel, .updates, .monitoring, .containers, .energy, .awake, .clipboard, .displays, .ports, .proxy, .claudeTabs, .cleanup] {
             appModel.selection = selection
             mainWindow.setContentSize(NSSize(width: mainHosting.view.fittingSize.width, height: 580))
             try await Task.sleep(for: .milliseconds(100))

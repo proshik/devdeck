@@ -7,10 +7,17 @@ import UserNotifications
 @MainActor
 final class LiveNotifier: Notifier {
     private var authorizationRequested = false
+    /// Off for isolated development launches, which never prompt on their own.
+    private let asksOnFirstRun: Bool
 
-    nonisolated init() {}
+    nonisolated init(asksOnFirstRun: Bool = true) { self.asksOnFirstRun = asksOnFirstRun }
 
-    /// Request permission once (from `AppDelegate` at startup). Idempotent.
+    /// The first user-started run asks for permission; macOS itself asks only once ever.
+    func prepareForUserRun() {
+        if asksOnFirstRun { requestAuthorization() }
+    }
+
+    /// Request permission once per process. Idempotent.
     func requestAuthorization() {
         guard !authorizationRequested else { return }
         authorizationRequested = true

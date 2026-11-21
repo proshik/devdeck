@@ -22,6 +22,7 @@ struct DevDeckApp: App {
                 .environment(appDelegate.monitoring)
                 .environment(appDelegate.clipboard)
                 .environment(appDelegate.brightness)
+                .environment(appDelegate.permissions)
                 .defaultAppStorage(AppRuntime.preferences)
         }
         .windowResizability(.contentMinSize)

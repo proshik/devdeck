@@ -241,6 +241,7 @@ final class ProcessManager {
     /// occupied-port check first; everything else launches directly.
     /// Chain steps bypass this (they call `startRun`) — the reactive check covers them.
     func run(_ command: Command) {
+        notifier.prepareForUserRun()
         portConflicts[command.id] = nil   // a fresh run clears a stale panel
         guard command.isDaemon, let port = command.port,
               active[command.id] == nil, adoptedPIDs[command.id] == nil else {
@@ -407,6 +408,7 @@ final class ProcessManager {
     /// awaiting each step's terminal event (or `daemonRunning`) before starting the next.
     /// A repeated run collapses an unfinished run of the same chain.
     func run(_ chain: Chain, commands: [UUID: Command]) {
+        notifier.prepareForUserRun()
         DiagnosticLog.shared.log("Run chain “\(chain.name)” (\(chain.commandIDs.count) steps)")
         if chain.openInTerminal {
             runChainInTerminal(chain, commands: commands)

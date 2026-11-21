@@ -19,6 +19,13 @@ enum AppNotification: Equatable {
 @MainActor
 protocol Notifier {
     func post(_ notification: AppNotification)
+    /// A run the user started (or a feature they turned on started a daemon): the moment to ask
+    /// for notification permission, instead of at launch (REC-01).
+    func prepareForUserRun()
+}
+
+extension Notifier {
+    func prepareForUserRun() {}
 }
 
 /// Default no-op stub: does nothing (for tests and builds without live notifications).
