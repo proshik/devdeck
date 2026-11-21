@@ -46,13 +46,19 @@ struct MainWindowView: View {
                 }
             }
         } detail: {
-            detail
-                .safeAreaInset(edge: .top, spacing: 0) {
-                    if let recovery, recovery.hasSuspensions, appModel.selection != .permissions {
-                        RecoveryBanner(model: recovery) { appModel.selection = .permissions }
-                            .padding(.horizontal, 20).padding(.top, 12)
-                    }
+            // The banner takes its own place above the page rather than a safe-area inset: the
+            // panes of an `HSplitView` (commands, clipboard) are AppKit-hosted, ignore SwiftUI
+            // insets and would draw under it. Without the banner the page stays the column's root,
+            // so its scroll view still runs under the toolbar.
+            if let recovery, recovery.hasSuspensions, appModel.selection != .permissions {
+                VStack(spacing: 0) {
+                    RecoveryBanner(model: recovery) { appModel.selection = .permissions }
+                        .padding(.horizontal, 20).padding(.top, 12)
+                    detail.frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
+            } else {
+                detail
+            }
         }
         // Reserve room for the sidebar at its maximum width next to a full-width settings form.
         .frame(minWidth: 1040, minHeight: 580)
