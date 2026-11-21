@@ -10,11 +10,6 @@ enum MemoryPressureLevel: Int, Equatable, Sendable {
     init(raw: Int32) { self = MemoryPressureLevel(rawValue: Int(raw)) ?? .normal }
 }
 
-/// Cheap standalone read of the current kernel memory-pressure level — no other probing.
-/// Used by the menu bar badge, which must reflect pressure even when no build is running
-/// (the per-run sampler's `cachedHostSample` is only populated during an active run).
-func currentMemoryPressureLevel() -> MemoryPressureLevel { memoryPressureIfAvailable() ?? .normal }
-
 func memoryPressureIfAvailable() -> MemoryPressureLevel? {
     var level: Int32 = 1
     var size = MemoryLayout<Int32>.size

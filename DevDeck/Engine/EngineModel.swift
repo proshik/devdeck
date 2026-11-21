@@ -1,9 +1,9 @@
 import Foundation
 import Observation
 
-/// The engine DevDeck is watching right now, for the tray dot, the labels and the probe gates.
-/// Refreshed by the tray's 2 s timer; the preference is read live, so a config edit (UI or by
-/// hand) takes effect on the next tick without a separate hook.
+/// The engine DevDeck is watching right now, for the labels, the tray accessibility label and the
+/// probe gates. Refreshed by the menu bar controller's 2 s timer; the preference is read live, so
+/// a config edit (UI or by hand) takes effect on the next tick without a separate hook.
 @MainActor
 @Observable
 final class EngineModel {

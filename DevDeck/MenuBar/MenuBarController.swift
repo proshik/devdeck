@@ -15,28 +15,7 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
     private let clipboard: ClipboardModel
     private let monitoringReader = UUID()
     private var appearanceBinding: PopoverAppearanceBinding?
-    private var iconTimer: Timer?
-
-    /// Colored pressure dot drawn over the (always-template) tray glyph. Kept as a separate
-    /// non-template overlay so the glyph itself stays light/adaptive on a dark menu bar.
-    private let badgeView: NSView = {
-        let dot: CGFloat = 6
-        let view = NSView(frame: NSRect(x: 0, y: 0, width: dot, height: dot))
-        view.wantsLayer = true
-        view.layer?.cornerRadius = dot / 2
-        view.isHidden = true
-        return view
-    }()
-
-    /// Green dot bottom-left while the container engine runs — the counterpart of the pressure dot.
-    private let engineBadgeView: NSView = {
-        let dot: CGFloat = 6
-        let view = NSView(frame: NSRect(x: 0, y: 0, width: dot, height: dot))
-        view.wantsLayer = true
-        view.layer?.cornerRadius = dot / 2
-        view.isHidden = true
-        return view
-    }()
+    private var engineTimer: Timer?
 
     init(store: CommandStore, manager: ProcessManager, appModel: AppModel,
          updateController: UpdateController, proxyManager: ProxyManager, claudeTabs: ClaudeTabsModel,
@@ -84,53 +63,14 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
             button.action = #selector(togglePopover)
             button.target = self
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])
-
-            // Pin the dot to the top-right corner of the glyph box via constraints, so it
-            // resolves at layout time (button.bounds isn't final yet during init) and the
-            // glyph is centered in the taller status-bar button. Offsets derive from the glyph
-            // size so the dot follows the glyph if its dimensions ever change.
-            let d = badgeView.frame.width
-            let half = TrayIcon.glyphSize / 2
-            badgeView.translatesAutoresizingMaskIntoConstraints = false
-            button.addSubview(badgeView)
-            NSLayoutConstraint.activate([
-                badgeView.widthAnchor.constraint(equalToConstant: d),
-                badgeView.heightAnchor.constraint(equalToConstant: d),
-                badgeView.trailingAnchor.constraint(equalTo: button.centerXAnchor, constant: half),
-                badgeView.topAnchor.constraint(equalTo: button.centerYAnchor, constant: -half),
-            ])
-
-            // Engine dot: bottom-left, the counterpart of the pressure dot top-right.
-            engineBadgeView.translatesAutoresizingMaskIntoConstraints = false
-            button.addSubview(engineBadgeView)
-            NSLayoutConstraint.activate([
-                engineBadgeView.widthAnchor.constraint(equalToConstant: d),
-                engineBadgeView.heightAnchor.constraint(equalToConstant: d),
-                engineBadgeView.leadingAnchor.constraint(equalTo: button.centerXAnchor, constant: -half),
-                engineBadgeView.bottomAnchor.constraint(equalTo: button.centerYAnchor, constant: half),
-            ])
         }
 
-        // The pressure badge is a system indicator: read the level directly (cheap sysctl) so it
-        // works even when no command is running. (`cachedHostSample` only exists during a run.)
-        iconTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
+        // Engine detection is subprocess-free and feeds the panel labels and probe gates; the
+        // icon itself stays a plain template glyph (no status dots, decision 2026-11-21).
+        engineTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 guard let self else { return }
-                let level = self.manager.isHostMonitoringEnabled() ? currentMemoryPressureLevel() : .normal
-                if let color = TrayIcon.badgeColor(for: level) {
-                    self.badgeView.layer?.backgroundColor = color.cgColor
-                    self.badgeView.isHidden = false
-                } else {
-                    self.badgeView.isHidden = true
-                }
-
                 self.engine.refresh()
-                if let color = TrayIcon.engineBadgeColor(running: self.engine.isActiveRunning) {
-                    self.engineBadgeView.layer?.backgroundColor = color.cgColor
-                    self.engineBadgeView.isHidden = false
-                } else {
-                    self.engineBadgeView.isHidden = true
-                }
                 self.statusItem.button?.image?.accessibilityDescription =
                     L10n.trayAccessibility(engineName: self.engine.activeName, running: self.engine.isActiveRunning)
             }
