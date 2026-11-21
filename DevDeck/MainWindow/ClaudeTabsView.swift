@@ -131,21 +131,18 @@ struct ClaudeTabsView: View {
             if filteredHistory.isEmpty {
                 Text(emptyHistoryMessage).foregroundStyle(.secondary)
             } else {
-                ForEach(filteredHistory) { entry in
-                    HStack(spacing: 12) {
-                        SessionRowText(title: entry.title, directory: entry.directory,
-                                       details: [L10n.claudeTabsAgentName(entry.provider),
-                                                 AppDateFormat.string(entry.lastActivity, date: .abbreviated,
-                                                                      time: .shortened)])
-                        Spacer(minLength: 8)
-                        Button(L10n.claudeTabsOpen) {
-                            claudeTabs.open(AgentSession(id: entry.sessionID, title: entry.title,
-                                                         lastActivity: entry.lastActivity,
-                                                         directory: entry.directory),
-                                            providerID: entry.provider)
-                        }
+                // Lazy, unlike the rest of the form: a grouped Form builds every row up front, and a
+                // week of sessions runs to a couple of hundred rows — about 0.2 s on the main thread
+                // at each visit to the page. The stack takes the place of one form row and draws
+                // the form's row insets and separators itself, so it looks the same.
+                let history = filteredHistory
+                LazyVStack(spacing: 0) {
+                    ForEach(history) { entry in
+                        if entry.id != history.first?.id { Divider() }
+                        historyRow(entry).padding(.vertical, Self.formRowInset)
                     }
                 }
+                .padding(.vertical, -Self.formRowInset)
             }
         } header: {
             HStack {
@@ -157,6 +154,25 @@ struct ClaudeTabsView: View {
             }
         } footer: {
             FormFooter(L10n.claudeTabsHistoryIntro)
+        }
+    }
+
+    /// The vertical inset a grouped Form gives each of its rows.
+    private static let formRowInset: CGFloat = 10
+
+    private func historyRow(_ entry: CatalogEntry) -> some View {
+        HStack(spacing: 12) {
+            SessionRowText(title: entry.title, directory: entry.directory,
+                           details: [L10n.claudeTabsAgentName(entry.provider),
+                                     AppDateFormat.string(entry.lastActivity, date: .abbreviated,
+                                                          time: .shortened)])
+            Spacer(minLength: 8)
+            Button(L10n.claudeTabsOpen) {
+                claudeTabs.open(AgentSession(id: entry.sessionID, title: entry.title,
+                                             lastActivity: entry.lastActivity,
+                                             directory: entry.directory),
+                                providerID: entry.provider)
+            }
         }
     }
 
