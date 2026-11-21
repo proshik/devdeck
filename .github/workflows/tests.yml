@@ -2,7 +2,7 @@ name: Tests
 
 # Runs on every push to the default branch, so breakage surfaces immediately instead of at
 # release time. The release workflow gates on the same suite — this one only makes the failure
-# arrive earlier.
+# arrive earlier. Pull requests and manual dispatch run the same suite.
 on:
   push:
     branches: [main]
