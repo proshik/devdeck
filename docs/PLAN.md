@@ -1,8 +1,7 @@
 # DevDeck — Implementation Plan
 
 Новая переделка интерфейса и дополнительные функции по принятому нативному дизайну:
-[спецификация](devdeck-modules-spec.md) и
-[план по законченным этапам](devdeck-modules-implementation-plan.md).
+[спецификация](devdeck-modules-spec.md).
 
 ## Context
 

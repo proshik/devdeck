@@ -6,8 +6,7 @@ Picker, Slider, Toggle, MenuBarExtra, SF Symbols и Swift Charts.
 Цвета, материалы, размеры контролов и состояния задаёт система.
 
 Требования к основному приложению описаны в
-[спецификации](../docs/devdeck-modules-spec.md), последовательность внедрения —
-в [плане этапов](../docs/devdeck-modules-implementation-plan.md).
+[спецификации](../docs/devdeck-modules-spec.md).
 Прототип показывает композицию и взаимодействия; рабочие функции реализуются
 в основном Xcode-проекте.
 

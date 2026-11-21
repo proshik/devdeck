@@ -22,8 +22,6 @@ Launch, stop, and monitor local dev commands and long-running daemons
 
 </div>
 
-**Продолжение разработки (14 ноября 2026): [docs/CONTINUE.md](docs/CONTINUE.md).**
-
 > Swift + SwiftUI/AppKit · `NSStatusItem` + `NSPopover` · sandbox-free · menu bar launch, Dock and ⌘Tab while the full window is open.
 
 ---
@@ -44,7 +42,7 @@ Launch, stop, and monitor local dev commands and long-running daemons
 - **Clipboard history** — opt-in collection of text, PNG/TIFF images and local file references even with the panel closed, type filters, search, copy back,
   pinned entries, pause, application exclusions and confirmed clearing. Local private storage
   stays separate from command configuration. Defaults: 500 entries, 30 days, 20 MiB;
-  settings and full history live on the Clipboard page. Optional explicit paste restores the previous app and requires Accessibility. See [clipboard details](docs/devdeck-stage5-result.md).
+  settings and full history live on the Clipboard page. Optional explicit paste restores the previous app and requires Accessibility.
 - **Chains** — sequential execution, stop on error, the failed step highlighted.
 - **sudo commands** — via the native macOS password dialog (`osascript … with administrator privileges`).
 - **Memory freeing** — gracefully quit memory-hungry GUI apps before a heavy build and
@@ -170,8 +168,7 @@ capture, global hotkey registration and automatic updates do not start automatic
 Commands you launch explicitly still run. Close the development app before rerunning
 the script. `DEVDECK_DEVELOPMENT_DATA` can select another absolute configuration path.
 
-See the [module specification](docs/devdeck-modules-spec.md) and
-[implementation stages](docs/devdeck-modules-implementation-plan.md).
+See the [module specification](docs/devdeck-modules-spec.md).
 
 ## Tests
 
