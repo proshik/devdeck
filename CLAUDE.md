@@ -58,7 +58,16 @@ generic and not tied to any specific project.
   error (if `stopOnError`), the failed step is highlighted.
 - **Config:** JSON file (`~/Library/Application Support/DevDeck/config.json`), editable
   both by hand and from the UI. External edits are picked up by the FileWatcher. Malformed JSON → error
-  in the UI; the last valid version is kept in memory.
+  in the UI; the last valid version is kept in memory, and nothing is written over the file until it
+  decodes again (an unfinished hand edit is the user's data).
+- **Permissions.** One page shows the actual state of every permission DevDeck uses (Accessibility,
+  pasteboard, notifications, Automation of Ghostty, local network, login item). A system prompt is
+  shown only when a feature that needs it is on; notifications are asked for at the first user run.
+- **Crash recovery (REC-01).** Each launch is recorded with the boot time in `recovery.json` (0600);
+  risky operations set a bit in `recovery-markers` (one `pwrite`, survives any process death). Two
+  deaths inside one operation switch off its module; three early unclean exits in a row switch off
+  every additional module. Recovery never writes `config.json` or the session snapshot, and a module
+  comes back only on an explicit "Turn On Again".
 - **Popover in the menu bar — minimalist** (control deck only). All editing and logs live in the main window.
 - **Coding-agent tab restore.** Ghostty tabs running a coding agent — Claude Code or opencode, each
   behind its own `AgentSessionProvider` — are snapshotted and reopened after a reboot. The snapshot
@@ -97,6 +106,12 @@ devdeck/
 │   │                    # it, GhosttyTabReader (AppleScript), TranscriptIndex (~/.claude session
 │   │                    # titles), SessionResolver, RestorePlanner, BootTime, TabRestorer,
 │   │                    # BackgroundSessions, ClaudeTabsStore, ClaudeTabsModel
+│   ├── Clipboard/       # history (text, images, files), private storage, paste into the previous app
+│   ├── Displays/        # brightness: native/DDC/software providers, keys, OSD, black overlay at 0%
+│   ├── Automation/      # `DevDeck automation …` CLI over a local socket, App Intents, AutomationService
+│   ├── Awake/           # keep-awake helper behind a synthetic daemon command
+│   ├── Permissions/     # PermissionKind/State, LivePermissionProbe, PermissionsModel (permissions page)
+│   ├── Recovery/        # RecoveryPolicy (pure), recovery.json + markers storage, RecoveryModel
 │   ├── Update/          # UpdateController (Sparkle)
 │   ├── Support/         # PrivateFile (0600 files), ShellQuoting
 │   └── Resources/       # Assets.xcassets, default-config.json
