@@ -23,6 +23,10 @@ generic and not tied to any specific project.
   activation policy is `regular` (Dock and Cmd-Tab); closing it restores `accessory` without quitting.
   Sandbox-free —
   required for launching external processes and accessing arbitrary working directories.
+- **Bundle id:** Release is `capital.frontier.DevDeck`; Debug is `local.devdeck.development`, so a
+  development build never shares UserDefaults (window frames included), TCC grants, the login item
+  or the automation socket with the installed app. Launch it via `scripts/run-development.sh`
+  (`--dev-data-directory`) to keep its config and data separate as well.
 - **Minimum macOS:** set to the current version of the developer's machine.
 - **File-system-synchronized groups:** a new `.swift` under `DevDeck/` or `DevDeckTests/` is picked
   up automatically — never edit `project.pbxproj` by hand.
