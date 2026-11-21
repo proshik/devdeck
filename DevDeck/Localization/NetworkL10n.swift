@@ -9,6 +9,7 @@ extension L10n {
     static var networkReceive: String { t("Received", "Получено") }
     static var networkSend: String { t("Sent", "Отправлено") }
     static var networkSession: String { t("Observed session volume", "Объём за сеанс наблюдения") }
+    static var networkHistoryOff: String { t("Recent history is off", "Недавняя история выключена") }
     static var networkCollect: String { t("Collect interface traffic", "Собирать трафик интерфейса") }
     static var networkTest: String { t("Test internet quality", "Проверить качество интернета") }
     static var networkTestHelp: String { t("networkQuality uses internet bandwidth for up to 30 seconds. Capacity in Mbit/s, responsiveness under load in RPM, idle latency in ms. Starts only on request; independent of command proxy routing.", "networkQuality расходует интернет-трафик до 30 секунд. Пропускная способность — Мбит/с, отзывчивость под нагрузкой — RPM, задержка без нагрузки — мс. Только по запросу; независимо от прокси команд.") }

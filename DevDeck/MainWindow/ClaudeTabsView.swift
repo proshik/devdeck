@@ -31,6 +31,8 @@ struct ClaudeTabsView: View {
     @Environment(CommandStore.self) private var store
     @Environment(ClaudeTabsModel.self) private var claudeTabs
     @State private var historyQuery = ""
+    /// What the open-tabs table needs for its rows, as measured from the table itself.
+    @State private var snapshotTableHeight: CGFloat?
 
     private var entries: [ClaudeTabEntry] { claudeTabs.snapshot?.tabs ?? [] }
 
@@ -46,8 +48,8 @@ struct ClaudeTabsView: View {
 
     var body: some View {
         // No ScrollView around either `Table`: `Table` scrolls itself, and nesting the two breaks
-        // its sizing. The open-tabs table gets a capped height instead, so the history table below
-        // it — usually the longer of the two — gets the rest of the page.
+        // its sizing. The open-tabs table is as tall as its rows up to a cap instead, so the history
+        // table below it — usually the longer of the two — gets the rest of the page.
         VStack(alignment: .leading, spacing: 12) {
             header
             Toggle(L10n.claudeTabsRestoreToggle, isOn: Binding(
@@ -59,7 +61,13 @@ struct ClaudeTabsView: View {
                 Text(L10n.claudeTabsNoSnapshot).foregroundStyle(.secondary)
             } else {
                 Table(entries) {
-                    TableColumn("#") { Text("\($0.order + 1)") }.width(24)
+                    TableColumn("#") { entry in
+                        Text("\(entry.order + 1)").background {
+                            if entry.id == entries.first?.id {
+                                TableContentHeightReader { snapshotTableHeight = $0 }
+                            }
+                        }
+                    }.width(24)
                     TableColumn(L10n.claudeTabsColumnTitle) { Text($0.title) }
                     TableColumn(L10n.claudeTabsColumnDirectory) {
                         Text($0.workingDirectory).foregroundStyle(.secondary)
@@ -75,7 +83,9 @@ struct ClaudeTabsView: View {
                     }
                     TableColumn("") { entry in openTabButton(entry) }.width(70)
                 }
-                .frame(maxHeight: 220)
+                // As tall as its rows, up to a cap: a table framed taller than its content pads
+                // itself out with empty striped rows. Until the first measurement, a close guess.
+                .frame(height: min(220, snapshotTableHeight ?? CGFloat(38 + 28 * entries.count)))
             }
 
             Divider()
@@ -100,8 +110,7 @@ struct ClaudeTabsView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text(L10n.claudeTabsIntro).font(.caption).foregroundStyle(.secondary)
             if let capturedAt = claudeTabs.snapshot?.capturedAt, !entries.isEmpty {
-                Text(L10n.claudeTabsCapturedAt(capturedAt.formatted(date: .abbreviated,
-                                                                    time: .shortened)))
+                Text(L10n.claudeTabsCapturedAt(AppDateFormat.string(capturedAt, date: .abbreviated, time: .shortened)))
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .monospacedDigit()
@@ -163,7 +172,7 @@ struct ClaudeTabsView: View {
                         Text(L10n.claudeTabsAgentName(entry.provider)).foregroundStyle(.secondary)
                     }
                     TableColumn(L10n.claudeTabsColumnLastActive) { entry in
-                        Text(entry.lastActivity.formatted(date: .abbreviated, time: .shortened))
+                        Text(AppDateFormat.string(entry.lastActivity, date: .abbreviated, time: .shortened))
                             .foregroundStyle(.secondary)
                             .monospacedDigit()
                     }

@@ -4,6 +4,9 @@ import SwiftUI
 /// daemon's own footprint biggest-first, with one button per category saying what it will free —
 /// plus the VM-memory explainer with a colima restart and the log of the last action. Every button
 /// confirms first and runs through the normal runner, so nothing here has its own process code.
+///
+/// One grouped Form like the window's other pages (UI-02): a section per daemon and for the VM
+/// memory, each action a row with its button at the trailing edge and what it costs under it.
 struct CleanupView: View {
     @Environment(CleanupModel.self) private var model
     @Environment(ProcessManager.self) private var manager
@@ -26,19 +29,17 @@ struct CleanupView: View {
     }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 12) {
-                header
-                ForEach(model.visibleHosts, id: \.self) { hostBox($0) }
-                if engine.activeKind == .colima { memoryBox }
-                if let id = model.lastRunID {
-                    GroupBox(L10n.cleanupLastRun) {
-                        LogView(id: id).frame(height: 220)
-                    }
+        Form {
+            header
+            ForEach(model.visibleHosts, id: \.self) { hostSection($0) }
+            if engine.activeKind == .colima { memorySection }
+            if let id = model.lastRunID {
+                Section(L10n.cleanupLastRun) {
+                    LogView(id: id).frame(height: 220)
                 }
             }
-            .padding(20)
         }
+        .formStyle(.grouped)
         .navigationTitle(L10n.cleanup)
         .toolbar {
             // No spinner here: in the macOS 26 toolbar it sits in an empty glass capsule, and each
@@ -80,12 +81,18 @@ struct CleanupView: View {
 
     // MARK: header
 
+    /// The page's explanation, then the disk bar the rest of the page breaks down.
+    @ViewBuilder
     private var header: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(L10n.cleanupIntro(engineName: engine.activeName)).font(.caption).foregroundStyle(.secondary)
-            if let disk = manager.cachedVMDisk {
+        Section {
+            EmptyView()
+        } footer: {
+            FormFooter(L10n.cleanupIntro(engineName: engine.activeName))
+        }
+        if let disk = manager.cachedVMDisk {
+            Section {
                 HStack(spacing: 8) {
-                    Text(L10n.diskVM).foregroundStyle(.secondary)
+                    Text(L10n.diskVM)
                     GeometryReader { geo in
                         ZStack(alignment: .leading) {
                             Capsule().fill(Color.secondary.opacity(0.20))
@@ -96,29 +103,26 @@ struct CleanupView: View {
                     .frame(height: 6)
                     Text(disk.format()).monospacedDigit().foregroundStyle(pressureColor(disk.fraction))
                 }
-                .font(.callout)
                 if disk.fraction >= VMDiskInfo.cleanupHintFraction {
                     Text(L10n.cleanupDiskPressureNote)
                         .font(.caption)
                         .foregroundStyle(pressureColor(disk.fraction))
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
         }
     }
 
-    // MARK: per-daemon box
+    // MARK: per-daemon section
 
-    private func hostBox(_ host: DockerHost) -> some View {
-        GroupBox(L10n.dockerHostTitle(host, engineName: engine.activeName)) {
-            VStack(alignment: .leading, spacing: 6) {
-                if let usage = model.usage[host] {
-                    if let note = L10n.dockerHostNote(host, engineName: engine.activeName) {
-                        Text(note).font(.caption).foregroundStyle(.secondary)
-                    }
-                    ForEach(usageEntries(usage)) { entry in
+    private func hostSection(_ host: DockerHost) -> some View {
+        Section {
+            if let usage = model.usage[host] {
+                ForEach(usageEntries(usage)) { entry in
+                    VStack(alignment: .leading, spacing: 2) {
                         usageRow(entry.label, entry.row)
-                        // The node's disk is one of colima's volumes; say so, or the two boxes read
-                        // as 45 GB counted twice.
+                        // The node's disk is one of colima's volumes; say so, or the two sections
+                        // read as 45 GB counted twice.
                         if entry.isVolumes {
                             if let nested = usage.nestedDaemonVolumeBytes, nested > 0 {
                                 volumeDetailLine(L10n.usageNestedVolume(DockerUsage.formatBytes(nested)))
@@ -130,36 +134,38 @@ struct CleanupView: View {
                             }
                         }
                     }
-                    // Without it the rows add up to less than the box: minikube keeps its PVCs,
-                    // etcd and logs in the same volume, beside the docker it reports on.
-                    if let other = unaccounted(usage, host), other >= Self.unaccountedFloor {
-                        usageLine(L10n.usageUnaccounted,
-                                  L10n.usageUnaccountedRow(DockerUsage.formatBytes(other), host))
-                    }
-                    // The opposite gap: rows past the disk are shared layers counted twice.
-                    if let over = overcounted(usage, host), over >= Self.unaccountedFloor {
-                        Text(L10n.usageOvercounted(DockerUsage.formatBytes(over)))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    if let tests = usage.testContainers, !tests.isEmpty {
-                        testContainersRows(usage, tests, host)
-                    }
-                    Divider().padding(.vertical, 2)
-                    if let tests = usage.testContainers, !tests.isEmpty {
-                        testContainersActionRow(host)
-                    }
-                    ForEach(CleanupAction.allCases, id: \.self) { action in
-                        actionRow(action, host)
-                    }
-                } else if model.isRefreshing && model.usage.isEmpty {
-                    ProgressView().controlSize(.small)
-                } else {
-                    Text(L10n.dockerHostUnavailable).foregroundStyle(.secondary).font(.callout)
                 }
+                // Without it the rows add up to less than the disk: minikube keeps its PVCs,
+                // etcd and logs in the same volume, beside the docker it reports on.
+                if let other = unaccounted(usage, host), other >= Self.unaccountedFloor {
+                    usageLine(L10n.usageUnaccounted,
+                              L10n.usageUnaccountedRow(DockerUsage.formatBytes(other), host))
+                }
+                // The opposite gap: rows past the disk are shared layers counted twice.
+                if let over = overcounted(usage, host), over >= Self.unaccountedFloor {
+                    Text(L10n.usageOvercounted(DockerUsage.formatBytes(over)))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                if let tests = usage.testContainers, !tests.isEmpty {
+                    VStack(alignment: .leading, spacing: 2) { testContainersRows(usage, tests, host) }
+                    testContainersActionRow(host)
+                }
+                ForEach(CleanupAction.allCases, id: \.self) { action in
+                    actionRow(action, host)
+                }
+            } else if model.isRefreshing && model.usage.isEmpty {
+                ProgressView().controlSize(.small).frame(maxWidth: .infinity)
+            } else {
+                Text(L10n.dockerHostUnavailable).foregroundStyle(.secondary)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(4)
+        } header: {
+            Text(L10n.dockerHostTitle(host, engineName: engine.activeName))
+        } footer: {
+            if model.usage[host] != nil, let note = L10n.dockerHostNote(host, engineName: engine.activeName) {
+                FormFooter(note)
+            }
         }
     }
 
@@ -223,7 +229,6 @@ struct CleanupView: View {
             Text(label).frame(width: 96, alignment: .leading)
             Text(value).monospacedDigit().foregroundStyle(.secondary)
         }
-        .font(.callout)
     }
 
     private func volumeDetailLine(_ text: String) -> some View {
@@ -244,7 +249,6 @@ struct CleanupView: View {
                 Text("—").foregroundStyle(.tertiary)
             }
         }
-        .font(.callout)
     }
 
     private func actionRow(_ action: CleanupAction, _ host: DockerHost) -> some View {
@@ -263,52 +267,47 @@ struct CleanupView: View {
                   enabled: !model.abandonedTestContainers(on: host).isEmpty) { pending = .testContainers(host) }
     }
 
-    /// The button, what it will free, and — under it, always visible — what it costs afterwards.
+    /// What the action frees and — always visible — what it costs afterwards, with its button at
+    /// the trailing edge of the row.
     private func actionRow(title: String, effect: String, running: Bool, estimate: UInt64?,
                            enabled: Bool, action: @escaping () -> Void) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            HStack(spacing: 8) {
-                Button(title, action: action)
-                    .disabled(model.isBusy || !enabled)
-                if running { ProgressView().controlSize(.small) }
-                Spacer()
+        FormActionRow {
+            VStack(alignment: .leading, spacing: 2) {
                 if let estimate {
                     Text(L10n.cleanupFrees(DockerUsage.formatBytes(estimate)))
                         .monospacedDigit()
                         .foregroundStyle(estimate > 0 ? .primary : .secondary)
                 }
+                Text(effect)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            .font(.callout)
-            Text(effect)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+        } actions: {
+            if running { ProgressView().controlSize(.small) }
+            Button(title, action: action)
+                .disabled(model.isBusy || !enabled)
         }
-        .padding(.bottom, 4)
     }
 
-    // MARK: memory box
+    // MARK: memory section
 
-    private var memoryBox: some View {
-        GroupBox(L10n.cleanupMemorySection) {
-            VStack(alignment: .leading, spacing: 6) {
-                if let vm = manager.vmMemorySample() {
-                    HStack(spacing: 8) {
-                        Text(HeaderMetric.vmEngine.title(engineName: engine.activeName)).foregroundStyle(.secondary)
-                        Text(vm.format()).monospacedDigit().foregroundStyle(pressureColor(vm.fraction))
-                    }
-                    .font(.callout)
+    private var memorySection: some View {
+        Section {
+            if let vm = manager.vmMemorySample() {
+                LabeledContent(HeaderMetric.vmEngine.title(engineName: engine.activeName)) {
+                    Text(vm.format()).monospacedDigit().foregroundStyle(pressureColor(vm.fraction))
                 }
-                Text(L10n.cleanupMemoryNote).font(.caption).foregroundStyle(.secondary)
-                HStack(spacing: 8) {
-                    Button(L10n.restartEngine(engine.activeName ?? "colima")) { pending = .restart }
-                        .disabled(model.isBusy)
-                    if model.restartState == .running { ProgressView().controlSize(.small) }
-                }
-                .font(.callout)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(4)
+            FormActionRow {
+                if model.restartState == .running { ProgressView().controlSize(.small) }
+                Button(L10n.restartEngine(engine.activeName ?? "colima")) { pending = .restart }
+                    .disabled(model.isBusy)
+            }
+        } header: {
+            Text(L10n.cleanupMemorySection)
+        } footer: {
+            FormFooter(L10n.cleanupMemoryNote)
         }
     }
 

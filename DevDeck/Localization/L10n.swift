@@ -291,7 +291,7 @@ enum L10n {
         }
     }
     static func cleanupFrees(_ size: String) -> String {
-        t("frees ≈ \(size)", "освободит ≈ \(size)")
+        t("Frees ≈ \(size)", "Освободит ≈ \(size)")
     }
     /// Shown under the disk bar once it crosses the same line that turns the popover cell red.
     static var cleanupDiskPressureNote: String {

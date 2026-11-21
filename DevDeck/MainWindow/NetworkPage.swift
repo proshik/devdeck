@@ -34,29 +34,47 @@ struct NetworkMetricsView: View {
             trafficRow(L10n.networkSend, model.point.map { L10n.networkBytes($0.sent, rate: true) })
             Text(L10n.networkSession).font(.caption).foregroundStyle(.secondary)
             Text(model.measuredAt == nil ? "—" : "↓ " + L10n.networkBytes(Double(model.totals.received)) + " · ↑ " + L10n.networkBytes(Double(model.totals.sent))).monospacedDigit()
-            Chart(model.history) { point in
-                LineMark(x: .value("Time", point.date), y: .value(L10n.networkRateUnit, point.received)).foregroundStyle(by: .value("Direction", L10n.networkReceive))
-                LineMark(x: .value("Time", point.date), y: .value(L10n.networkRateUnit, point.sent)).foregroundStyle(by: .value("Direction", L10n.networkSend))
-            }
-            .chartXAxis { AxisMarks(values: .automatic(desiredCount: onDetails == nil ? 5 : 2)) }
-            .chartYAxis {
-                AxisMarks(values: .automatic(desiredCount: onDetails == nil ? 4 : 2)) { value in
-                    AxisGridLine()
-                    AxisValueLabel {
-                        if let bytes = value.as(Double.self) {
-                            Text(L10n.networkBytes(bytes, rate: true)).font(.caption2)
+            // A line needs two points. Until then the page shows one centred line instead of an
+            // empty plot; the panel keeps the plot's height so it does not jump on every open.
+            if model.history.count < 2 && onDetails == nil {
+                if let empty = emptyHistoryText {
+                    Text(empty).font(.callout).foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity).padding(.vertical, 12)
+                }
+            } else {
+                Chart(model.history) { point in
+                    LineMark(x: .value("Time", point.date), y: .value(L10n.networkRateUnit, point.received)).foregroundStyle(by: .value("Direction", L10n.networkReceive))
+                    LineMark(x: .value("Time", point.date), y: .value(L10n.networkRateUnit, point.sent)).foregroundStyle(by: .value("Direction", L10n.networkSend))
+                }
+                .chartXAxis { AxisMarks(values: .automatic(desiredCount: onDetails == nil ? 5 : 2)) }
+                .chartYAxis {
+                    AxisMarks(values: .automatic(desiredCount: onDetails == nil ? 4 : 2)) { value in
+                        AxisGridLine()
+                        AxisValueLabel {
+                            if let bytes = value.as(Double.self) {
+                                Text(L10n.networkBytes(bytes, rate: true)).font(.caption2)
+                            }
                         }
                     }
                 }
+                .environment(\.locale, AppDateFormat.locale())
+                .frame(height: onDetails == nil ? 150 : 90)
+                .overlay { if let empty = emptyHistoryText { Text(empty).font(.caption).foregroundStyle(.secondary) } }
             }
-            .frame(height: onDetails == nil ? 150 : 90)
             if let date = model.measuredAt {
-                Text((model.collecting ? L10n.monitoringUpdated : L10n.monitoringLast) + ": " + date.formatted(date: .omitted, time: .standard)).font(.caption).foregroundStyle(.secondary)
+                Text((model.collecting ? L10n.monitoringUpdated : L10n.monitoringLast) + ": " + AppDateFormat.string(date, date: .omitted, time: .standard)).font(.caption).foregroundStyle(.secondary)
             } else { Text(L10n.monitoringUnavailable).font(.caption).foregroundStyle(.secondary) }
             if !model.collecting { Text(L10n.deckCollectionOff).font(.caption).foregroundStyle(.secondary) }
         }
         .onAppear { model.begin(reader) }
         .onDisappear { model.end(reader) }
+    }
+    /// Why the plot has no line yet (it needs two points), or nil once it has one. Nil as well
+    /// while collection is off: the caption under the plot already says so.
+    private var emptyHistoryText: String? {
+        guard model.history.count < 2 else { return nil }
+        if !store.config.settings.monitoring.historyEnabled { return L10n.networkHistoryOff }
+        return model.collecting ? L10n.monitoringWaitingHistory : nil
     }
     private func trafficRow(_ title: String, _ value: String?) -> some View {
         HStack { Text(title).foregroundStyle(.secondary); Spacer(); Text(value ?? "—").monospacedDigit() }
@@ -92,7 +110,7 @@ struct NetworkPage: View {
                 }
                 if let error = model.failure { Text(L10n.networkError(error)).foregroundStyle(.secondary) }
                 if let result = model.result {
-                    LabeledContent(L10n.monitoringLast, value: result.date.formatted())
+                    LabeledContent(L10n.monitoringLast, value: AppDateFormat.string(result.date, date: .numeric, time: .shortened))
                     LabeledContent(L10n.networkInterface, value: result.interface ?? L10n.monitoringUnavailable)
                     LabeledContent(L10n.networkCapacity, value: String(format: "%.2f / %.2f", result.download / 1e6, result.upload / 1e6))
                     LabeledContent(L10n.networkResponsiveness, value: result.responsiveness.map { String(format: "%.0f", $0) } ?? "—")
