@@ -93,24 +93,47 @@ struct PanelModuleMenu: View {
 /// When they do not, whole columns widen so that the next one visibly peeks in at the trailing
 /// edge: the grouped Form caps its width, and a row ending exactly on a column boundary used to
 /// hide the remaining tabs without any hint that the row scrolls.
+///
+/// The cap differs by system: macOS 26 leaves the row about 684 pt, macOS 15 caps the grouped
+/// Form at 600 pt and leaves about 588 pt. There the regular columns do not fit three across, so
+/// the columns tighten their spacing and padding before the row resorts to scrolling.
 enum PanelColumnSizing {
+    struct Layout: Equatable {
+        let width: CGFloat
+        let spacing: CGFloat
+        /// Tighter spacing between and inside columns; used only when it is what lets every
+        /// column fit.
+        let isCompact: Bool
+    }
+
     static let spacing: CGFloat = 12
+    static let compactSpacing: CGFloat = 8
     /// Narrowest column while the row scrolls; titles and the three controls still fit.
     static let minimum: CGFloat = 220
     /// Slightly narrower columns are fine when nothing is hidden and the row does not scroll.
     static let fittingMinimum: CGFloat = 210
+    /// Narrowest compact column: the three controls and a short title. Standard titles fit whole
+    /// from about 188 pt, the width the three standard tabs get in the macOS 15 form.
+    static let compactMinimum: CGFloat = 172
     static let maximum: CGFloat = 260
     /// How much of the next column stays visible when the row overflows.
     static let peek: CGFloat = 40
 
-    static func width(count: Int, viewportWidth: CGFloat) -> CGFloat {
-        guard count > 0 else { return maximum }
-        guard viewportWidth > 0 else { return minimum }
+    static func layout(count: Int, viewportWidth: CGFloat) -> Layout {
+        guard count > 0 else { return Layout(width: maximum, spacing: spacing, isCompact: false) }
+        guard viewportWidth > 0 else { return Layout(width: minimum, spacing: spacing, isCompact: false) }
         let columns = CGFloat(count)
         let fitting = (viewportWidth - (columns - 1) * spacing) / columns
-        if fitting >= fittingMinimum { return min(maximum, fitting) }
+        if fitting >= fittingMinimum {
+            return Layout(width: min(maximum, fitting), spacing: spacing, isCompact: false)
+        }
+        let compact = (viewportWidth - (columns - 1) * compactSpacing) / columns
+        if compact >= compactMinimum {
+            return Layout(width: compact, spacing: compactSpacing, isCompact: true)
+        }
         let whole = max(1, ((viewportWidth - peek) / (minimum + spacing)).rounded(.down))
-        return min(maximum, max(minimum, (viewportWidth - peek) / whole - spacing))
+        let width = min(maximum, max(minimum, (viewportWidth - peek) / whole - spacing))
+        return Layout(width: width, spacing: spacing, isCompact: false)
     }
 }
 
@@ -125,11 +148,11 @@ struct PanelSettingsView: View {
     /// Preview of a tab heading drag; the configuration changes only when it is dropped.
     @State private var tabReorder: PanelTabReorder?
     @State private var tabDragSession = 0
-    private let cardSpacing = PanelColumnSizing.spacing
-
-    private var cardWidth: CGFloat {
-        PanelColumnSizing.width(count: store.config.panel.sections.count, viewportWidth: cardsViewportWidth)
+    private var columns: PanelColumnSizing.Layout {
+        PanelColumnSizing.layout(count: store.config.panel.sections.count, viewportWidth: cardsViewportWidth)
     }
+    private var cardWidth: CGFloat { columns.width }
+    private var cardSpacing: CGFloat { columns.spacing }
 
     var body: some View {
         // One grouped Form, like every other settings page: the system owns the page margins,
@@ -259,7 +282,7 @@ struct PanelSettingsView: View {
 
     private func sectionCard(_ layout: PanelSectionLayout, section: PanelSection) -> some View {
         VStack(spacing: 6) {
-            HStack(spacing: 6) {
+            HStack(spacing: columns.isCompact ? 4 : 6) {
                 Label(layout.title, systemImage: layout.symbol).fontWeight(.medium).lineLimit(1)
                     .onDrag {
                         beginTabDrag(section)
@@ -300,7 +323,7 @@ struct PanelSettingsView: View {
             }.menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
                 .controlHoverFeedback().frame(minHeight: 24)
                 .disabled(store.config.panel.availableModules.isEmpty).help(L10n.panelDropHere)
-        }.font(.callout).labelStyle(PanelRowLabelStyle()).padding(8)
+        }.font(.callout).labelStyle(PanelRowLabelStyle()).padding(columns.isCompact ? 6 : 8)
         .overlay(RoundedRectangle(cornerRadius: 8)
             .stroke(targetedSection == section.rawValue ? Color.accentColor : Color(nsColor: .separatorColor),
                     lineWidth: targetedSection == section.rawValue ? 2 : 1).allowsHitTesting(false))

@@ -392,6 +392,49 @@ final class PanelLayoutTests: XCTestCase {
                        "reopening the same window must restore Cmd-Tab registration")
     }
 
+    /// macOS 15 caps a grouped Form at 600 pt, so its tab row is about 588 pt wide, narrower than
+    /// the 684 pt row macOS 26 gives the same window. Emulate that cap on any system by narrowing
+    /// the page itself (on macOS 26 these pages leave a 540–600 pt row): the three default tabs
+    /// must still be fully visible without scrolling.
+    func testDefaultTabsFitTheNarrowGroupedFormOfMacOS15() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = CommandStore(configURL: directory.appendingPathComponent("config.json"))
+        try store.save(.empty)
+        store.updatePanel { $0 = .standard; $0.removeSection(.clipboard) }
+        let previousLanguage = LocalizationManager.shared.language
+        defer { LocalizationManager.shared.language = previousLanguage }
+        for formWidth: CGFloat in [600, 648, 660] {
+            let hosting = NSHostingController(rootView: PanelSettingsView().environment(store)
+                .frame(width: formWidth, height: 700))
+            let window = NSWindow(contentViewController: hosting)
+            window.isReleasedWhenClosed = false
+            window.setFrameOrigin(NSPoint(x: -2600, y: -2600))
+            window.orderFront(nil)
+            defer { window.close() }
+            for language in AppLanguage.allCases {
+                LocalizationManager.shared.language = language
+                try await Task.sleep(for: .milliseconds(150))
+                hosting.view.layoutSubtreeIfNeeded()
+                let locator = try XCTUnwrap(findView(in: hosting.view, of: PanelRowScrollViewLocator.LocatorView.self))
+                let rowScroll = try XCTUnwrap(locator.enclosingScrollView)
+                XCTAssertLessThanOrEqual(rowScroll.frame.width, 600, "the emulated form must be as narrow as on macOS 15")
+                let visible = rowScroll.contentView.convert(rowScroll.contentView.bounds, to: hosting.view)
+                for layout in store.config.panel.sections {
+                    var ids = ["panel-section-\(layout.id)"]
+                    ids += layout.modules.map { "panel-module-\($0.id)" }
+                    for id in ids {
+                        let checkbox = try XCTUnwrap(findVisibilityCheckbox(in: hosting.view, id: id))
+                        let rect = checkbox.convert(checkbox.bounds, to: hosting.view)
+                        XCTAssertTrue(visible.contains(rect),
+                                      "\(id) must be visible without scrolling the row (form \(formWidth), row \(visible.width))")
+                    }
+                }
+                try saveSnapshot(hosting.view, name: "panel-narrow-form-\(Int(formWidth))-\(language.rawValue)")
+            }
+        }
+    }
+
     private func findPicker(in view: NSView) -> NSSegmentedControl? {
         if let picker = view as? NSSegmentedControl { return picker }
         for child in view.subviews { if let match = findPicker(in: child) { return match } }
