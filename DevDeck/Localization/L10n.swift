@@ -638,7 +638,6 @@ enum L10n {
     // MARK: - Proxy manager
 
     static var proxy: String { t("Proxy", "Прокси") }
-    static var proxySection: String { t("Proxy manager", "Менеджер прокси") }
     /// Name of the synthetic gost daemon — logs use this instead of the command line,
     /// which keeps the password out of the log.
     static var proxyShareDaemonName: String { t("Proxy (gost)", "Прокси (gost)") }

@@ -1,5 +1,6 @@
 import Foundation
 extension L10n {
+    static var monitoringCollectionSection: String { t("Data collection", "Сбор данных") }
     static var monitoringEnabled: String { t("Collect monitoring data", "Собирать показатели") }
     static var monitoringHistory: String { t("Keep recent history", "Хранить недавнюю историю") }
     static var monitoringInterval: String { t("Sampling interval (seconds)", "Интервал измерений (секунды)") }

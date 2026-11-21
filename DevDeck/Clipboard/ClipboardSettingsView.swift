@@ -7,32 +7,44 @@ struct ClipboardSettingsView: View {
     @State private var bundleID = ""
     var body: some View {
         Form {
-            Section(L10n.clipboardCollection) {
+            Section {
                 Toggle(L10n.clipboardEnabled, isOn: setting(\.enabled))
                 Toggle(L10n.clipboardPause, isOn: setting(\.paused)).disabled(!store.config.settings.clipboard.enabled)
                 if (store.config.settings.clipboard.enabled && model.access != .allowed) || model.errorMessage != nil {
                     ClipboardStatusView()
                 }
-                Text(L10n.clipboardPrivacyHelp).font(.caption).foregroundStyle(.secondary)
+            } header: {
+                Text(L10n.clipboardCollection)
+            } footer: {
+                FormFooter(L10n.clipboardPrivacyHelp)
             }
-            Section(L10n.clipboardPaste) {
+            Section {
                 Toggle(L10n.clipboardPasteEnabled, isOn: Binding(get: { store.config.settings.clipboard.pasteEnabled }, set: { value in
                     store.updateClipboard { $0.pasteEnabled = value }
                     if value { model.requestPastePermission() }
                 }))
                 if store.config.settings.clipboard.pasteEnabled && !model.pastePermission {
-                    Text(L10n.clipboardPastePermission).font(.caption).foregroundStyle(.secondary)
-                    Button(L10n.clipboardPasteRequest) { model.requestPastePermission() }
+                    FormActionRow {
+                        Text(L10n.clipboardPastePermission).foregroundStyle(.secondary)
+                    } actions: {
+                        Button(L10n.clipboardPasteRequest) { model.requestPastePermission() }
+                    }
                 }
-                Text(L10n.clipboardPasteHelp).font(.caption).foregroundStyle(.secondary)
+            } header: {
+                Text(L10n.clipboardPaste)
+            } footer: {
+                FormFooter(L10n.clipboardPasteHelp)
             }
-            Section(L10n.clipboardRetention) {
+            Section {
                 Stepper(L10n.clipboardCountLimit + ": \(store.config.settings.clipboard.maxEntries)", value: setting(\.maxEntries), in: 100...10_000, step: 100)
                 Stepper(L10n.clipboardDaysLimit + ": \(store.config.settings.clipboard.retentionDays)", value: setting(\.retentionDays), in: 1...365)
                 Stepper(L10n.clipboardBytesLimit + ": \(store.config.settings.clipboard.maxBytes / 1_024 / 1_024)", value: Binding(
                     get: { store.config.settings.clipboard.maxBytes / 1_024 / 1_024 },
                     set: { value in store.updateClipboard { $0.maxBytes = value * 1_024 * 1_024 } }), in: 1...100)
-                Text(L10n.clipboardLimitsHelp + " " + L10n.clipboardMediaLimitsHelp).font(.caption).foregroundStyle(.secondary)
+            } header: {
+                Text(L10n.clipboardRetention)
+            } footer: {
+                FormFooter(L10n.clipboardLimitsHelp + " " + L10n.clipboardMediaLimitsHelp)
             }
             Section(L10n.clipboardExclusions) {
                 ForEach(store.config.settings.clipboard.excludedBundleIDs, id: \.self) { id in

@@ -36,25 +36,29 @@ struct SettingsView: View {
                     Label(startupError, systemImage: "exclamationmark.triangle").foregroundStyle(.red)
                 }
             }
-            Section(L10n.automationSection) {
+            Section {
                 Toggle(L10n.automationToggle, isOn: Binding(
                     get: { store.config.settings.automationEnabled },
                     set: { store.setAutomationEnabled($0) }
                 ))
-                Text(L10n.automationHelp).font(.caption).foregroundStyle(.secondary)
+            } header: {
+                Text(L10n.automationSection)
+            } footer: {
+                FormFooter(L10n.automationHelp)
             }
-            Section(L10n.deckPanel) {
-                Button(L10n.deckPanelSettings) { appModel.selection = .panel }
-            }
-            Section("DevDeck") {
+            Section {
                 LabeledContent(L10n.deckVersion, value: updates.currentVersion)
-                Button(L10n.deckUpdates) { appModel.selection = .updates }
-                Button(L10n.deckDiagnosticLog) {
-                    NSWorkspace.shared.activateFileViewerSelecting([DiagnosticLog.shared.fileURL])
+                FormNavigationRow(title: L10n.deckPanel) { appModel.selection = .panel }
+                FormNavigationRow(title: L10n.deckUpdates) { appModel.selection = .updates }
+                FormActionRow {
+                    Button(L10n.deckDiagnosticLog) {
+                        NSWorkspace.shared.activateFileViewerSelecting([DiagnosticLog.shared.fileURL])
+                    }
                 }
-                if AppRuntime.isIsolated {
-                    Text(L10n.deckIsolated).font(.caption).foregroundStyle(.secondary)
-                }
+            } header: {
+                Text("DevDeck")
+            } footer: {
+                if AppRuntime.isIsolated { FormFooter(L10n.deckIsolated) }
             }
         }
         .formStyle(.grouped)
@@ -86,14 +90,17 @@ struct UpdatesView: View {
         Form {
             Section("DevDeck") {
                 LabeledContent(L10n.deckVersion, value: updates.currentVersion)
-                Text(updates.statusText).foregroundStyle(.secondary)
                 if let checked = updates.lastCheckedAt {
                     LabeledContent(L10n.deckLastCheck, value: checked.formatted(date: .abbreviated, time: .shortened))
                 }
-                Button(L10n.checkForUpdates) { updates.checkForUpdatesUserInitiated() }
-                    .disabled(AppRuntime.isIsolated || updates.isChecking)
+                FormActionRow {
+                    Text(updates.statusText).foregroundStyle(.secondary)
+                } actions: {
+                    Button(L10n.checkForUpdates) { updates.checkForUpdatesUserInitiated() }
+                        .disabled(AppRuntime.isIsolated || updates.isChecking)
+                }
             }
-            Section(L10n.updatesSection) {
+            Section {
                 Toggle(L10n.autoUpdateToggle, isOn: Binding(
                     get: { store.config.settings.autoUpdateEnabled },
                     set: {
@@ -101,9 +108,10 @@ struct UpdatesView: View {
                         if !AppRuntime.isIsolated { updates.setAutoUpdateEnabled($0) }
                     }
                 ))
-                if AppRuntime.isIsolated {
-                    Text(L10n.deckDevelopmentUpdates).font(.caption).foregroundStyle(.secondary)
-                }
+            } header: {
+                Text(L10n.updatesSection)
+            } footer: {
+                if AppRuntime.isIsolated { FormFooter(L10n.deckDevelopmentUpdates) }
             }
         }
         .formStyle(.grouped)
@@ -120,9 +128,10 @@ struct MonitoringPage: View {
 
     var body: some View {
         Form {
-            Section(section.title) { MonitoringMetricsView(section: section) }
+            // The page title already names the metrics; their group needs no header of its own.
+            Section { MonitoringMetricsView(section: section) }
             Section(L10n.monitoringHistoryTitle) { MonitoringHistoryView(section: section) }
-            Section(L10n.monitoringEnabled) {
+            Section {
                 Toggle(L10n.monitoringEnabled, isOn: Binding(
                     get: { store.config.settings.monitoring.enabled },
                     set: { value in store.updateMonitoring { $0.enabled = value } }))
@@ -132,7 +141,10 @@ struct MonitoringPage: View {
                 Toggle(L10n.monitoringHistory, isOn: Binding(
                     get: { store.config.settings.monitoring.historyEnabled },
                     set: { value in store.updateMonitoring { $0.historyEnabled = value } }))
-                Text(L10n.monitoringHistoryHelp).font(.caption).foregroundStyle(.secondary)
+            } header: {
+                Text(L10n.monitoringCollectionSection)
+            } footer: {
+                FormFooter(L10n.monitoringHistoryHelp)
             }
             Section(L10n.memoryMonitoringSection) {
                 switch section {
@@ -188,8 +200,8 @@ struct MonitoringPage: View {
 struct AwakeSettingsView: View {
     var body: some View {
         Form {
-            Section(L10n.awakeTitle) { AwakeSectionView() }
-            Section { Text(L10n.awakeDetails).foregroundStyle(.secondary) }
+            // The page title already says what this is; the explanation belongs under the group.
+            Section { AwakeSectionView() } footer: { FormFooter(L10n.awakeDetails) }
         }
         .formStyle(.grouped)
         .navigationTitle(L10n.awakeTitle)

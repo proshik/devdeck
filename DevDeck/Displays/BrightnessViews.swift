@@ -73,8 +73,8 @@ struct DisplayBrightnessSettingsView: View {
     @Environment(CommandStore.self) private var store
     var body: some View {
         Form {
-            Section(L10n.brightnessTitle) {
-                if model.displays.isEmpty { Text(L10n.brightnessNoDisplays) }
+            Section {
+                if model.displays.isEmpty { Text(L10n.brightnessNoDisplays).foregroundStyle(.secondary) }
                 ForEach(model.displays) { display in
                     VStack(alignment: .leading, spacing: 12) {
                         BrightnessDisplayRow(display: display)
@@ -90,19 +90,30 @@ struct DisplayBrightnessSettingsView: View {
                     }.padding(.vertical, 6)
                 }
                 Toggle(L10n.brightnessLink, isOn: setting(\.linkSliders))
-                Button(L10n.brightnessRefresh) { Task { await model.refresh() } }.disabled(model.refreshing)
+                FormActionRow {
+                    Button(L10n.brightnessRefresh) { Task { await model.refresh() } }.disabled(model.refreshing)
+                }
+            } header: {
+                Text(L10n.brightnessTitle)
+            } footer: {
+                FormFooter(L10n.brightnessSoftwareHelp)
             }
-            Section(L10n.brightnessKeyboard) {
+            Section {
                 Toggle(L10n.brightnessKeys, isOn: setting(\.keyboardEnabled))
                 Toggle(L10n.brightnessLinkKeys, isOn: setting(\.linkKeys))
                     .disabled(!store.config.settings.displays.keyboardEnabled)
-                Text(L10n.brightnessConflict).font(.caption).foregroundStyle(.secondary)
                 if !model.keyboardStatus.isEmpty {
-                    Text(model.keyboardStatus).foregroundStyle(.secondary)
-                    Button(L10n.brightnessPermissionButton) { BrightnessKeys.requestPermission() }
+                    FormActionRow {
+                        Text(model.keyboardStatus).foregroundStyle(.secondary)
+                    } actions: {
+                        Button(L10n.brightnessPermissionButton) { BrightnessKeys.requestPermission() }
+                    }
                 }
+            } header: {
+                Text(L10n.brightnessKeyboard)
+            } footer: {
+                FormFooter(L10n.brightnessConflict)
             }
-            Section { Text(L10n.brightnessSoftwareHelp).font(.caption).foregroundStyle(.secondary) }
         }
         .formStyle(.grouped).navigationTitle(L10n.deckDisplays)
     }

@@ -37,7 +37,22 @@ struct CleanupView: View {
                     }
                 }
             }
-            .padding()
+            .padding(20)
+        }
+        .navigationTitle(L10n.cleanup)
+        .toolbar {
+            // No spinner here: in the macOS 26 toolbar it sits in an empty glass capsule, and each
+            // host box already shows its own progress while the disabled button says the rest.
+            ToolbarItem {
+                Button(L10n.cleanupRefresh) {
+                    Task {
+                        await manager.refreshVMDisk()
+                        await manager.refreshVMSample()
+                        await model.refresh()
+                    }
+                }
+                .disabled(model.isRefreshing)
+            }
         }
         .task {
             await manager.refreshVMDisk()
@@ -67,19 +82,6 @@ struct CleanupView: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text(L10n.cleanup).font(.title2).bold()
-                Spacer()
-                if model.isRefreshing { ProgressView().controlSize(.small) }
-                Button(L10n.cleanupRefresh) {
-                    Task {
-                        await manager.refreshVMDisk()
-                        await manager.refreshVMSample()
-                        await model.refresh()
-                    }
-                }
-                .disabled(model.isRefreshing)
-            }
             Text(L10n.cleanupIntro(engineName: engine.activeName)).font(.caption).foregroundStyle(.secondary)
             if let disk = manager.cachedVMDisk {
                 HStack(spacing: 8) {

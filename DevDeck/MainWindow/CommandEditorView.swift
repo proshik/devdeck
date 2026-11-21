@@ -116,7 +116,9 @@ struct CommandEditorView: View {
                         .buttonStyle(.borderless).controlHoverFeedback()
                     }
                 }
-                Button(L10n.addEnvVar) { envRows.append(EnvRow(key: "", value: "")) }
+                FormActionRow {
+                    Button(L10n.addEnvVar) { envRows.append(EnvRow(key: "", value: "")) }
+                }
             }
 
             Section(L10n.freeMemorySection) {
@@ -135,7 +137,9 @@ struct CommandEditorView: View {
                         }
                     }
                 }
-                Button(L10n.refreshAppList) { refreshApps() }
+                FormActionRow {
+                    Button(L10n.refreshAppList) { refreshApps() }
+                }
             }
         }
         .formStyle(.grouped)

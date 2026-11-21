@@ -46,7 +46,7 @@ struct AwakeSectionView: View {
                     durationPicker.pickerStyle(.segmented)
                 }
             }
-            if !compact { Text(L10n.awakeLimits).foregroundStyle(.secondary).font(.system(size: 10)) }
+            if !compact { Text(L10n.awakeLimits).foregroundStyle(.secondary).font(.caption) }
             if awake.recoveryAvailable {
                 Button(L10n.awakeRecovery) { awake.start(recovery: true) }
                     .help(L10n.awakeRecoveryHelp)
@@ -58,9 +58,10 @@ struct AwakeSectionView: View {
                 Button(L10n.awakeError) { showingError = true }.foregroundStyle(.red)
             }
         }
-        .font(compact ? .body : .system(size: 11))
-        .padding(.horizontal, 16)
-        .padding(.vertical, compact ? 10 : 9)
+        // In the settings page the view is a Form row: the form supplies the insets.
+        .font(.body)
+        .padding(.horizontal, compact ? 16 : 0)
+        .padding(.vertical, compact ? 10 : 2)
         .help(L10n.awakeDetails + "\n" + L10n.awakeLimits)
         .alert(L10n.awakeError, isPresented: $showingError) {
             Button(L10n.cancel, role: .cancel) {}

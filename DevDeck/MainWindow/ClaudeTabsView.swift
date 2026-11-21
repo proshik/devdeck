@@ -17,17 +17,16 @@ enum SnapshotRowAction {
 /// Two lists: the tabs open right now (as before), and — new — the session history: everything
 /// the catalogue remembers within the window, minus whatever is already in the first list. Every
 /// row in either list can be opened on its own; there is no "restore everything" button here, only
-/// the full restore that already lives in the header.
+/// the full restore that already lives in the toolbar.
 ///
 /// A row without a session still restores — as a shell in its directory — and saying so plainly
 /// is what keeps that from reading as a bug.
 ///
-/// Laid out like `CleanupView`: a title with its actions on the same line, one caption explaining
-/// what the page is for, then the content. The first version stacked the buttons under the title
-/// and skipped the explanation, which is why it sat oddly next to the app's other pages. The
-/// history section repeats that same shape for itself, rather than borrowing `CleanupView`'s
-/// `GroupBox` styling — the two sections belong to the same page and read better sharing one
-/// vocabulary than mixing two.
+/// Laid out like `CleanupView` and the window's other pages: the page title and its page-wide
+/// actions live in the window toolbar, one caption explaining what the page is for opens the
+/// content. The history section has a headline with its own action on the same line, rather than
+/// borrowing `CleanupView`'s `GroupBox` styling — the two sections belong to the same page and read
+/// better sharing one vocabulary than mixing two.
 struct ClaudeTabsView: View {
     @Environment(CommandStore.self) private var store
     @Environment(ClaudeTabsModel.self) private var claudeTabs
@@ -83,19 +82,22 @@ struct ClaudeTabsView: View {
 
             historySection
         }
-        .padding()
+        .padding(20)
+        // Short content starts at the top of the page instead of floating in the middle.
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .navigationTitle(L10n.claudeTabsSection)
+        .toolbar {
+            ToolbarItemGroup {
+                Button(L10n.claudeTabsCaptureNow) { captureNow() }
+                Button(L10n.claudeTabsRestoreNow) { claudeTabs.restoreNow() }
+                    .disabled(entries.isEmpty)
+            }
+        }
         .task { await claudeTabs.rebuildHistory() }
     }
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text(L10n.claudeTabsSection).font(.title2).bold()
-                Spacer()
-                Button(L10n.claudeTabsCaptureNow) { captureNow() }
-                Button(L10n.claudeTabsRestoreNow) { claudeTabs.restoreNow() }
-                    .disabled(entries.isEmpty)
-            }
             Text(L10n.claudeTabsIntro).font(.caption).foregroundStyle(.secondary)
             if let capturedAt = claudeTabs.snapshot?.capturedAt, !entries.isEmpty {
                 Text(L10n.claudeTabsCapturedAt(capturedAt.formatted(date: .abbreviated,
@@ -138,7 +140,7 @@ struct ClaudeTabsView: View {
     private var historySection: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text(L10n.claudeTabsHistorySection).font(.title3).bold()
+                Text(L10n.claudeTabsHistorySection).font(.headline)
                 Spacer()
                 if claudeTabs.isBuildingHistory { ProgressView().controlSize(.small) }
                 Button(L10n.claudeTabsHistoryRefresh) { Task { await claudeTabs.rebuildHistory() } }

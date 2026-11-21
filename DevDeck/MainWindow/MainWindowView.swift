@@ -45,7 +45,7 @@ struct MainWindowView: View {
         } detail: {
             detail
         }
-        // Reserve room for the sidebar at its maximum width and three complete tab cards.
+        // Reserve room for the sidebar at its maximum width next to a full-width settings form.
         .frame(minWidth: 1040, minHeight: 580)
         // The sidebar's toolbar makes AppKit draw its titlebar separator, which on macOS 26 lands
         // across the traffic lights. The sidebar already has its native separation.
@@ -194,11 +194,8 @@ struct MainWindowView: View {
     }
 
     private var portForwards: some View {
-        List {
-            let ports = store.config.commands.filter { $0.port != nil }
-            if ports.isEmpty {
-                Text(L10n.deckNoPortForwards).foregroundStyle(.secondary)
-            }
+        let ports = store.config.commands.filter { $0.port != nil }
+        return List {
             ForEach(ports) { command in
                 Button {
                     appModel.selection = .command(command.id)
@@ -211,7 +208,13 @@ struct MainWindowView: View {
                     }
                 }.buttonStyle(.plain).controlHoverFeedback()
             }
-        }.navigationTitle(L10n.deckPorts)
+        }
+        .overlay {
+            if ports.isEmpty {
+                ContentUnavailableView(L10n.deckNoPortForwards, systemImage: "arrow.left.arrow.right")
+            }
+        }
+        .navigationTitle(L10n.deckPorts)
     }
 
     private func addCommand(daemon: Bool = false) {

@@ -68,22 +68,27 @@ struct NetworkPage: View {
     private var model: NetworkMonitoringModel { monitoring.network }
     var body: some View {
         Form {
-            Section(L10n.networkTitle) { NetworkMetricsView() }
-            Section(L10n.monitoringEnabled) {
+            // The page title already names the metrics; their group needs no header of its own.
+            Section { NetworkMetricsView() }
+            Section {
                 Toggle(L10n.networkCollect, isOn: Binding(get: { store.config.settings.monitoring.networkEnabled }, set: { value in store.updateMonitoring { $0.networkEnabled = value } }))
                 Toggle(L10n.monitoringEnabled, isOn: Binding(get: { store.config.settings.monitoring.enabled }, set: { value in store.updateMonitoring { $0.enabled = value } }))
                 Stepper(L10n.monitoringInterval + ": \(store.config.settings.monitoring.interval)", value: Binding(get: { store.config.settings.monitoring.interval }, set: { value in store.updateMonitoring { $0.intervalSeconds = value } }), in: 1...60)
                 Toggle(L10n.monitoringHistory, isOn: Binding(get: { store.config.settings.monitoring.historyEnabled }, set: { value in store.updateMonitoring { $0.historyEnabled = value } }))
-                Text(L10n.monitoringHistoryHelp).font(.caption).foregroundStyle(.secondary)
+            } header: {
+                Text(L10n.monitoringCollectionSection)
+            } footer: {
+                FormFooter(L10n.monitoringHistoryHelp)
             }
-            Section(L10n.networkTest) {
-                Text(L10n.networkTestHelp).font(.caption).foregroundStyle(.secondary)
-                HStack {
+            Section {
+                FormActionRow {
                     if model.runningTest {
                         ProgressView().controlSize(.small)
-                        Text(L10n.networkRunning)
-                        Button(L10n.cancel) { model.cancelTest() }
-                    } else { Button(L10n.networkTest) { model.runTest() } }
+                        Text(L10n.networkRunning).foregroundStyle(.secondary)
+                    }
+                } actions: {
+                    if model.runningTest { Button(L10n.cancel) { model.cancelTest() } }
+                    else { Button(L10n.networkTest) { model.runTest() } }
                 }
                 if let error = model.failure { Text(L10n.networkError(error)).foregroundStyle(.secondary) }
                 if let result = model.result {
@@ -93,7 +98,12 @@ struct NetworkPage: View {
                     LabeledContent(L10n.networkResponsiveness, value: result.responsiveness.map { String(format: "%.0f", $0) } ?? "—")
                     LabeledContent(L10n.networkLatency, value: result.latency.map { String(format: "%.1f", $0) } ?? "—")
                 }
+            } header: {
+                Text(L10n.networkTest)
+            } footer: {
+                FormFooter(L10n.networkTestHelp)
             }
         }.formStyle(.grouped)
+        .navigationTitle(L10n.networkTitle)
     }
 }

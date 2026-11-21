@@ -54,7 +54,7 @@ struct ProxyShareEditorView: View {
             terminalHelperSection
         }
         .formStyle(.grouped)
-        .navigationTitle(L10n.proxySection)
+        .navigationTitle(L10n.proxy)
         .onAppear {
             savedSharePassword = proxy.sharePassword() ?? ""
             sharePassword = savedSharePassword
@@ -89,23 +89,23 @@ struct ProxyShareEditorView: View {
 
     @ViewBuilder
     private var remoteSection: some View {
-        Section(L10n.proxyRemoteSection) {
+        Section {
             ForEach(store.config.remoteProxies) { remote in
                 remoteRow(remote)
             }
-            Button(L10n.proxyRemoteAdd) { resetRemoteDraft(); addingRemote = true }
-
-            Divider()
-            HStack {
+            FormActionRow {
                 Button {
                     if !proxy.openProxyBrowser() { browserError = true }
                 } label: {
                     Label(L10n.proxyBrowserButton, systemImage: "globe")
                 }
                 .disabled(!proxy.canOpenProxyBrowser)
-                Spacer()
+                Button(L10n.proxyRemoteAdd) { resetRemoteDraft(); addingRemote = true }
             }
-            Text(L10n.proxyBrowserHint).font(.caption).foregroundStyle(.secondary)
+        } header: {
+            Text(L10n.proxyRemoteSection)
+        } footer: {
+            FormFooter(L10n.proxyBrowserHint)
         }
     }
 
@@ -296,7 +296,7 @@ struct ProxyShareEditorView: View {
 
     @ViewBuilder
     private var shareSection: some View {
-        Section(L10n.proxyShareSection) {
+        Section {
             Toggle(L10n.proxyShareToggle, isOn: Binding(
                 get: { store.config.settings.proxyShareEnabled },
                 set: { proxy.setShareEnabled($0) }
@@ -321,19 +321,21 @@ struct ProxyShareEditorView: View {
                 SecureField(L10n.proxyPassword, text: $sharePassword)
             }
 
-            HStack {
-                Button(L10n.save) { saveShare() }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(!shareHasChanges)
-                Spacer()
-                shareStatus
-            }
-
             // About the engine the user is CHOOSING, not the one that failed last.
             if draft.engine == .gost && proxy.gostMissing {
                 warning(L10n.gostNotFound)
             }
-            Text(L10n.proxyIsolatedNetworkHint).font(.caption).foregroundStyle(.secondary)
+            FormActionRow {
+                shareStatus
+            } actions: {
+                Button(L10n.save) { saveShare() }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(!shareHasChanges)
+            }
+        } header: {
+            Text(L10n.proxyShareSection)
+        } footer: {
+            FormFooter(L10n.proxyIsolatedNetworkHint)
         }
     }
 
@@ -448,13 +450,13 @@ struct ProxyShareEditorView: View {
             if let active = proxy.activeProxy, active.authRequired {
                 TextField(L10n.proxyUsername, text: $clientUsername)
                 SecureField(L10n.proxyPassword, text: $clientPassword)
-                HStack {
-                    Button(L10n.save) { saveClientCredentials(for: active.name) }
-                        .disabled(clientUsername.isEmpty)
-                    Spacer()
+                FormActionRow {
                     if proxy.activeProxyNeedsCredentials {
                         warning(L10n.proxyAuthRequired)
                     }
+                } actions: {
+                    Button(L10n.save) { saveClientCredentials(for: active.name) }
+                        .disabled(clientUsername.isEmpty)
                 }
             }
         }
@@ -524,8 +526,7 @@ struct ProxyShareEditorView: View {
 
     @ViewBuilder
     private var terminalHelperSection: some View {
-        Section(L10n.proxyTerminalHelperSection) {
-            Text(L10n.proxyTerminalHelperHint).font(.caption).foregroundStyle(.secondary)
+        Section {
             Text(proxyShellHelperSnippet)
                 .font(.system(size: 11, design: .monospaced))
                 .textSelection(.enabled)
@@ -542,6 +543,10 @@ struct ProxyShareEditorView: View {
             if proxy.activeProxy?.authRequired == true {
                 warning(L10n.proxyTerminalHelperPasswordWarning)
             }
+        } header: {
+            Text(L10n.proxyTerminalHelperSection)
+        } footer: {
+            FormFooter(L10n.proxyTerminalHelperHint)
         }
     }
 
