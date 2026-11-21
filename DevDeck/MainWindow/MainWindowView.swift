@@ -281,15 +281,15 @@ struct MainWindowView: View {
         }
     }
 
-    /// The editor's toolbar "Delete" does the same: the store call, then the selection resets if
-    /// the deleted item was open.
+    /// The editor's toolbar "Delete" does the same: the store call, then, if the deleted item was
+    /// open, back to the workspace's list.
     private func delete(_ item: MainSelection) {
         switch item {
         case .command(let id): store.delete(commandID: id)
         case .chain(let id): store.delete(chainID: id)
         default: return
         }
-        if appModel.selection == item { appModel.selection = nil }
+        if appModel.selection == item { appModel.selection = .commands }
     }
 
     private func duplicateChain(_ id: UUID) {

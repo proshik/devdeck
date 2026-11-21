@@ -80,18 +80,14 @@ struct ChainEditorView: View {
                     }
                     .help(L10n.deleteChainHelp)
 
-                    Button(L10n.save) { save() }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(!hasChanges)
-                    .keyboardShortcut("s")
-                    .help(L10n.saveHelp)
+                    EditorSaveButton(hasChanges: hasChanges) { save() }
                 }
             }
         }
         .confirmationDialog(L10n.deleteChainTitle(chain.name), isPresented: $confirmDelete) {
             Button(L10n.delete, role: .destructive) {
                 store.delete(chainID: chain.id)
-                appModel.selection = nil
+                appModel.selection = .commands
             }
             Button(L10n.cancel, role: .cancel) {}
         } message: {

@@ -162,18 +162,14 @@ struct CommandEditorView: View {
                     }
                     .help(L10n.deleteCommandHelp)
 
-                    Button(L10n.save) { save() }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(!hasChanges)
-                    .keyboardShortcut("s")
-                    .help(L10n.saveHelp)
+                    EditorSaveButton(hasChanges: hasChanges) { save() }
                 }
             }
         }
         .confirmationDialog(L10n.deleteCommandTitle(command.name), isPresented: $confirmDelete) {
             Button(L10n.delete, role: .destructive) {
                 store.delete(commandID: command.id)
-                appModel.selection = nil
+                appModel.selection = .commands
             }
             Button(L10n.cancel, role: .cancel) {}
         } message: {
