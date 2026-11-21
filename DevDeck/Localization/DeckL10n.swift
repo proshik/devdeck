@@ -21,6 +21,7 @@ extension L10n {
     static var panelMoveTo: String { t("Move to", "Перенести в") }
     static var panelMoveUp: String { t("Move up", "Переместить вверх") }
     static var panelMoveDown: String { t("Move down", "Переместить вниз") }
+    static var panelTabsSection: String { t("Panel tabs", "Вкладки панели") }
     static var panelBehavior: String { t("Panel behavior", "Поведение панели") }
     static var panelRememberLast: String { t("Return to the last section", "Возвращаться на последнюю вкладку") }
     static var panelInitialSection: String { t("Initial section", "Начальная вкладка") }

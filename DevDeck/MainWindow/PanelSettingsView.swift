@@ -89,6 +89,31 @@ struct PanelModuleMenu: View {
     private var moduleCount: Int { group?.modules.count ?? 0 }
 }
 
+/// Width of a tab column in the row on the "Panel & Modules" page. Columns that fit share the row.
+/// When they do not, whole columns widen so that the next one visibly peeks in at the trailing
+/// edge: the grouped Form caps its width, and a row ending exactly on a column boundary used to
+/// hide the remaining tabs without any hint that the row scrolls.
+enum PanelColumnSizing {
+    static let spacing: CGFloat = 12
+    /// Narrowest column while the row scrolls; titles and the three controls still fit.
+    static let minimum: CGFloat = 220
+    /// Slightly narrower columns are fine when nothing is hidden and the row does not scroll.
+    static let fittingMinimum: CGFloat = 210
+    static let maximum: CGFloat = 260
+    /// How much of the next column stays visible when the row overflows.
+    static let peek: CGFloat = 40
+
+    static func width(count: Int, viewportWidth: CGFloat) -> CGFloat {
+        guard count > 0 else { return maximum }
+        guard viewportWidth > 0 else { return minimum }
+        let columns = CGFloat(count)
+        let fitting = (viewportWidth - (columns - 1) * spacing) / columns
+        if fitting >= fittingMinimum { return min(maximum, fitting) }
+        let whole = max(1, ((viewportWidth - peek) / (minimum + spacing)).rounded(.down))
+        return min(maximum, max(minimum, (viewportWidth - peek) / whole - spacing))
+    }
+}
+
 struct PanelSettingsView: View {
     @Environment(CommandStore.self) private var store
     @State private var targetedSection: String?
@@ -100,77 +125,56 @@ struct PanelSettingsView: View {
     /// Preview of a tab heading drag; the configuration changes only when it is dropped.
     @State private var tabReorder: PanelTabReorder?
     @State private var tabDragSession = 0
-    private let cardSpacing: CGFloat = 12
+    private let cardSpacing = PanelColumnSizing.spacing
 
     private var cardWidth: CGFloat {
-        let count = max(store.config.panel.sections.count, 1)
-        let fittingWidth = (cardsViewportWidth - CGFloat(count - 1) * 12) / CGFloat(count)
-        return min(260, max(220, fittingWidth))
+        PanelColumnSizing.width(count: store.config.panel.sections.count, viewportWidth: cardsViewportWidth)
     }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                Text(L10n.panelArrangementHelp).font(.callout).foregroundStyle(.secondary)
-                ScrollView(.horizontal) {
-                    HStack(alignment: .top, spacing: cardSpacing) {
-                        if store.config.panel.sections.isEmpty {
-                            Text(L10n.panelNoTabs).foregroundStyle(.secondary).padding(.vertical, 12)
-                        }
-                        ForEach(rowLayouts) { layout in
-                            if let section = PanelSection(rawValue: layout.id) {
-                                if tabReorder?.dragged == layout.id {
-                                    tabPlaceholder(layout, section: section)
-                                } else {
-                                    sectionCard(layout, section: section).frame(width: cardWidth)
-                                }
-                            }
-                        }
-                    }.fixedSize(horizontal: false, vertical: true)
-                        .overlay {
-                            if tabReorder != nil {
-                                Color.clear.contentShape(Rectangle())
-                                    .onDrop(of: [.devDeckPanelItem], delegate: PanelTabRowDropDelegate(
-                                        reorder: $tabReorder, columnWidth: cardWidth, spacing: cardSpacing,
-                                        onEnter: { autoscroller.beginTracking() },
-                                        commit: commitTabDrag))
-                            }
-                        }
-                        .padding(.vertical, 2)
-                        .background(PanelRowScrollViewLocator(autoscroller: autoscroller))
+        // One grouped Form, like every other settings page: the system owns the page margins,
+        // section headers and footers, so the custom tab row lines up with the behavior rows.
+        Form {
+            Section {
+                tabRow
+                FormActionRow {
+                    Button(L10n.panelRestoreLayout) { store.updatePanel { $0.restoreStandardLayout() } }
+                    Button(L10n.panelAddTab) { tabDraft = PanelTabDraft() }
                 }
-                .fixedSize(horizontal: false, vertical: true)
-                .scrollBounceBehavior(.basedOnSize)
-                .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { cardsViewportWidth = $0 }
-                Button(L10n.panelAddTab, systemImage: "plus") { tabDraft = PanelTabDraft() }
+            } header: {
+                Text(L10n.panelTabsSection)
+            } footer: {
+                FormFooter(L10n.panelArrangementHelp)
+            }
+            Section {
                 moduleCatalogue
-                Text(L10n.panelVisibilityHelp).font(.callout).foregroundStyle(.secondary)
-                Form {
-                    Section(L10n.panelBehavior) {
-                        Toggle(L10n.panelRememberLast, isOn: Binding(
-                            get: { store.config.panel.rememberLastSection },
-                            set: { value in store.updatePanel { $0.rememberLastSection = value } }
-                        ))
-                        Picker(L10n.panelInitialSection, selection: Binding(
-                            get: { store.config.panel.initialSection },
-                            set: { value in store.updatePanel { $0.initialSection = value } }
-                        )) {
-                            if store.config.panel.sections.isEmpty {
-                                Text(L10n.panelNewTab).tag(store.config.panel.initialSection)
-                            }
-                            ForEach(store.config.panel.sections) { Text($0.title).tag($0.id) }
-                        }.disabled(store.config.panel.rememberLastSection || store.config.panel.sections.isEmpty)
-                        Toggle(L10n.panelMemoryInEnvironment, isOn: Binding(
-                            get: { store.config.panel.showMemoryInEnvironment },
-                            set: { value in store.updatePanel { $0.showMemoryInEnvironment = value } }
-                        ))
+            } header: {
+                Text(L10n.panelAvailableModules)
+            } footer: {
+                FormFooter(L10n.panelVisibilityHelp)
+            }
+            Section(L10n.panelBehavior) {
+                Toggle(L10n.panelRememberLast, isOn: Binding(
+                    get: { store.config.panel.rememberLastSection },
+                    set: { value in store.updatePanel { $0.rememberLastSection = value } }
+                ))
+                Picker(L10n.panelInitialSection, selection: Binding(
+                    get: { store.config.panel.initialSection },
+                    set: { value in store.updatePanel { $0.initialSection = value } }
+                )) {
+                    if store.config.panel.sections.isEmpty {
+                        Text(L10n.panelNewTab).tag(store.config.panel.initialSection)
                     }
-                    Section {
-                        Button(L10n.panelRestoreLayout) { store.updatePanel { $0.restoreStandardLayout() } }
-                    }
-                }.formStyle(.grouped).scrollDisabled(true).fixedSize(horizontal: false, vertical: true)
-            }.padding(20).frame(maxWidth: .infinity, alignment: .leading)
-        }.navigationTitle(L10n.deckPanel)
+                    ForEach(store.config.panel.sections) { Text($0.title).tag($0.id) }
+                }.disabled(store.config.panel.rememberLastSection || store.config.panel.sections.isEmpty)
+                Toggle(L10n.panelMemoryInEnvironment, isOn: Binding(
+                    get: { store.config.panel.showMemoryInEnvironment },
+                    set: { value in store.updatePanel { $0.showMemoryInEnvironment = value } }
+                ))
+            }
+        }
+        .formStyle(.grouped)
+        .navigationTitle(L10n.deckPanel)
         .sheet(item: $tabDraft) { draft in
             PanelTabEditor(draft: draft) { name, icon in
                 store.updatePanel {
@@ -179,6 +183,39 @@ struct PanelSettingsView: View {
                 }
             }
         }
+    }
+
+    private var tabRow: some View {
+        ScrollView(.horizontal) {
+            HStack(alignment: .top, spacing: cardSpacing) {
+                if store.config.panel.sections.isEmpty {
+                    Text(L10n.panelNoTabs).foregroundStyle(.secondary).padding(.vertical, 12)
+                }
+                ForEach(rowLayouts) { layout in
+                    if let section = PanelSection(rawValue: layout.id) {
+                        if tabReorder?.dragged == layout.id {
+                            tabPlaceholder(layout, section: section)
+                        } else {
+                            sectionCard(layout, section: section).frame(width: cardWidth)
+                        }
+                    }
+                }
+            }.fixedSize(horizontal: false, vertical: true)
+                .overlay {
+                    if tabReorder != nil {
+                        Color.clear.contentShape(Rectangle())
+                            .onDrop(of: [.devDeckPanelItem], delegate: PanelTabRowDropDelegate(
+                                reorder: $tabReorder, columnWidth: cardWidth, spacing: cardSpacing,
+                                onEnter: { autoscroller.beginTracking() },
+                                commit: commitTabDrag))
+                    }
+                }
+                .padding(.vertical, 2)
+                .background(PanelRowScrollViewLocator(autoscroller: autoscroller))
+        }
+        .fixedSize(horizontal: false, vertical: true)
+        .scrollBounceBehavior(.basedOnSize)
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { cardsViewportWidth = $0 }
     }
 
     /// Columns in the previewed order while a tab heading is dragged, otherwise as configured.
@@ -283,31 +320,28 @@ struct PanelSettingsView: View {
         }
     }
 
-    private var moduleCatalogue: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(L10n.panelAvailableModules).font(.headline)
-            if store.config.panel.availableModules.isEmpty {
-                Text(L10n.panelAllModulesAdded).font(.callout).foregroundStyle(.secondary)
-            } else {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 190))], alignment: .leading, spacing: 8) {
-                    ForEach(store.config.panel.availableModules) { module in
-                        HStack(spacing: 6) {
-                            Label(module.title, systemImage: module.symbol).lineLimit(1).help(module.title)
-                            Spacer(minLength: 4)
-                            Menu(L10n.panelAddModule, systemImage: "plus") {
-                                ForEach(store.config.panel.sections) { layout in
-                                    if let section = PanelSection(rawValue: layout.id) {
-                                        Button(layout.title) { store.updatePanel { $0.moveModule(module, to: section) } }
-                                    }
+    @ViewBuilder private var moduleCatalogue: some View {
+        if store.config.panel.availableModules.isEmpty {
+            Text(L10n.panelAllModulesAdded).foregroundStyle(.secondary)
+        } else {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 190))], alignment: .leading, spacing: 8) {
+                ForEach(store.config.panel.availableModules) { module in
+                    HStack(spacing: 6) {
+                        Label(module.title, systemImage: module.symbol).lineLimit(1).help(module.title)
+                        Spacer(minLength: 4)
+                        Menu(L10n.panelAddModule, systemImage: "plus") {
+                            ForEach(store.config.panel.sections) { layout in
+                                if let section = PanelSection(rawValue: layout.id) {
+                                    Button(layout.title) { store.updatePanel { $0.moveModule(module, to: section) } }
                                 }
-                            }.labelStyle(.iconOnly).menuStyle(.borderlessButton).menuIndicator(.hidden)
-                                .fixedSize().controlHoverFeedback().disabled(store.config.panel.sections.isEmpty)
-                                .help(L10n.panelAddTo)
-                        }.font(.callout).padding(8)
-                            .background(.quaternary.opacity(0.3), in: RoundedRectangle(cornerRadius: 6))
-                            .contentShape(Rectangle())
-                            .draggable(PanelDragItem(kind: .module, id: module.rawValue))
-                    }
+                            }
+                        }.labelStyle(.iconOnly).menuStyle(.borderlessButton).menuIndicator(.hidden)
+                            .fixedSize().controlHoverFeedback().disabled(store.config.panel.sections.isEmpty)
+                            .help(L10n.panelAddTo)
+                    }.font(.callout).padding(8)
+                        .background(.quaternary.opacity(0.3), in: RoundedRectangle(cornerRadius: 6))
+                        .contentShape(Rectangle())
+                        .draggable(PanelDragItem(kind: .module, id: module.rawValue))
                 }
             }
         }
