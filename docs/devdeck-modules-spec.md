@@ -511,6 +511,16 @@ DevDeck automation help
 использования, поэтому её CLI не попадает в рабочий DevDeck; релиз этот флаг
 отвергает.
 
+**Изоляция dev-сборки при любом запуске (21 ноября 2026).** Shortcuts, launchd
+и Finder запускают app без аргументов — dev-сборка тогда открывалась на рабочем
+config. Каталог данных dev-сборки теперь берётся по порядку: аргумент
+`--dev-data-directory` → ключ Info.plist `DevDeckDevDataDirectory` (его
+прописывает упаковка приёмочной сборки перед codesign) → обычный каталог.
+Путь — абсолютный и не каталог установленного DevDeck, иначе отказ при запуске.
+Учитывается только в Debug: у релиза ключа нет, поведение не меняется. CLI того
+же бинарника берёт каталог так же, поэтому `…/DevDeckStage7Reviewed.app/Contents/
+MacOS/DevDeck automation …` без флагов идёт в сокет этой dev-сборки.
+
 **Коды выхода CLI.** 0 — успех: `succeeded`, daemon поднялся (`running`),
 `alreadyRunning`, `openedInTerminal`; stop — `stopped`/`notRunning`; любой
 status; list. 1 — `failed` (run команды/цепочки, а также run, закончившийся

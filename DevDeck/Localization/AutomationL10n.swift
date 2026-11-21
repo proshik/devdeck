@@ -208,8 +208,8 @@ extension L10n {
             run waits for a one-shot command or a chain up to --timeout (default \(AutomationLimits.defaultTimeoutSeconds) s,
             \(AutomationLimits.minTimeoutSeconds)…\(AutomationLimits.maxTimeoutSeconds)); a daemon until it is up. --directory is for commands that ask
             for a directory on every run; a relative path is taken from the current directory.
-            DevDeck must be running — this command does not start it. A development build needs
-            --dev-data-directory PATH, the same as the running development app.
+            DevDeck must be running — this command does not start it. A development build uses the
+            data directory packaged into it, or --dev-data-directory PATH like the running dev app.
 
             Output: key: value lines on stdout, errors on stderr; list prints kind<TAB>UUID<TAB>name.
 
@@ -232,8 +232,8 @@ extension L10n {
             run ждёт разовую команду или цепочку до --timeout (по умолчанию \(AutomationLimits.defaultTimeoutSeconds) с,
             \(AutomationLimits.minTimeoutSeconds)…\(AutomationLimits.maxTimeoutSeconds)); daemon — пока не поднимется. --directory — для команд, которые
             спрашивают каталог при каждом запуске; относительный путь берётся от текущего каталога.
-            DevDeck должен быть запущен — эта команда его не запускает. Dev-сборке нужен
-            --dev-data-directory PATH, тот же, что у запущенной dev-app.
+            DevDeck должен быть запущен — эта команда его не запускает. Dev-сборка берёт каталог
+            данных, упакованный в неё, или --dev-data-directory PATH, как у запущенной dev-app.
 
             Вывод: строки key: value в stdout, ошибки — в stderr; list печатает тип<TAB>UUID<TAB>имя.
 

@@ -99,10 +99,7 @@ enum AutomationEndpoint {
     static let maxPathBytes = 103
 
     /// `~/Library/Application Support/DevDeck` — where a release build keeps its data.
-    static var installedDataDirectory: URL {
-        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("DevDeck", isDirectory: true)
-    }
+    static var installedDataDirectory: URL { AppRuntime.installedSupportDirectory }
 
     /// `~/Library/Caches/DevDeck` — created 0700 by the server.
     static var socketDirectory: URL {

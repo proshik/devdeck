@@ -8,9 +8,9 @@ final class AutomationCLIParsingTests: XCTestCase {
 
     private let devDir = "/Users/someone/dev-data"
 
-    private func parse(_ args: [String], cwd: String = "/Users/someone/project",
-                       development: Bool = false) -> Result<AutomationCLI.Invocation, AutomationCLI.UsageError> {
-        AutomationCLI.parse(args, currentDirectory: cwd, isDevelopmentBuild: development)
+    private func parse(_ args: [String], cwd: String = "/Users/someone/project", development: Bool = false,
+                       info: [String: Any] = [:]) -> Result<AutomationCLI.Invocation, AutomationCLI.UsageError> {
+        AutomationCLI.parse(args, currentDirectory: cwd, isDevelopmentBuild: development, bundleInfo: info)
     }
 
     private func request(_ args: [String], cwd: String = "/Users/someone/project") -> AutomationRequest? {
@@ -18,8 +18,8 @@ final class AutomationCLIParsingTests: XCTestCase {
         return request
     }
 
-    private func usage(_ args: [String], development: Bool = false) -> String? {
-        guard case .failure(let error) = parse(args, development: development) else { return nil }
+    private func usage(_ args: [String], development: Bool = false, info: [String: Any] = [:]) -> String? {
+        guard case .failure(let error) = parse(args, development: development, info: info) else { return nil }
         return error.message
     }
 
@@ -106,6 +106,33 @@ final class AutomationCLIParsingTests: XCTestCase {
         XCTAssertNotNil(usage(["list", "--dev-data-directory", "relative/dir"], development: true))
         let installed = AutomationEndpoint.installedDataDirectory.path
         XCTAssertNotNil(usage(["list", "--dev-data-directory", installed], development: true))
+    }
+
+    // MARK: the packaged data directory (Info.plist), so a bare launch of the binary stays isolated
+
+    private var packaged: [String: Any] { [AppRuntime.developmentDirectoryInfoKey: "/Users/someone/packaged"] }
+
+    func testDevelopmentBuildUsesThePackagedDataDirectory() {
+        guard case .success(.request(_, let directory)) = parse(["list"], development: true, info: packaged)
+        else { return XCTFail("the packaged directory stands in for the flag") }
+        XCTAssertEqual(directory, "/Users/someone/packaged")
+    }
+
+    func testFlagWinsOverThePackagedDataDirectory() {
+        guard case .success(.request(_, let directory)) =
+                parse(["list", "--dev-data-directory", devDir], development: true, info: packaged)
+        else { return XCTFail("flag must parse") }
+        XCTAssertEqual(directory, devDir)
+    }
+
+    func testInvalidPackagedDataDirectoryIsAUsageError() {
+        XCTAssertNotNil(usage(["list"], development: true, info: [AppRuntime.developmentDirectoryInfoKey: "relative"]))
+    }
+
+    func testReleaseBuildIgnoresThePackagedDataDirectory() {
+        guard case .success(.request(_, let directory)) = parse(["list"], development: false, info: packaged)
+        else { return XCTFail("a release build parses without a data directory") }
+        XCTAssertNil(directory, "release behaviour does not change")
     }
 
     func testReleaseBuildRejectsDevDataDirectory() {
@@ -198,7 +225,7 @@ final class AutomationCLIExecutionTests: XCTestCase {
 
     private func execute(_ args: [String], development: Bool = false,
                          send: @escaping AutomationCLI.Sender) -> AutomationCLI.Outcome {
-        AutomationCLI.execute(args, currentDirectory: "/tmp", isDevelopmentBuild: development,
+        AutomationCLI.execute(args, currentDirectory: "/tmp", isDevelopmentBuild: development, bundleInfo: [:],
                               bundleID: "com.proshik.DevDeck", send: send)
     }
 

@@ -44,7 +44,7 @@ enum AutomationCLI {
     /// Called by `DevDeckMain` with the arguments after `automation`. Returns the exit code.
     static func main(_ arguments: [String]) -> Int32 {
         let outcome = execute(arguments, currentDirectory: FileManager.default.currentDirectoryPath,
-                              isDevelopmentBuild: isDevelopmentBuild,
+                              isDevelopmentBuild: isDevelopmentBuild, bundleInfo: Bundle.main.infoDictionary ?? [:],
                               bundleID: Bundle.main.bundleIdentifier ?? "DevDeck") { request, url, wait in
             AutomationSocketClient.send(request, socketURL: url, receiveTimeout: wait)
         }
@@ -54,8 +54,9 @@ enum AutomationCLI {
     }
 
     static func execute(_ arguments: [String], currentDirectory: String, isDevelopmentBuild: Bool,
-                        bundleID: String, send: Sender) -> Outcome {
-        switch parse(arguments, currentDirectory: currentDirectory, isDevelopmentBuild: isDevelopmentBuild) {
+                        bundleInfo: [String: Any], bundleID: String, send: Sender) -> Outcome {
+        switch parse(arguments, currentDirectory: currentDirectory, isDevelopmentBuild: isDevelopmentBuild,
+                     bundleInfo: bundleInfo) {
         case .failure(let error):
             return Outcome(code: AutomationExitCode.usage, stdout: "", stderr: error.message + "\n")
         case .success(.help):
@@ -81,23 +82,34 @@ enum AutomationCLI {
 
     // MARK: parsing
 
-    static func parse(_ arguments: [String], currentDirectory: String,
-                      isDevelopmentBuild: Bool) -> Result<Invocation, UsageError> {
+    /// `bundleInfo` is the executable's Info.plist: a packaged development build carries its data
+    /// directory there, so the bare binary reaches the same isolated app the bare launch starts.
+    static func parse(_ arguments: [String], currentDirectory: String, isDevelopmentBuild: Bool,
+                      bundleInfo: [String: Any] = [:]) -> Result<Invocation, UsageError> {
         // The data directory first, and in plain English: in a development build the language
-        // preference is read through `AppRuntime`, which refuses a bad `--dev-data-directory`
-        // outright — so no localized text may be produced before the flag is known to be valid.
+        // preference is read through `AppRuntime`, which refuses a bad data directory outright —
+        // so no localized text may be produced before it is known to be valid.
         var args = arguments
-        var dataDirectory: String?
-        if let index = args.firstIndex(of: "--dev-data-directory") {
-            guard args.indices.contains(index + 1) else {
-                return .failure(UsageError(message: plainUsage("Option --dev-data-directory needs a value.")))
+        let flag = AppRuntime.developmentDirectoryArgument
+        let dataDirectory: String?
+        if isDevelopmentBuild {
+            switch AppRuntime.resolveDevelopmentDirectory(arguments: args, info: bundleInfo,
+                                                          installed: AutomationEndpoint.installedDataDirectory) {
+            case .none:
+                return .failure(UsageError(message: plainUsage(
+                    "This is a development build without a data directory: pass \(flag) PATH, the same as the running development DevDeck.")))
+            case .invalid(let reason):
+                return .failure(UsageError(message: plainUsage(reason)))
+            case .directory(let url):
+                dataDirectory = url.path
             }
-            dataDirectory = args[index + 1]
-            args.removeSubrange(index...(index + 1))
+        } else {
+            if args.contains(flag) {
+                return .failure(UsageError(message: plainUsage("\(flag) is only accepted by development builds.")))
+            }
+            dataDirectory = nil
         }
-        if let problem = dataDirectoryProblem(dataDirectory, isDevelopmentBuild: isDevelopmentBuild) {
-            return .failure(UsageError(message: plainUsage(problem)))
-        }
+        if let index = args.firstIndex(of: flag) { args.removeSubrange(index...min(index + 1, args.count - 1)) }
 
         if args.contains("--help") || args.contains("-h") || args.first == "help" { return .success(.help) }
         guard let first = args.first else { return usage(L10n.automationUsageNoOperation) }
@@ -152,24 +164,6 @@ enum AutomationCLI {
         return .success(.request(AutomationRequest(operation: operation, kind: kind, target: positional[1],
                                                    directory: directory, timeoutSeconds: timeout),
                                  dataDirectory: dataDirectory))
-    }
-
-    /// A development build must name its data directory, so its command line can never reach the
-    /// installed DevDeck; a release build has no such flag.
-    private static func dataDirectoryProblem(_ directory: String?, isDevelopmentBuild: Bool) -> String? {
-        guard isDevelopmentBuild else {
-            return directory == nil ? nil : "--dev-data-directory is only accepted by development builds."
-        }
-        guard let directory else {
-            return "This is a development build: pass --dev-data-directory PATH, the same as the running development DevDeck."
-        }
-        guard directory.hasPrefix("/") else { return "--dev-data-directory requires an absolute path." }
-        let given = URL(fileURLWithPath: directory, isDirectory: true).resolvingSymlinksInPath().standardizedFileURL
-        let installed = AutomationEndpoint.installedDataDirectory.resolvingSymlinksInPath().standardizedFileURL
-        guard given.path != installed.path else {
-            return "--dev-data-directory must not be the installed DevDeck's data directory."
-        }
-        return nil
     }
 
     private static func absolute(_ path: String, from currentDirectory: String) -> String {
