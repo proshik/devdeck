@@ -28,6 +28,7 @@ struct MonitoringHistoryView: View {
             }
         }
         .chartYScale(domain: 0...100)
+        .environment(\.locale, AppDateFormat.locale())
         .frame(height: 160)
         .overlay { if !Self.hasMeasurements(points, section: section) { Text(L10n.monitoringWaitingHistory).foregroundStyle(.secondary).padding(4).background(.background) } }
         .accessibilityLabel(L10n.monitoringHistoryTitle)

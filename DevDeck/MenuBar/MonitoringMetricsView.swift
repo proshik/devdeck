@@ -33,7 +33,7 @@ struct MonitoringMetricsView: View {
             HStack {
                 if let measuredAt {
                     Text((enabled ? L10n.monitoringUpdated : L10n.monitoringLast) + ": "
-                         + measuredAt.formatted(date: .omitted, time: .standard))
+                         + AppDateFormat.string(measuredAt, date: .omitted, time: .standard))
                 } else { Text(L10n.deckNoData) }
                 Spacer(minLength: 0)
                 if let onDetails {
@@ -76,7 +76,7 @@ struct MonitoringMetricsView: View {
         row(HeaderMetric.diskVM.title(engineName: name), value?.disk?.format(), "internaldrive")
         if value?.disk != nil, let date = value?.diskMeasuredAt {
             Text(HeaderMetric.diskVM.title(engineName: name) + " · " + L10n.monitoringUpdated + ": "
-                 + date.formatted(date: .omitted, time: .standard))
+                 + AppDateFormat.string(date, date: .omitted, time: .standard))
                 .font(.caption2).foregroundStyle(.secondary)
         }
         row(HeaderMetric.cluster.title(engineName: name), value?.cluster.map { L10n.clusterHealthValue($0.level) }, "server.rack")
@@ -103,9 +103,9 @@ struct MonitoringMetricsView: View {
             if value.consumers.isEmpty { Text(L10n.energyNoData).font(.caption).foregroundStyle(.secondary) }
             if !compact {
                 Text(value.isDischarging
-                     ? L10n.energySince(tally.since.formatted(date: .omitted, time: .shortened))
-                     : L10n.energyLastDischarge(tally.since.formatted(date: .omitted, time: .shortened),
-                                               tally.lastUpdate.formatted(date: .omitted, time: .shortened)))
+                     ? L10n.energySince(AppDateFormat.string(tally.since, date: .omitted, time: .shortened))
+                     : L10n.energyLastDischarge(AppDateFormat.string(tally.since, date: .omitted, time: .shortened),
+                                               AppDateFormat.string(tally.lastUpdate, date: .omitted, time: .shortened)))
                     .font(.caption).foregroundStyle(.secondary)
             }
         }

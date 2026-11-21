@@ -39,7 +39,7 @@ extension L10n {
     }
 
     static func recoveryReason(_ reason: RecoverySuspensionReason, since: Date) -> String {
-        let time = since.formatted(date: .abbreviated, time: .shortened)
+        let time = AppDateFormat.string(since, date: .abbreviated, time: .shortened)
         switch reason {
         case .operationCrashed(.updateInstall):
             return t("The update did not install twice · \(time)", "Обновление дважды не установилось · \(time)")

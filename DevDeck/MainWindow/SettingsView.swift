@@ -91,7 +91,7 @@ struct UpdatesView: View {
             Section("DevDeck") {
                 LabeledContent(L10n.deckVersion, value: updates.currentVersion)
                 if let checked = updates.lastCheckedAt {
-                    LabeledContent(L10n.deckLastCheck, value: checked.formatted(date: .abbreviated, time: .shortened))
+                    LabeledContent(L10n.deckLastCheck, value: AppDateFormat.string(checked, date: .abbreviated, time: .shortened))
                 }
                 FormActionRow {
                     Text(updates.statusText).foregroundStyle(.secondary)

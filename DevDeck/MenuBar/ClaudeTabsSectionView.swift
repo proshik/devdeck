@@ -46,9 +46,7 @@ struct ClaudeTabsSectionView: View {
             return L10n.claudeTabsNoSnapshot
         }
         // Include the date for older snapshots, so a pre-reboot copy cannot look freshly saved.
-        let formatter = DateFormatter()
-        formatter.timeStyle = .short
-        formatter.dateStyle = Calendar.current.isDateInToday(snapshot.capturedAt) ? .none : .short
-        return formatter.string(from: snapshot.capturedAt)
+        let today = Calendar.current.isDateInToday(snapshot.capturedAt)
+        return AppDateFormat.string(snapshot.capturedAt, date: today ? .omitted : .numeric, time: .shortened)
     }
 }

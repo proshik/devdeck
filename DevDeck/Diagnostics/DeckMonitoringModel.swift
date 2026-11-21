@@ -169,7 +169,7 @@ struct MonitoringContext: Equatable {
         guard !context.settings.enabled || suspended || !context.hostEnabled else { return nil }
         let state = !context.hostEnabled ? L10n.monitoringMemoryOff : L10n.deckCollectionOff
         guard let date = snapshot.mac?.date else { return state }
-        return state + " · " + L10n.monitoringLast + ": " + date.formatted(date: .omitted, time: .standard)
+        return state + " · " + L10n.monitoringLast + ": " + AppDateFormat.string(date, date: .omitted, time: .standard)
     }
     func begin(_ reader: UUID) { readers.insert(reader); launchIfNeeded() }
     func end(_ reader: UUID) {

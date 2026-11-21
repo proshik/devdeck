@@ -54,7 +54,7 @@ struct ClipboardEntryRow: View {
                         Text(entry.displayTitle).lineLimit(1)
                             .frame(maxWidth: .infinity, alignment: .leading)
                         (Text(entry.sourceName ?? entry.sourceBundleID ?? L10n.clipboardUnknownSource)
-                            + Text(" · ") + Text(entry.capturedAt, style: .time))
+                            + Text(" · ") + Text(AppDateFormat.string(entry.capturedAt, date: .omitted, time: .shortened)))
                             .font(.caption).foregroundStyle(.secondary)
                     }
                 }.contentShape(Rectangle())
@@ -192,7 +192,7 @@ struct ClipboardView: View {
                             }
                             Text(entry.sourceName ?? entry.sourceBundleID ?? L10n.clipboardUnknownSource)
                                 .font(.caption).foregroundStyle(.secondary)
-                            Text(entry.capturedAt, format: .dateTime.day().month().hour().minute())
+                            Text(AppDateFormat.dayMonthTime(entry.capturedAt))
                                 .font(.caption).foregroundStyle(.secondary)
                         }.padding(.vertical, 4).tag(entry.id)
                         .contextMenu {
