@@ -1,6 +1,7 @@
 name: Release
 
-# Manual "Run workflow" button from the master/main branch.
+# Manual "Run workflow" button from the master/main branch. Publishes the DMG as a GitHub
+# Release, commits the bumped version and appcast.xml, and updates the Homebrew tap cask.
 on:
   workflow_dispatch:
     inputs:
