@@ -2,7 +2,7 @@ import SwiftUI
 
 /// Starts in the menu bar (LSUIElement). Opening the full window enables Dock/Cmd-Tab;
 /// closing it returns to accessory mode while background services keep running.
-@main
+/// Started by `DevDeckMain`, which first routes `DevDeck automation …` to the command line.
 struct DevDeckApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 

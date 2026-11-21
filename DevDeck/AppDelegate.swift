@@ -24,6 +24,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let brightness = DisplayBrightnessModel()
 
     private var menuBar: MenuBarController?
+    private var automationSocket: AutomationSocketServer?
     private lazy var termination = AppTerminationCoordinator(network: monitoring.network)
 
     override init() {
@@ -74,8 +75,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if !AppRuntime.isIsolated { proxyManager.start() }
         // Shortcuts actions (App Intents) reach saved commands and chains through this service.
         // It reads the config live, so the settings switch and the per-item flags apply at once.
-        AutomationHost.service = AutomationService(manager: manager,
-                                                   config: { [weak store] in store?.config ?? .empty })
+        let automation = AutomationService(manager: manager, config: { [weak store] in store?.config ?? .empty })
+        AutomationHost.service = automation
+        // `DevDeck automation …` reaches the same service over a local socket — it works with the
+        // ad-hoc signature, which App Intents do not.
+        startAutomationSocket(automation)
         // Start Sparkle with the persisted auto-update preference; populates the indicator when off.
         if !AppRuntime.isIsolated {
             updateController.configure(autoUpdateEnabled: store.config.settings.autoUpdateEnabled)
@@ -114,6 +118,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                          })
     }
 
+    /// Listen for the command line. The socket is per bundle id and data directory, so a
+    /// development build never answers for the installed DevDeck. A failure costs only the CLI.
+    private func startAutomationSocket(_ service: AutomationService) {
+        let router = AutomationRequestRouter(service: service)
+        let url = AutomationEndpoint.socketURL(bundleID: Bundle.main.bundleIdentifier ?? "DevDeck",
+                                               dataDirectory: AppRuntime.supportDirectory)
+        let server = AutomationSocketServer(socketURL: url) { request in await router.handle(request) }
+        do {
+            try server.start()
+            automationSocket = server
+            DiagnosticLog.shared.log("Automation: command line listening at \(url.path)")
+        } catch {
+            DiagnosticLog.shared.log("Automation: command line unavailable — \(error)", level: .warn)
+        }
+    }
+
     /// Last snapshot before quitting, so a crash-free quit never loses the most recent tab layout.
     ///
     /// `captureBeforeShutdown`, not `captureNow`: quitting is an automatic path and must respect
@@ -123,6 +143,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// documented on `captureBeforeShutdown` itself; it is not unconditionally bounded.
     func applicationWillTerminate(_ notification: Notification) {
         guard !AppRuntime.isTesting else { return }
+        automationSocket?.stop()
         awake.stop()   // the privileged helper restores sleep even after this process exits
         monitoring.stop()
         clipboard.stop()

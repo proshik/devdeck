@@ -7,7 +7,7 @@ struct AutomationReport: Equatable, Sendable {
         case succeeded, failed, timedOut, running, stopped, alreadyRunning, openedInTerminal, notRunning, idle
     }
 
-    enum Kind: String, Sendable {
+    enum Kind: String, Codable, Sendable {
         case command, chain
     }
 

@@ -37,6 +37,10 @@ enum AutomationRefusal: Error, Equatable, LocalizedError {
     case proxyUnavailable(String)
     case sudoDaemonUnsupported(String)
     case notReady
+    /// Command line: no command/chain of this kind is called that (and it is no UUID of one).
+    case unknownName(AutomationReport.Kind, String)
+    /// Command line: several share the name — the caller must pick one by UUID.
+    case ambiguousName(AutomationReport.Kind, String, [UUID])
 
     var message: String {
         switch self {
@@ -52,6 +56,8 @@ enum AutomationRefusal: Error, Equatable, LocalizedError {
         case .proxyUnavailable(let name): L10n.automationProxyUnavailable(name)
         case .sudoDaemonUnsupported(let name): L10n.automationSudoDaemon(name)
         case .notReady: L10n.automationNotReady
+        case .unknownName(let kind, let name): L10n.automationUnknownName(kind == .chain, name)
+        case .ambiguousName(let kind, let name, let ids): L10n.automationAmbiguousName(kind == .chain, name, ids)
         }
     }
 
@@ -123,6 +129,41 @@ final class AutomationService {
     /// comes from `perform` with a clear message instead of a silently unresolved parameter.
     func commandName(_ id: UUID) -> String? { config().commands.first { $0.id == id }?.name }
     func chainName(_ id: UUID) -> String? { config().chains.first { $0.id == id }?.name }
+
+    // MARK: what the command line may see
+
+    struct ListedItem: Equatable {
+        let kind: AutomationReport.Kind
+        let id: UUID
+        let name: String
+    }
+
+    /// `DevDeck automation list`: the allowed commands, then the allowed chains. Unlike the
+    /// Shortcuts picker, which just shows nothing, a disabled switch is a refusal here.
+    func listing() throws -> [ListedItem] {
+        guard config().settings.automationEnabled else { throw AutomationRefusal.automationDisabled }
+        return availableCommands().map { ListedItem(kind: .command, id: $0.id, name: $0.name) }
+            + availableChains().map { ListedItem(kind: .chain, id: $0.id, name: $0.name) }
+    }
+
+    /// The id the command line means: a UUID (any case) or the exact name among all items of the
+    /// kind. Permission is checked afterwards by the operation itself, so a disallowed command is
+    /// refused as "not allowed" rather than reported as unknown.
+    func resolve(_ kind: AutomationReport.Kind, _ query: String) throws -> UUID {
+        let config = config()
+        guard config.settings.automationEnabled else { throw AutomationRefusal.automationDisabled }
+        let items: [(id: UUID, name: String)] = kind == .command
+            ? config.commands.map { ($0.id, $0.name) } : config.chains.map { ($0.id, $0.name) }
+        if let id = UUID(uuidString: query.trimmingCharacters(in: .whitespaces)) {
+            return id   // an unknown id is refused by the operation, with the id in the message
+        }
+        let matches = items.filter { $0.name == query }
+        switch matches.count {
+        case 0: throw AutomationRefusal.unknownName(kind, query)
+        case 1: return matches[0].id
+        default: throw AutomationRefusal.ambiguousName(kind, query, matches.map(\.id))
+        }
+    }
 
     // MARK: commands
 
