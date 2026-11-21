@@ -77,15 +77,10 @@ struct ChainEditorView: View {
                 ToolbarItemGroup {
                     Button(role: .destructive) { confirmDelete = true } label: {
                         Label(L10n.delete, systemImage: "trash")
-                            .labelStyle(.titleAndIcon)
-                            .foregroundStyle(.red)
                     }
                     .help(L10n.deleteChainHelp)
 
-                    Button { save() } label: {
-                        Label(hasChanges ? L10n.save : L10n.saved, systemImage: hasChanges ? "checkmark.circle.fill" : "checkmark")
-                            .labelStyle(.titleAndIcon)
-                    }
+                    Button(L10n.save) { save() }
                     .buttonStyle(.borderedProminent)
                     .disabled(!hasChanges)
                     .keyboardShortcut("s")

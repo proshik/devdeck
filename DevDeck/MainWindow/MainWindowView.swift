@@ -6,6 +6,8 @@ struct MainWindowView: View {
     @Environment(AppModel.self) private var appModel
     @Environment(PermissionsModel.self) private var permissions
     @Environment(RecoveryModel.self) private var recovery: RecoveryModel?
+    /// The command or chain whose "Delete…" from the inner list awaits confirmation.
+    @State private var pendingDeletion: MainSelection?
 
     var body: some View {
         NavigationSplitView {
@@ -153,6 +155,10 @@ struct MainWindowView: View {
                                 .tag(MainSelection.chain(chain.id))
                                 .contextMenu {
                                     Button(L10n.duplicate) { duplicateChain(chain.id) }
+                                    Divider()
+                                    Button("\(L10n.delete)…", role: .destructive) {
+                                        pendingDeletion = .chain(chain.id)
+                                    }
                                 }
                         }.onMove { store.moveChains($0, to: $1) }
                     }
@@ -169,6 +175,15 @@ struct MainWindowView: View {
             .frame(minWidth: 190, idealWidth: 230, maxWidth: 300)
             commandDetail.frame(minWidth: 350, maxWidth: .infinity, maxHeight: .infinity)
         }.navigationTitle(L10n.deckCommands)
+        // The same confirmation as the editor's toolbar "Delete".
+        .confirmationDialog(deletionTitle, isPresented: Binding(
+            get: { pendingDeletion != nil }, set: { if !$0 { pendingDeletion = nil } }
+        ), presenting: pendingDeletion) { item in
+            Button(L10n.delete, role: .destructive) { delete(item) }
+            Button(L10n.cancel, role: .cancel) {}
+        } message: { item in
+            if case .chain = item { Text(L10n.deleteChainMessage) } else { Text(L10n.deleteCommandMessage) }
+        }
     }
 
     @ViewBuilder private var commandDetail: some View {
@@ -202,6 +217,8 @@ struct MainWindowView: View {
             .tag(MainSelection.command(command.id))
             .contextMenu {
                 Button(L10n.duplicate) { duplicateCommand(command.id) }
+                Divider()
+                Button("\(L10n.delete)…", role: .destructive) { pendingDeletion = .command(command.id) }
             }
     }
 
@@ -254,6 +271,25 @@ struct MainWindowView: View {
         guard let copyID = store.duplicate(commandID: id) else { return }
         appModel.detailTab = .editor
         appModel.selection = .command(copyID)
+    }
+
+    private var deletionTitle: String {
+        switch pendingDeletion {
+        case .command(let id): L10n.deleteCommandTitle(store.commandsByID[id]?.name ?? "")
+        case .chain(let id): L10n.deleteChainTitle(store.config.chains.first { $0.id == id }?.name ?? "")
+        default: ""
+        }
+    }
+
+    /// The editor's toolbar "Delete" does the same: the store call, then the selection resets if
+    /// the deleted item was open.
+    private func delete(_ item: MainSelection) {
+        switch item {
+        case .command(let id): store.delete(commandID: id)
+        case .chain(let id): store.delete(chainID: id)
+        default: return
+        }
+        if appModel.selection == item { appModel.selection = nil }
     }
 
     private func duplicateChain(_ id: UUID) {

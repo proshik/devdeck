@@ -130,7 +130,6 @@ enum L10n {
 
     static var delete: String { t("Delete", "Удалить") }
     static var save: String { t("Save", "Сохранить") }
-    static var saved: String { t("Saved", "Сохранено") }
     static var saveHelp: String { t("Save changes (⌘S)", "Сохранить изменения (⌘S)") }
     static var deleteCommandHelp: String { t("Delete command — asks for confirmation", "Удалить команду — спросит подтверждение") }
     static func deleteCommandTitle(_ name: String) -> String {
