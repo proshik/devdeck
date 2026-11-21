@@ -16,6 +16,9 @@ import Observation
 final class CommandStore {
     private(set) var config: Config = .empty
     private(set) var error: String?
+    /// The file exists but does not decode — most likely a hand edit in progress. While it is,
+    /// nothing from the UI is written over it: the edit is the user's data (stage 9).
+    private(set) var isFileDamaged = false
 
     @ObservationIgnored private let configURL: URL
     @ObservationIgnored private let defaultConfigData: Data?
@@ -59,7 +62,9 @@ final class CommandStore {
     func reload() -> Bool {
         do {
             let data = try Data(contentsOf: configURL)
+            isFileDamaged = true
             let decoded = try ConfigCodec.decode(data)
+            isFileDamaged = false
             error = nil
             guard decoded != config else { return false }
             config = decoded
@@ -87,6 +92,7 @@ final class CommandStore {
         PrivateFile.restrict(configURL)
         config = newConfig
         error = nil
+        isFileDamaged = false
     }
 
     // MARK: mutations from the UI (Stage 4)
@@ -413,6 +419,14 @@ final class CommandStore {
 
     /// Save; a write failure goes into `error` (the UI shows a banner) instead of throwing out.
     private func persist(_ newConfig: Config) {
+        guard !isFileDamaged else {
+            let reason = error ?? ""
+            if !reason.contains(L10n.configChangesNotSaved) {
+                error = reason.isEmpty ? L10n.configChangesNotSaved : reason + " " + L10n.configChangesNotSaved
+            }
+            DiagnosticLog.shared.log("Config change from UI not saved: config.json does not decode", level: .warn)
+            return
+        }
         do {
             try save(newConfig)
             DiagnosticLog.shared.log("Config saved from UI: \(newConfig.commands.count) commands, \(newConfig.chains.count) chains")

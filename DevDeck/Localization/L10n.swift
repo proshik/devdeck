@@ -545,6 +545,9 @@ enum L10n {
 
     // MARK: - Config decode errors (shown in the popover banner)
 
+    static var configChangesNotSaved: String {
+        t("Changes are not saved until config.json is fixed.", "Изменения не сохраняются, пока config.json не исправлен.")
+    }
     static func brokenJSON(_ detail: String) -> String {
         t("Broken JSON: \(detail)", "Битый JSON: \(detail)")
     }
