@@ -147,6 +147,9 @@ final class ClaudeTabsModel {
     /// the snapshot with it. Also what keeps a second trigger (the launch observer firing twice, a
     /// "Restore now" press mid-restore) from racing the first (see `runRestore`).
     private var isRestoring = false
+    /// Marks a restore for crash recovery: a restore that kills the app would otherwise rerun at
+    /// every launch, since the snapshot's boot stays unresolved.
+    @ObservationIgnored var markOperation: RecoveryMarking = { _, _ in }
     /// So the "refusing to capture" line is logged once per state change, not on every tick.
     private var loggedCaptureHold = false
     /// The signature of the last APPLIED capture — `nil` means "treat the next tick as a fresh
@@ -531,7 +534,9 @@ final class ClaudeTabsModel {
             if force { lastError = L10n.claudeTabsNothingToRestore }
         case let .restore(actions):
             DiagnosticLog.shared.log("ClaudeTabs: restoring \(actions.count) tab(s)")
+            markOperation(.tabRestore, true)
             let outcome = await restorer.restore(actions)
+            markOperation(.tabRestore, false)
             // The boot is marked resolved as soon as ANYTHING opened, not only when everything did:
             // re-running the restore at that point would duplicate the tabs already on screen. Only
             // when NOTHING opened — the dominant failure being Automation not yet granted — must the

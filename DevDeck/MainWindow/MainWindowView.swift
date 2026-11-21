@@ -5,6 +5,7 @@ struct MainWindowView: View {
     @Environment(CommandStore.self) private var store
     @Environment(AppModel.self) private var appModel
     @Environment(PermissionsModel.self) private var permissions
+    @Environment(RecoveryModel.self) private var recovery: RecoveryModel?
 
     var body: some View {
         NavigationSplitView {
@@ -46,6 +47,12 @@ struct MainWindowView: View {
             }
         } detail: {
             detail
+                .safeAreaInset(edge: .top, spacing: 0) {
+                    if let recovery, recovery.hasSuspensions, appModel.selection != .permissions {
+                        RecoveryBanner(model: recovery) { appModel.selection = .permissions }
+                            .padding(.horizontal, 20).padding(.top, 12)
+                    }
+                }
         }
         // Reserve room for the sidebar at its maximum width next to a full-width settings form.
         .frame(minWidth: 1040, minHeight: 580)
@@ -66,7 +73,7 @@ struct MainWindowView: View {
         case .settings:
             SettingsView()
         case .permissions:
-            PermissionsView(model: permissions)
+            PermissionsView(model: permissions, recovery: recovery)
         case .panel:
             PanelSettingsView()
         case .updates:

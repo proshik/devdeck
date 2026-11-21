@@ -21,6 +21,7 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
          updateController: UpdateController, proxyManager: ProxyManager, claudeTabs: ClaudeTabsModel,
          energy: EnergyModel, engine: EngineModel, awake: AwakeModel, monitoring: DeckMonitoringModel,
          clipboard: ClipboardModel? = nil, brightness: DisplayBrightnessModel? = nil,
+         recovery: RecoveryModel? = nil,
          popover suppliedPopover: NSPopover? = nil) {
         let popover = suppliedPopover ?? NSPopover()
         self.manager = manager
@@ -51,6 +52,7 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
                 .environment(monitoring)
                 .environment(self.clipboard)
                 .environment(brightness ?? DisplayBrightnessModel())
+                .environment(recovery)
                 .defaultAppStorage(AppRuntime.preferences)
         )
         popover.contentViewController = hosting

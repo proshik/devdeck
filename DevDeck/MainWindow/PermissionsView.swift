@@ -6,10 +6,12 @@ import AppKit
 /// needs the permission is on.
 struct PermissionsView: View {
     let model: PermissionsModel
+    var recovery: RecoveryModel?
     var refreshOnAppear = true
 
     var body: some View {
         Form {
+            if let recovery { RecoverySection(model: recovery) }
             Section {
                 EmptyView()
             } footer: {

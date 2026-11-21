@@ -229,7 +229,14 @@ final class PermissionsTests: XCTestCase {
         flags.enabled = Set(PermissionFeature.allCases)
         let permissions = PermissionsModel(probe: probe, flags: { flags })
         await permissions.refresh()
-        let hosting = NSHostingController(rootView: PermissionsView(model: permissions, refreshOnAppear: false)
+        let storage = FakeRecoveryStorage()
+        var saved = RecoveryState()
+        saved.suspended[.clipboard] = RecoverySuspension(reason: .repeatedCrashes, since: .now)
+        saved.suspended[.agentTabRestore] = RecoverySuspension(reason: .operationCrashed(.tabRestore), since: .now)
+        storage.data = try RecoveryState.encode(saved)
+        let recovery = RecoveryModel(storage: storage, markers: nil, bootTime: { 1 }, installedBuild: "1", notify: { _ in })
+        recovery.launch()
+        let hosting = NSHostingController(rootView: PermissionsView(model: permissions, recovery: recovery, refreshOnAppear: false)
             .frame(width: 600, height: 1200))
         let window = NSWindow(contentViewController: hosting)
         window.isReleasedWhenClosed = false
@@ -239,6 +246,7 @@ final class PermissionsTests: XCTestCase {
         try await Task.sleep(for: .milliseconds(150))
         hosting.view.layoutSubtreeIfNeeded()
         XCTAssertEqual(hosting.view.frame.width, 600)
+        XCTAssertEqual(recovery.suspensions.map(\.module), [.clipboard, .agentTabRestore])
         XCTAssertTrue(PermissionsView.footer(permissions.row(.accessibility)).contains(L10n.permissionFeature(.brightnessKeys)))
     }
 

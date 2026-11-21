@@ -21,7 +21,9 @@ struct MonitoringContext: Equatable {
     private(set) var history: [MonitoringHistoryPoint] = []
     private(set) var context = MonitoringContext()
     private(set) var suspended = false
-    var isCollecting: Bool { context.settings.enabled && !suspended && !readers.isEmpty }
+    /// Switched off by crash recovery (REC-01), independently of the user's settings.
+    private(set) var halted = false
+    var isCollecting: Bool { context.settings.enabled && !suspended && !halted && !readers.isEmpty }
     @ObservationIgnored private var readers: Set<UUID> = []
     @ObservationIgnored private var heavyTask: Task<Void, Never>?
     @ObservationIgnored private let heavySample: (@MainActor () async -> DeckMonitoringSnapshot)?
@@ -38,6 +40,8 @@ struct MonitoringContext: Equatable {
     @ObservationIgnored private let sample: @MainActor (Bool) async -> DeckMonitoringSnapshot
     @ObservationIgnored private var observers: [NSObjectProtocol] = []
     @ObservationIgnored private var observationGeneration = UUID()
+    /// Marks the heavy container probes for crash recovery.
+    @ObservationIgnored var markOperation: RecoveryMarking = { _, _ in }
 
     init(network: NetworkMonitoringModel? = nil, interval: Duration? = nil, now: @escaping () -> Date = Date.init,
          waitForNext: @escaping (Duration) async throws -> Void = { try await Task.sleep(for: $0) },
@@ -152,6 +156,11 @@ struct MonitoringContext: Equatable {
         network.configure(enabled: settings.enabled && settings.networkEnabled, interface: settings.networkInterface,
                           interval: settings.interval, historyEnabled: settings.historyEnabled, suspended: suspended)
     }
+    func setHalted(monitoring: Bool, network: Bool) {
+        self.network.setHalted(network)
+        guard halted != monitoring else { return }
+        halted = monitoring; invalidate(); launchIfNeeded()
+    }
     func setSuspended(_ value: Bool) {
         guard suspended != value else { return }
         suspended = value; configureNetwork(context.settings); invalidate(); launchIfNeeded()
@@ -189,8 +198,11 @@ struct MonitoringContext: Equatable {
                 let heavy = self.now().timeIntervalSince(self.lastHeavy) >= 15
                 if heavy, let heavySample = self.heavySample, self.heavyTask == nil {
                     self.lastHeavy = self.now()
+                    let mark = self.markOperation
                     self.heavyTask = Task { [weak self] in
+                        mark(.heavyProbes, true)
                         let value = await heavySample()
+                        mark(.heavyProbes, false)
                         guard let self else { return }
                         defer { self.heavyTask = nil }
                         guard !Task.isCancelled, token == self.generation else { return }
@@ -200,7 +212,9 @@ struct MonitoringContext: Equatable {
                 let value = await self.sample(heavy && self.heavySample == nil)
                 guard !Task.isCancelled, token == self.generation else { return }
                 if heavy && self.heavySample == nil {
+                    self.markOperation(.heavyProbes, true)
                     await self.refreshHeavy()
+                    self.markOperation(.heavyProbes, false)
                     guard !Task.isCancelled, token == self.generation else { return }
                     self.lastHeavy = self.now()
                 }

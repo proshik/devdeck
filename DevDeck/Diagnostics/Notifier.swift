@@ -11,6 +11,7 @@ enum AppNotification: Equatable {
     case diskThreshold(detail: String)                   // colima VM docker disk almost full mid-run
     case watchdogGaveUp(name: String)                    // watchdog exhausted its restart attempts
     case proxyUnavailable(name: String)                  // routeThroughProxy command with no usable proxy
+    case modulesSuspended(names: String)                 // crash recovery switched modules off (REC-01)
 }
 
 /// Abstraction over native notifications (behind a protocol → `ProcessManager` orchestration

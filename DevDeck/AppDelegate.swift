@@ -28,6 +28,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                launchAtLogin: SMAppService.mainApp.status == .enabled)
     })
 
+    /// Crash-loop protection (REC-01). Its own 0600 file beside the config; never writes config.json.
+    private(set) lazy var recovery: RecoveryModel = {
+        let directory = AppRuntime.supportDirectory
+        return RecoveryModel(
+            storage: FileRecoveryStorage(url: directory.appendingPathComponent("recovery.json")),
+            markers: AppRuntime.isTesting ? nil
+                : FileRecoveryMarkerStorage(url: directory.appendingPathComponent("recovery-markers")),
+            bootTime: { Int(LiveBootTime().bootTime().timeIntervalSince1970) },
+            installedBuild: Bundle.main.buildVersion,
+            notify: { [weak self] modules in
+                self?.notifier.post(.modulesSuspended(names: modules.map(L10n.recoveryModule).joined(separator: ", ")))
+            })
+    }()
+
     private var menuBar: MenuBarController?
     private var automationSocket: AutomationSocketServer?
     private lazy var termination = AppTerminationCoordinator(network: monitoring.network)
@@ -43,6 +57,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         guard !AppRuntime.isTesting else { return }
         DiagnosticLog.shared.installCrashHandlers()
+        // First: judge how the previous process ended, before any module can crash this one.
+        recovery.launch()
+        recovery.onResume = { [weak self] module in self?.resume(module) }
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(RecoveryPolicy.earlyWindow))
+            self?.recovery.markSurvivedEarlyWindow()
+        }
+        let mark: RecoveryMarking = { [weak self] operation, running in
+            if running { self?.recovery.begin(operation) } else { self?.recovery.end(operation) }
+        }
+        brightness.markOperation = mark
+        claudeTabs.markOperation = mark
+        monitoring.markOperation = mark
+        updateController.willInstall = { [weak self] build in self?.recovery.updateWillInstall(build: build) }
+        updateController.setAutoInstallSuspended(recovery.isSuspended(.autoUpdateInstall))
+        applyMonitoringHalt()
         AppearanceManager.shared.apply()   // apply the persisted Light/Dark/System choice app-wide
         store.start()
         DiagnosticLog.shared.log("DevDeck launch: \(store.config.commands.count) commands, \(store.config.chains.count) chains")
@@ -56,13 +86,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Read the memory-monitoring flags live from the config — no copy when they change.
         // The VM memory/disk and cluster probes speak `colima ssh`/`colima list`: under another
         // engine they stay off (caches cleared) instead of reporting a stopped colima.
+        // Recovery can halt monitoring without touching these flags in config.json.
+        let monitoringOn = { [weak self] in self.map { !$0.recovery.isSuspended(.monitoring) } ?? false }
         manager.isVMMonitoringEnabled = { [weak store, weak engine] in
-            (store?.config.settings.vmMemoryMonitoring ?? false) && engine?.activeKind == .colima
+            (store?.config.settings.vmMemoryMonitoring ?? false) && engine?.activeKind == .colima && monitoringOn()
         }
-        manager.isMinikubeMonitoringEnabled = { [weak store] in store?.config.settings.minikubeMemoryMonitoring ?? false }
-        manager.isHostMonitoringEnabled = { [weak store] in store?.config.settings.hostMemoryMonitoring ?? false }
+        manager.isMinikubeMonitoringEnabled = { [weak store] in
+            (store?.config.settings.minikubeMemoryMonitoring ?? false) && monitoringOn()
+        }
+        manager.isHostMonitoringEnabled = { [weak store] in
+            (store?.config.settings.hostMemoryMonitoring ?? false) && monitoringOn()
+        }
         manager.isClusterHealthEnabled = { [weak store, weak engine] in
-            (store?.config.settings.clusterHealthMonitoring ?? false) && engine?.activeKind == .colima
+            (store?.config.settings.clusterHealthMonitoring ?? false) && engine?.activeKind == .colima && monitoringOn()
         }
         // Proxy Manager: shares this machine's VPN egress and routes flagged commands through a peer's.
         // The routing hook is a closure so ProcessManager keeps no dependency on ProxyManager.
@@ -83,7 +119,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         AutomationHost.service = automation
         // `DevDeck automation …` reaches the same service over a local socket — it works with the
         // ad-hoc signature, which App Intents do not.
-        startAutomationSocket(automation)
+        if !recovery.isSuspended(.automationCLI) { startAutomationSocket(automation) }
         // Start Sparkle with the persisted auto-update preference; populates the indicator when off.
         if !AppRuntime.isIsolated {
             updateController.configure(autoUpdateEnabled: store.config.settings.autoUpdateEnabled)
@@ -91,12 +127,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menuBar = MenuBarController(store: store, manager: manager, appModel: appModel,
                                     updateController: updateController, proxyManager: proxyManager,
                                     claudeTabs: claudeTabs, energy: energy, engine: engine, awake: awake,
-                                    monitoring: monitoring, clipboard: clipboard, brightness: brightness)
-        brightness.start(settings: { [weak store] in store?.config.settings.displays ?? .init() })
+                                    monitoring: monitoring, clipboard: clipboard, brightness: brightness,
+                                    recovery: recovery)
+        if !recovery.isSuspended(.brightness) { startBrightness() }
         clipboard.dismissPanel = { [weak appModel] in appModel?.dismissPanel() }
-        clipboard.start(settings: { [weak store] in store?.config.settings.clipboard ?? .init() })
+        if !recovery.isSuspended(.clipboard) { startClipboard() }
         if !AppRuntime.isIsolated { awake.startMonitoring() }
-        energy.isEnabled = { [weak store] in store?.config.settings.batteryMonitoring ?? false }
+        energy.isEnabled = { [weak store] in (store?.config.settings.batteryMonitoring ?? false) && monitoringOn() }
         energy.start()
         monitoring.start(store: store, engine: engine, manager: manager)
 
@@ -110,6 +147,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // script around for diagnosing. Collect the ones whose terminal is gone now instead.
         if !AppRuntime.isIsolated { sweepStaleTerminalDirectories() }
 
+        // Switched off by recovery: no capture either, so the snapshot on disk stays untouched.
+        if !recovery.isSuspended(.agentTabRestore) { startClaudeTabs() }
+    }
+
+    private func startBrightness() {
+        brightness.start(settings: { [weak store] in store?.config.settings.displays ?? .init() })
+    }
+
+    private func startClipboard() {
+        clipboard.start(settings: { [weak store] in store?.config.settings.clipboard ?? .init() })
+    }
+
+    private func applyMonitoringHalt() {
+        monitoring.setHalted(monitoring: recovery.isSuspended(.monitoring), network: recovery.isSuspended(.network))
+    }
+
+    /// A module the user switched back on starts now, without a relaunch.
+    private func resume(_ module: RecoveryModule) {
+        switch module {
+        case .clipboard: startClipboard()
+        case .brightness: startBrightness()
+        case .monitoring, .network: applyMonitoringHalt()
+        case .agentTabRestore: startClaudeTabs()
+        case .autoUpdateInstall: updateController.setAutoInstallSuspended(false)
+        case .automationCLI:
+            if automationSocket == nil, let service = AutomationHost.service { startAutomationSocket(service) }
+        }
+    }
+
+    private func startClaudeTabs() {
         // Snapshots of the coding-agent tabs, and the post-reboot restore.
         // Both closures read live from the config, so a hand-edited config.json — the flag or the
         // interval — takes effect without a relaunch. Development launches use their own
@@ -155,6 +222,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         clipboard.stop()
         brightness.stop()
         claudeTabs.captureBeforeShutdown()
+        recovery.markCleanExit()   // last: a crash in the shutdown work above is still a crash
     }
 
     /// The main window's red close button does NOT quit the app — it lives in the menu bar.

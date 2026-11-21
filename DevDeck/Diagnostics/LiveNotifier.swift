@@ -69,6 +69,10 @@ final class LiveNotifier: Notifier {
             content.title = L10n.notifProxyUnavailable
             content.body = name
             content.sound = .default
+        case .modulesSuspended(let names):
+            content.title = L10n.notifModulesSuspended
+            content.body = names
+            content.sound = .default
         }
 
         let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)

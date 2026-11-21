@@ -57,11 +57,32 @@ final class UpdateController: NSObject, SPUUpdaterDelegate {
         controller = SPUStandardUpdaterController(startingUpdater: false, updaterDelegate: self, userDriverDelegate: nil)
     }
 
+    /// Crash recovery switched automatic installation off (REC-01); checks and manual install stay.
+    @ObservationIgnored private var autoInstallSuspended = false
+    @ObservationIgnored private var autoUpdatePreference = false
+    /// Told before Sparkle quits the app to install an update.
+    @ObservationIgnored var willInstall: (_ build: String) -> Void = { _ in }
+
+    static func automaticallyDownloads(enabled: Bool, suspended: Bool) -> Bool { enabled && !suspended }
+
+    func setAutoInstallSuspended(_ suspended: Bool) {
+        autoInstallSuspended = suspended
+        guard started else { return }
+        controller.updater.automaticallyDownloadsUpdates =
+            Self.automaticallyDownloads(enabled: autoUpdatePreference, suspended: suspended)
+        if suspended { checkSilently() }
+    }
+
+    @ObservationIgnored private var started = false
+
     /// Apply the persisted preference and start Sparkle. Call once after settings have loaded.
     func configure(autoUpdateEnabled: Bool) {
         let updater = controller.updater
+        autoUpdatePreference = autoUpdateEnabled
         updater.automaticallyChecksForUpdates = true          // always check (needed for the indicator)
-        updater.automaticallyDownloadsUpdates = autoUpdateEnabled
+        updater.automaticallyDownloadsUpdates =
+            Self.automaticallyDownloads(enabled: autoUpdateEnabled, suspended: autoInstallSuspended)
+        started = true
         do {
             try updater.start()
         } catch {
@@ -69,12 +90,14 @@ final class UpdateController: NSObject, SPUUpdaterDelegate {
             DiagnosticLog.shared.log("Sparkle failed to start: \(error.localizedDescription)", level: .warn)
             return
         }
-        if !autoUpdateEnabled { checkSilently() }
+        if !Self.automaticallyDownloads(enabled: autoUpdateEnabled, suspended: autoInstallSuspended) { checkSilently() }
     }
 
     func setAutoUpdateEnabled(_ on: Bool) {
-        controller.updater.automaticallyDownloadsUpdates = on
-        if !on { checkSilently() }
+        autoUpdatePreference = on
+        controller.updater.automaticallyDownloadsUpdates =
+            Self.automaticallyDownloads(enabled: on, suspended: autoInstallSuspended)
+        if !Self.automaticallyDownloads(enabled: on, suspended: autoInstallSuspended) { checkSilently() }
     }
 
     /// Silent background probe — populates `latestVersion` / `releasesBehind` without any UI.
@@ -94,6 +117,10 @@ final class UpdateController: NSObject, SPUUpdaterDelegate {
     }
 
     // MARK: - SPUUpdaterDelegate
+
+    func updater(_ updater: SPUUpdater, willInstallUpdate item: SUAppcastItem) {
+        willInstall(item.versionString)
+    }
 
     func updater(_ updater: SPUUpdater, willScheduleUpdateCheckAfterDelay delay: TimeInterval) {
         isChecking = false

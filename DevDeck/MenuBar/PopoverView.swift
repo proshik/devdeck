@@ -8,6 +8,7 @@ struct PopoverView: View {
     @Environment(UpdateController.self) private var updates
     @Environment(ProxyManager.self) private var proxy
     @Environment(AwakeModel.self) private var awake
+    @Environment(RecoveryModel.self) private var recovery: RecoveryModel?
     @Environment(\.openWindow) private var openWindow
     @State private var contentHeight: CGFloat = 1
 
@@ -48,6 +49,10 @@ struct PopoverView: View {
                         Label(error, systemImage: "exclamationmark.triangle.fill")
                             .font(.caption).foregroundStyle(.red)
                             .padding(16)
+                    }
+                    if let recovery {
+                        RecoveryBanner(model: recovery) { openItem(.permissions) }
+                            .padding(.horizontal, 16).padding(.top, recovery.hasSuspensions ? 12 : 0)
                     }
                     if let section = selectedSection {
                         if section == .environment && store.config.panel.showMemoryInEnvironment { memoryRow }

@@ -31,6 +31,8 @@ enum BrightnessOutcome: Equatable, Sendable {
     @ObservationIgnored private let blackout: any BrightnessBlackoutPresenting
     @ObservationIgnored private var settings: () -> DisplayBrightnessSettings = { .init() }
     @ObservationIgnored private var timer: Task<Void, Never>?
+    /// Marks display discovery for crash recovery: DDC and IOKit run in this process.
+    @ObservationIgnored var markOperation: RecoveryMarking = { _, _ in }
     @ObservationIgnored private var writer: Task<Void, Never>?
     @ObservationIgnored private var keys: BrightnessKeys?
     @ObservationIgnored private var observers: [NSObjectProtocol] = []
@@ -97,7 +99,9 @@ enum BrightnessOutcome: Equatable, Sendable {
         guard !refreshing, !applying, pending.isEmpty, !suspended else { return }
         refreshing = true
         let epoch = generation
+        markOperation(.displayDiscovery, true)
         let result = await provider.discover(methods: current)
+        markOperation(.displayDiscovery, false)
         if epoch == generation && !suspended {
             let next = blackout.reconcile(result)
             let beforeKeys = keyObservations(targetID: "", linked: true, in: displays)

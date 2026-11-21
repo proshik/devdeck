@@ -11,6 +11,9 @@ final class NetworkMonitoringModel {
     var history: [NetworkTrafficPoint] = []
     var totals = NetworkTrafficAccumulator()
     private(set) var collecting = false
+    /// Switched off by crash recovery (REC-01): no sampling until switched back on. The manual
+    /// speed test stays an explicit action and is not gated.
+    private(set) var isHalted = false
     var runningTest = false
     var result: NetworkQualityResult?
     var failure: NetworkQualityFailure?
@@ -69,7 +72,13 @@ final class NetworkMonitoringModel {
         launchIfNeeded()
     }
     private var shouldCollect: Bool {
-        desired.map { $0.enabled && !$0.suspended && !readers.isEmpty } ?? false
+        !isHalted && (desired.map { $0.enabled && !$0.suspended && !readers.isEmpty } ?? false)
+    }
+    func setHalted(_ value: Bool) {
+        guard isHalted != value else { return }
+        isHalted = value
+        invalidate(resetInterval: true)
+        launchIfNeeded()
     }
     private func invalidate(resetInterval: Bool) {
         generation = UUID(); loop?.cancel()
