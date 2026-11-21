@@ -118,7 +118,7 @@ struct CleanupView: View {
     private func hostSection(_ host: DockerHost) -> some View {
         Section {
             if let usage = model.usage[host] {
-                ForEach(usageEntries(usage)) { entry in
+                ForEach(usageEntries(usage, host)) { entry in
                     VStack(alignment: .leading, spacing: 2) {
                         usageRow(entry.label, entry.row)
                         // The node's disk is one of colima's volumes; say so, or the two sections
@@ -153,7 +153,7 @@ struct CleanupView: View {
                     testContainersActionRow(host)
                 }
                 ForEach(CleanupAction.allCases, id: \.self) { action in
-                    actionRow(action, host)
+                    actionRow(action, host).id(RowID(host: host, item: action.rawValue))
                 }
             } else if model.isRefreshing && model.usage.isEmpty {
                 ProgressView().controlSize(.small).frame(maxWidth: .infinity)
@@ -169,19 +169,28 @@ struct CleanupView: View {
         }
     }
 
+    /// A row's identity in the Form. Both daemons have the same categories and actions, and a Form
+    /// keys rows by ID across all its sections: the same ID in two sections shifts the rows — the
+    /// colima section's last row turned into its footer and minikube's footer into a row.
+    struct RowID: Hashable {
+        let host: DockerHost
+        let item: String
+    }
+
     /// One line per category, biggest first: the page exists to answer "where did the disk go".
     private struct UsageEntry: Identifiable {
+        let host: DockerHost
         let label: String
         let row: DockerUsageRow?
         let isVolumes: Bool
-        var id: String { label }
+        var id: RowID { RowID(host: host, item: label) }
     }
 
-    private func usageEntries(_ usage: DockerUsage) -> [UsageEntry] {
-        [UsageEntry(label: L10n.usageVolumes, row: usage.volumes, isVolumes: true),
-         UsageEntry(label: L10n.usageImages, row: usage.images, isVolumes: false),
-         UsageEntry(label: L10n.usageBuildCache, row: usage.buildCache, isVolumes: false),
-         UsageEntry(label: L10n.usageContainers, row: usage.containers, isVolumes: false)]
+    private func usageEntries(_ usage: DockerUsage, _ host: DockerHost) -> [UsageEntry] {
+        [UsageEntry(host: host, label: L10n.usageVolumes, row: usage.volumes, isVolumes: true),
+         UsageEntry(host: host, label: L10n.usageImages, row: usage.images, isVolumes: false),
+         UsageEntry(host: host, label: L10n.usageBuildCache, row: usage.buildCache, isVolumes: false),
+         UsageEntry(host: host, label: L10n.usageContainers, row: usage.containers, isVolumes: false)]
             .sorted { ($0.row?.sizeBytes ?? 0) > ($1.row?.sizeBytes ?? 0) }
     }
 
