@@ -10,11 +10,14 @@ import Foundation
 enum AutomationExitCode {
     /// Succeeded, a daemon came up, already running, opened in a terminal, stopped, any status, list.
     static let success: Int32 = 0
-    /// The command or chain ran and failed (a cancelled sudo prompt counts: it did not run).
+    /// The command or chain ran and failed (a cancelled sudo prompt counts: it did not run);
+    /// a brightness write failed, read back another level or was replaced by a newer change.
     static let failed: Int32 = 1
-    /// Still running when the wait ran out (run timeout; stop not done within the stop wait).
+    /// Still running when the wait ran out (run timeout; stop not done within the stop wait;
+    /// no brightness readback within the brightness wait).
     static let timedOut: Int32 = 2
-    /// Refused by a check: automation off, not allowed, unknown/ambiguous name, port, proxy…
+    /// Refused by a check: automation off, not allowed, unknown/ambiguous name, port, proxy,
+    /// unknown/ambiguous/unsupported display…
     static let refused: Int32 = 3
     /// No DevDeck is listening for this build and data directory.
     static let appNotRunning: Int32 = 4
@@ -26,7 +29,7 @@ enum AutomationExitCode {
     /// How a report ends the process. `status` and `list` always succeed — they only read.
     static func code(for report: AutomationReport, operation: AutomationOperation) -> Int32 {
         switch operation {
-        case .list, .status:
+        case .list, .status, .brightness:
             return success
         case .stop:
             return report.status == .running || report.status == .timedOut ? timedOut : success
@@ -41,7 +44,20 @@ enum AutomationExitCode {
 }
 
 enum AutomationOperation: String, Codable, Sendable {
-    case list, run, stop, status
+    case list, run, stop, status, brightness
+}
+
+/// `DevDeck automation brightness …`: read or change display brightness the way the brightness
+/// keys do. `percent` is the absolute value of `set` (0…100) or the step of `up`/`down` (nil =
+/// the key step); `display` is a display name or UUID, nil = the keys' target.
+struct AutomationBrightnessRequest: Codable, Equatable, Sendable {
+    enum Action: String, Codable, Sendable, CaseIterable {
+        case list, get, set, up, down
+    }
+
+    var action: Action
+    var percent: Double? = nil
+    var display: String? = nil
 }
 
 /// What the command line asks the app. Only saved items, by name or UUID — never a shell string.
@@ -55,6 +71,8 @@ struct AutomationRequest: Codable, Equatable, Sendable {
     /// Absolute already: the client resolves a relative path against its own working directory.
     var directory: String? = nil
     var timeoutSeconds: Int? = nil
+    /// `operation == .brightness` only. Optional, so the protocol version stays 1.
+    var brightness: AutomationBrightnessRequest? = nil
 }
 
 /// What the app answers: the text for each stream and the exit code, decided app-side.

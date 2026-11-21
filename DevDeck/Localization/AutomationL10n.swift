@@ -152,8 +152,8 @@ extension L10n {
     }
     static var automationUsageNoOperation: String { t("No operation given.", "Не указана операция.") }
     static func automationUsageUnknownOperation(_ value: String) -> String {
-        t("Unknown operation “\(value)”: expected list, run, stop or status.",
-          "Неизвестная операция «\(value)»: нужна list, run, stop или status.")
+        t("Unknown operation “\(value)”: expected list, run, stop, status or brightness.",
+          "Неизвестная операция «\(value)»: нужна list, run, stop, status или brightness.")
     }
     static func automationUsageUnknownKind(_ value: String) -> String {
         t("Unknown kind “\(value)”: expected command or chain.", "Неизвестный тип «\(value)»: нужен command или chain.")
@@ -180,13 +180,79 @@ extension L10n {
           "Параметр \(option) здесь неприменим: --directory — только для run command, --timeout — для run.")
     }
 
+    // MARK: command line — brightness
+
+    static var automationUsageNoBrightnessAction: String {
+        t("No brightness action given: expected list, get, set, up or down.",
+          "Не указано действие яркости: нужно list, get, set, up или down.")
+    }
+    static func automationUsageUnknownBrightnessAction(_ value: String) -> String {
+        t("Unknown brightness action “\(value)”: expected list, get, set, up or down.",
+          "Неизвестное действие яркости «\(value)»: нужно list, get, set, up или down.")
+    }
+    static var automationUsageMissingBrightness: String {
+        t("set needs a brightness from 0 to 100.", "set нужна яркость от 0 до 100.")
+    }
+    static func automationUsageBadBrightness(_ value: String) -> String {
+        t("Brightness is a percentage from 0 to 100, got “\(value)”.",
+          "Яркость — процент от 0 до 100, получено «\(value)».")
+    }
+    static func automationUsageBadBrightnessStep(_ value: String) -> String {
+        t("The step is a percentage above 0 and up to 100, got “\(value)”.",
+          "Шаг — процент больше 0 и не больше 100, получено «\(value)».")
+    }
+    static var automationUsageBrightnessListDisplay: String {
+        t("list shows every display; --display is for get, set, up and down.",
+          "list показывает все экраны; --display — для get, set, up и down.")
+    }
+    private static func displayList(_ displays: [String]) -> String {
+        t("Displays (name, id, available):\n", "Экраны (имя, id, доступность):\n") + displays.joined(separator: "\n")
+    }
+    static var automationNoBrightnessDisplays: String {
+        t("DevDeck sees no displays right now.", "DevDeck сейчас не видит ни одного экрана.")
+    }
+    static func automationNoPointerDisplay(_ displays: [String]) -> String {
+        t("The pointer is over no display, so there is no brightness-key target. Pass --display.\n",
+          "Курсор не над экраном — цели клавиш яркости нет. Укажите --display.\n") + displayList(displays)
+    }
+    static func automationDisplayUnsupported(_ name: String, _ displays: [String]) -> String {
+        t("“\(name)” has no brightness control in DevDeck.\n", "У экрана «\(name)» нет управления яркостью в DevDeck.\n")
+            + displayList(displays)
+    }
+    static func automationUnknownDisplay(_ query: String, _ displays: [String]) -> String {
+        t("There is no display named or with the id “\(query)”.\n", "Экрана с именем или id «\(query)» нет.\n")
+            + displayList(displays)
+    }
+    static func automationAmbiguousDisplay(_ query: String, _ displays: [String]) -> String {
+        t("Several displays are named “\(query)”; pass one of these ids instead.\n",
+          "Несколько экранов называются «\(query)»; укажите вместо имени один из id.\n") + displayList(displays)
+    }
+    static func automationBrightnessApplied(_ name: String, _ level: String) -> String {
+        t("\(name): \(level)", "\(name): \(level)")
+    }
+    static func automationBrightnessAtLimit(_ name: String, _ level: String) -> String {
+        t("\(name) is already at \(level).", "\(name) уже на \(level).")
+    }
+    static func automationBrightnessUnconfirmed(_ name: String, _ level: String) -> String {
+        t("\(name) did not confirm the change; it reads back \(level).",
+          "\(name) не подтвердил изменение; читается \(level).")
+    }
+    static func automationBrightnessReplaced(_ name: String) -> String {
+        t("The change to \(name) was not applied: a newer change replaced it or the displays changed.",
+          "Изменение для \(name) не применено: его заменило более новое или сменились экраны.")
+    }
+    static func automationBrightnessTimedOut(_ name: String, _ seconds: Int) -> String {
+        t("\(name) did not confirm the change within \(seconds) s; the write may still finish.",
+          "\(name) не подтвердил изменение за \(seconds) с; запись может ещё завершиться.")
+    }
+
     static var automationHelpText: String {
         let path = "/Applications/DevDeck.app/Contents/MacOS/DevDeck"
         let codes = """
              \(AutomationExitCode.success)  succeeded, daemon up, alreadyRunning, openedInTerminal, stopped, status, list
-             \(AutomationExitCode.failed)  failed (including a cancelled sudo prompt)
-             \(AutomationExitCode.timedOut)  timedOut — still running when the wait ran out (it keeps running)
-             \(AutomationExitCode.refused)  refused — automation off, not allowed, unknown or ambiguous name, port, proxy…
+             \(AutomationExitCode.failed)  failed (including a cancelled sudo prompt); brightness not confirmed by the display
+             \(AutomationExitCode.timedOut)  timedOut — still running when the wait ran out (it keeps running); no brightness readback in \(AutomationLimits.brightnessWaitSeconds) s
+             \(AutomationExitCode.refused)  refused — automation off, not allowed, unknown or ambiguous name or display, port, proxy…
              \(AutomationExitCode.appNotRunning)  DevDeck is not running
              \(AutomationExitCode.communication)  could not talk to DevDeck
              \(AutomationExitCode.usage) usage error
@@ -202,6 +268,10 @@ extension L10n {
               \(path) automation run chain <name|UUID> [--timeout SECONDS]
               \(path) automation stop command|chain <name|UUID>
               \(path) automation status command|chain <name|UUID>
+              \(path) automation brightness list
+              \(path) automation brightness get [--display <name|id>]
+              \(path) automation brightness set <0…100> [--display <name|id>]
+              \(path) automation brightness up|down [STEP] [--display <name|id>]
               \(path) automation help
 
             A name must match exactly (quote it if it has spaces); a UUID may be in any case.
@@ -210,6 +280,14 @@ extension L10n {
             for a directory on every run; a relative path is taken from the current directory.
             DevDeck must be running — this command does not start it. A development build uses the
             data directory packaged into it, or --dev-data-directory PATH like the running dev app.
+
+            Brightness works like the brightness keys and the slider: the same scale, 0 is a black
+            cover, the display must read the level back, the OSD shows it. Without --display it is
+            the display under the pointer (with the linked ones if the keys are on and linked);
+            --display takes an exact name or id from brightness list and changes only that display.
+            up/down without STEP is one key press; STEP is in percent. Each display is a block of
+            key: value lines (status applied|atLimit|failed|timedOut, display, id, method
+            ddc|native|software|none, available, brightness, approxNits, confirmed, message).
 
             Output: key: value lines on stdout, errors on stderr; list prints kind<TAB>UUID<TAB>name.
 
@@ -226,6 +304,10 @@ extension L10n {
               \(path) automation run chain <имя|UUID> [--timeout SECONDS]
               \(path) automation stop command|chain <имя|UUID>
               \(path) automation status command|chain <имя|UUID>
+              \(path) automation brightness list
+              \(path) automation brightness get [--display <имя|id>]
+              \(path) automation brightness set <0…100> [--display <имя|id>]
+              \(path) automation brightness up|down [ШАГ] [--display <имя|id>]
               \(path) automation help
 
             Имя — точное совпадение (с пробелами — в кавычках); UUID — в любом регистре.
@@ -234,6 +316,13 @@ extension L10n {
             спрашивают каталог при каждом запуске; относительный путь берётся от текущего каталога.
             DevDeck должен быть запущен — эта команда его не запускает. Dev-сборка берёт каталог
             данных, упакованный в неё, или --dev-data-directory PATH, как у запущенной dev-app.
+
+            Яркость работает как клавиши яркости и ползунок: та же шкала, 0 — чёрная накладка, экран
+            должен подтвердить уровень, показывается OSD. Без --display — экран под курсором (со
+            связанными, если клавиши включены и связаны); --display — точное имя или id из brightness
+            list, меняется только этот экран. up/down без ШАГА — одно нажатие клавиши; ШАГ в процентах.
+            Каждый экран — блок строк key: value (status applied|atLimit|failed|timedOut, display, id,
+            method ddc|native|software|none, available, brightness, approxNits, confirmed, message).
 
             Вывод: строки key: value в stdout, ошибки — в stderr; list печатает тип<TAB>UUID<TAB>имя.
 

@@ -1,7 +1,26 @@
 import AppKit
 import Observation
 
+/// A key-style request the caller waits on (`DevDeck automation brightness`): see
+/// `DisplayBrightnessModel.isSettled(_:)` and `outcomes(_:)`.
+struct BrightnessTicket: Hashable, Sendable {
+    fileprivate let sequence: Int
+}
+
+/// How a tracked request ended on one display. A display with no outcome once the ticket is
+/// settled never got this request: a newer one replaced it, or the display set changed.
+enum BrightnessOutcome: Equatable, Sendable {
+    case confirmed
+    /// The write went out but the display reads back another level (now in `displays`).
+    case unconfirmed
+    case failed
+}
+
 @MainActor @Observable final class DisplayBrightnessModel {
+    /// Logical step of one brightness-key press, and of a fine (⌥⇧) press.
+    static let keyStep = 1.0 / 16
+    static let fineKeyStep = 1.0 / 64
+
     private(set) var displays: [BrightnessDisplay] = []
     private(set) var errors: [String: String] = [:]
     private(set) var pending: [String: Double] = [:]
@@ -34,10 +53,15 @@ import Observation
     private struct KeyIntent {
         let targetID: String
         let linked: Bool
+        /// `linkKeys` when the intent began: toggling it resets the intent. Separate from `linked`
+        /// because the command line may address one display while the keys are linked.
+        let linkSetting: Bool
         let requested: Double
         var observed: [String: KeyObservation]
     }
     @ObservationIgnored private var keyIntent: KeyIntent?
+    /// Outcomes of the tracked tickets still waited on, by display id. Released by the waiter.
+    @ObservationIgnored private var tracked: [Int: [String: BrightnessOutcome]] = [:]
 
     init(provider: any DisplayBrightnessProvider = NativeBrightnessProvider(),
          osd: (any BrightnessOSDPresenting)? = nil,
@@ -98,20 +122,28 @@ import Observation
     }
 
     /// A single worker coalesces slider motion and repeated key presses across all displays.
-    func request(id: String, value: Double, fromKeys: Bool = false) {
+    ///
+    /// `fromKeys` requests confirm through the OSD. `linked` overrides the link setting of that
+    /// kind (`linkKeys`/`linkSliders`); `track` keeps per-display outcomes for the returned ticket
+    /// until `release(_:)` — key-style requests only. Nil when nothing was queued.
+    @discardableResult
+    func request(id: String, value: Double, fromKeys: Bool = false, linked: Bool? = nil,
+                 track: Bool = false) -> BrightnessTicket? {
         guard !suspended, value.isFinite, let target = displays.first(where: { $0.id == id }), target.value != nil else {
             if fromKeys { clearFeedback() }
-            return
+            return nil
         }
-        let linked = fromKeys ? settings().linkKeys : settings().linkSliders
+        let linked = linked ?? (fromKeys ? settings().linkKeys : settings().linkSliders)
         let feedback: KeyFeedback?
         if fromKeys {
             if latestFeedback?.targetID != id { osd.hide() }
             feedbackSequence += 1
             feedback = KeyFeedback(sequence: feedbackSequence, targetID: id)
             latestFeedback = feedback
-            keyIntent = KeyIntent(targetID: id, linked: linked, requested: min(1, max(0, value)),
+            keyIntent = KeyIntent(targetID: id, linked: linked, linkSetting: settings().linkKeys,
+                                  requested: min(1, max(0, value)),
                                   observed: keyObservations(targetID: id, linked: linked, in: displays))
+            if track { tracked[feedbackSequence] = [:] }
         } else {
             clearFeedback()
             feedback = nil
@@ -122,6 +154,26 @@ import Observation
             pendingFeedback[display.id] = feedback
         }
         startWriter()
+        return feedback.map { BrightnessTicket(sequence: $0.sequence) }
+    }
+
+    /// No display still waits to apply this ticket's request.
+    func isSettled(_ ticket: BrightnessTicket) -> Bool {
+        !pendingFeedback.values.contains { $0.sequence == ticket.sequence }
+    }
+
+    /// Per-display outcomes recorded so far for a tracked ticket.
+    func outcomes(_ ticket: BrightnessTicket) -> [String: BrightnessOutcome] {
+        tracked[ticket.sequence] ?? [:]
+    }
+
+    func release(_ ticket: BrightnessTicket) {
+        tracked.removeValue(forKey: ticket.sequence)
+    }
+
+    private func record(_ outcome: BrightnessOutcome, id: String, feedback: KeyFeedback?) {
+        guard let sequence = feedback?.sequence, tracked[sequence] != nil else { return }
+        tracked[sequence]?[id] = outcome
     }
 
     private func startWriter() {
@@ -169,6 +221,7 @@ import Observation
             if requested > 0 && display.builtIn { displays[index].reportedNits = reported }
             observeOwnValue(id: id)
             errors.removeValue(forKey: id)
+            record(.confirmed, id: id, feedback: feedback)
             if let feedback, feedback == latestFeedback, feedback.targetID == id, !Task.isCancelled {
                 osd.show(display: displays[index], value: actual, nits: nits(for: displays[index]))
             }
@@ -177,12 +230,14 @@ import Observation
             displays[index].value = actual
             discardKeyIntent(affectedBy: id)
             errors[id] = L10n.brightnessWriteFailed
+            record(.unconfirmed, id: id, feedback: feedback)
             rejectFeedback(feedback)
         } catch {
             guard epoch == generation else { return }
             if requested == 0 { uncover(id: id) }
             discardKeyIntent(affectedBy: id)
             errors[id] = L10n.brightnessWriteFailed
+            record(.failed, id: id, feedback: feedback)
             rejectFeedback(feedback)
         }
     }
@@ -212,7 +267,7 @@ import Observation
     }
     private func matchesKeyIntent(in displays: [BrightnessDisplay], targetID: String? = nil) -> Bool {
         guard let intent = keyIntent, intent.targetID == (targetID ?? intent.targetID),
-              intent.linked == settings().linkKeys, intent.observed[intent.targetID] != nil else { return false }
+              intent.linkSetting == settings().linkKeys, intent.observed[intent.targetID] != nil else { return false }
         return intent.observed == keyObservations(targetID: intent.targetID, linked: intent.linked, in: displays)
     }
     private func observeOwnValue(id: String) {
@@ -253,14 +308,23 @@ import Observation
 
     func handleKey(increase: Bool, fine: Bool, at point: CGPoint) {
         // CGEvent.location and CGDisplayBounds share the upper-left coordinate space.
-        guard let target = BrightnessRouting.target(at: point, displays: displays),
-              let actual = target.value else {
+        guard let target = BrightnessRouting.target(at: point, displays: displays), target.value != nil else {
             clearFeedback(); keyboardStatus = L10n.brightnessUnsupported; return
         }
         keyboardStatus = ""
-        let step = (fine ? 1.0 / 64 : 1.0 / 16) * (increase ? 1 : -1)
+        step(id: target.id, by: (fine ? Self.fineKeyStep : Self.keyStep) * (increase ? 1 : -1),
+             linked: settings().linkKeys)
+    }
+
+    /// One brightness-key press on a display — the keys and the command line's up/down share it.
+    /// Signed logical `step`; nil when the display has no brightness control.
+    @discardableResult
+    func step(id: String, by step: Double, linked: Bool, track: Bool = false) -> BrightnessTicket? {
+        guard let target = displays.first(where: { $0.id == id }), let actual = target.value else {
+            clearFeedback(); return nil
+        }
         let base: Double
-        if matchesKeyIntent(in: displays, targetID: target.id), let intent = keyIntent {
+        if matchesKeyIntent(in: displays, targetID: target.id), let intent = keyIntent, intent.linked == linked {
             base = intent.requested
         } else {
             keyIntent = nil
@@ -269,10 +333,10 @@ import Observation
         }
         // External DDC: every press must move the hardware by at least one raw level.
         if target.method == .hardware, let maximum = target.hardwareMaximum {
-            request(id: target.id, value: BrightnessDDCScale.keyTarget(from: base, step: step, maximum: maximum), fromKeys: true)
-        } else {
-            request(id: target.id, value: base + step, fromKeys: true)
+            return request(id: target.id, value: BrightnessDDCScale.keyTarget(from: base, step: step, maximum: maximum),
+                           fromKeys: true, linked: linked, track: track)
         }
+        return request(id: target.id, value: base + step, fromKeys: true, linked: linked, track: track)
     }
 
     func updateKeyboard() {

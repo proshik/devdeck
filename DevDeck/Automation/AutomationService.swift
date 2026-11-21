@@ -16,6 +16,8 @@ enum AutomationLimits {
     static let stopWaitSeconds = 10
     /// How long an intent waits for the app to finish launching when Shortcuts started it.
     static let readinessWaitSeconds = 15
+    /// How long `DevDeck automation brightness set|up|down` waits for the display's readback.
+    static let brightnessWaitSeconds = 10
 
     static func timeout(seconds: Int?) -> Duration {
         .seconds(min(max(seconds ?? defaultTimeoutSeconds, minTimeoutSeconds), maxTimeoutSeconds))
@@ -41,6 +43,13 @@ enum AutomationRefusal: Error, Equatable, LocalizedError {
     case unknownName(AutomationReport.Kind, String)
     /// Command line: several share the name — the caller must pick one by UUID.
     case ambiguousName(AutomationReport.Kind, String, [UUID])
+    /// `brightness`: no display is discovered (yet). Display lists are `name<TAB>id<TAB>available`.
+    case noBrightnessDisplays
+    /// `brightness` without `--display`: the pointer is over no display.
+    case noPointerDisplay([String])
+    case displayUnsupported(String, [String])
+    case unknownDisplay(String, [String])
+    case ambiguousDisplay(String, [String])
 
     var message: String {
         switch self {
@@ -58,6 +67,11 @@ enum AutomationRefusal: Error, Equatable, LocalizedError {
         case .notReady: L10n.automationNotReady
         case .unknownName(let kind, let name): L10n.automationUnknownName(kind == .chain, name)
         case .ambiguousName(let kind, let name, let ids): L10n.automationAmbiguousName(kind == .chain, name, ids)
+        case .noBrightnessDisplays: L10n.automationNoBrightnessDisplays
+        case .noPointerDisplay(let displays): L10n.automationNoPointerDisplay(displays)
+        case .displayUnsupported(let name, let displays): L10n.automationDisplayUnsupported(name, displays)
+        case .unknownDisplay(let query, let displays): L10n.automationUnknownDisplay(query, displays)
+        case .ambiguousDisplay(let query, let displays): L10n.automationAmbiguousDisplay(query, displays)
         }
     }
 

@@ -6,14 +6,22 @@ import Foundation
 @MainActor
 final class AutomationRequestRouter {
     private let service: AutomationService
+    private let brightness: BrightnessAutomation?
 
-    init(service: AutomationService) {
+    init(service: AutomationService, brightness: BrightnessAutomation? = nil) {
         self.service = service
+        self.brightness = brightness
     }
 
     func handle(_ request: AutomationRequest) async -> AutomationResponse {
         guard request.version == AutomationRequest.currentVersion else {
             return Self.error(AutomationExitCode.communication, L10n.automationVersionMismatch(request.version))
+        }
+        if request.operation == .brightness {
+            guard let brightness, let body = request.brightness else {
+                return Self.error(AutomationExitCode.usage, L10n.automationIncompleteRequest)
+            }
+            return await brightness.handle(body)
         }
         do {
             if request.operation == .list { return list() }
@@ -41,7 +49,7 @@ final class AutomationRequestRouter {
         case (.stop, .chain): return try await service.stopChain(id)
         case (.status, .command): return try service.commandStatus(id)
         case (.status, .chain): return try service.chainStatus(id)
-        case (.list, _): preconditionFailure("list is handled before resolving a target")
+        case (.list, _), (.brightness, _): preconditionFailure("handled before resolving a target")
         }
     }
 

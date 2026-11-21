@@ -116,6 +116,9 @@ enum AutomationCLI {
         guard let operation = AutomationOperation(rawValue: first) else {
             return usage(L10n.automationUsageUnknownOperation(first))
         }
+        if operation == .brightness {
+            return parseBrightness(Array(args.dropFirst())).map { .request($0, dataDirectory: dataDirectory) }
+        }
 
         var positional: [String] = []
         var directory: String?
@@ -164,6 +167,58 @@ enum AutomationCLI {
         return .success(.request(AutomationRequest(operation: operation, kind: kind, target: positional[1],
                                                    directory: directory, timeoutSeconds: timeout),
                                  dataDirectory: dataDirectory))
+    }
+
+    /// `brightness list | get | set <0…100> | up|down [step]`, each but list with `--display <name|id>`.
+    private static func parseBrightness(_ args: [String]) -> Result<AutomationRequest, UsageError> {
+        func failure(_ problem: String) -> Result<AutomationRequest, UsageError> {
+            .failure(UsageError(message: L10n.automationUsage(problem)))
+        }
+        guard let first = args.first else { return failure(L10n.automationUsageNoBrightnessAction) }
+        guard let action = AutomationBrightnessRequest.Action(rawValue: first) else {
+            return failure(L10n.automationUsageUnknownBrightnessAction(first))
+        }
+        var positional: [String] = []
+        var display: String?
+        var rest = args.dropFirst()[...]
+        while let arg = rest.popFirst() {
+            switch arg {
+            case "--display":
+                guard let value = rest.popFirst(), !value.trimmingCharacters(in: .whitespaces).isEmpty else {
+                    return failure(L10n.automationUsageMissingValue(arg))
+                }
+                display = value
+            case "--directory", "--timeout":
+                return failure(L10n.automationUsageOptionNotApplicable(arg))
+            default:
+                if arg.hasPrefix("--") { return failure(L10n.automationUsageUnknownOption(arg)) }
+                positional.append(arg)
+            }
+        }
+        if action == .list, display != nil { return failure(L10n.automationUsageBrightnessListDisplay) }
+
+        var percent: Double?
+        switch action {
+        case .list, .get:
+            if let extra = positional.first { return failure(L10n.automationUsageExtraArgument(extra)) }
+        case .set:
+            guard let value = positional.first else { return failure(L10n.automationUsageMissingBrightness) }
+            guard let number = Double(value), number.isFinite, (0...100).contains(number) else {
+                return failure(L10n.automationUsageBadBrightness(value))
+            }
+            percent = number
+        case .up, .down:
+            if let value = positional.first {
+                guard let number = Double(value), number.isFinite, number > 0, number <= 100 else {
+                    return failure(L10n.automationUsageBadBrightnessStep(value))
+                }
+                percent = number
+            }
+        }
+        if positional.count > 1 { return failure(L10n.automationUsageExtraArgument(positional[1])) }
+        return .success(AutomationRequest(operation: .brightness,
+                                          brightness: AutomationBrightnessRequest(action: action, percent: percent,
+                                                                                  display: display)))
     }
 
     private static func absolute(_ path: String, from currentDirectory: String) -> String {

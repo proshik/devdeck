@@ -121,7 +121,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Listen for the command line. The socket is per bundle id and data directory, so a
     /// development build never answers for the installed DevDeck. A failure costs only the CLI.
     private func startAutomationSocket(_ service: AutomationService) {
-        let router = AutomationRequestRouter(service: service)
+        // Brightness goes through the same model as the keys and the slider (and its OSD).
+        let brightness = BrightnessAutomation(model: self.brightness, config: { [weak store] in store?.config ?? .empty })
+        let router = AutomationRequestRouter(service: service, brightness: brightness)
         let url = AutomationEndpoint.socketURL(bundleID: Bundle.main.bundleIdentifier ?? "DevDeck",
                                                dataDirectory: AppRuntime.supportDirectory)
         let server = AutomationSocketServer(socketURL: url) { request in await router.handle(request) }
