@@ -3,8 +3,8 @@ import AppKit
 /// Menu bar icon: a mini "control panel" (console frame + horizontal faders).
 /// Drawn in code → crisp at any size; `isTemplate` → adapts to light/dark menu bar appearance.
 enum TrayIcon {
-    /// Glyph side in points. The pressure badge is pinned to this box's top-right corner.
-    static let glyphSize: CGFloat = 18
+    /// Glyph side in points.
+    private static let glyphSize: CGFloat = 18
 
     static func image() -> NSImage {
         let size = NSSize(width: glyphSize, height: glyphSize)
@@ -44,19 +44,4 @@ enum TrayIcon {
         image.isTemplate = true
         return image
     }
-
-    /// Badge color for a pressure level; nil under normal pressure (no badge).
-    static func badgeColor(for level: MemoryPressureLevel) -> NSColor? {
-        switch level {
-        case .normal: return nil
-        case .warning: return .systemYellow
-        case .critical: return .systemRed
-        }
-    }
-
-    /// Colour of the bottom-left engine dot; nil (no dot) while the engine is stopped or unknown.
-    static func engineBadgeColor(running: Bool) -> NSColor? {
-        running ? .systemGreen : nil
-    }
-
 }

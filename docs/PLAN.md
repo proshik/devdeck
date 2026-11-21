@@ -387,7 +387,9 @@ Design: `docs/superpowers/specs/2026-08-18-remote-proxy-design.md`.
 
 DevDeck was hard-wired to colima (`colima ssh`, `colima list`, "VM colima", "Restart colima").
 Now it recognises the active engine (colima or Docker Desktop), shows a green dot in the tray while
-it runs, and names metrics/buttons after it. Executed subagent-driven, one task at a time, with an
+it runs, and names metrics/buttons after it. **2026-11-21 (user decision):** both tray dots — the
+green engine dot and the yellow/red memory-pressure dot — are removed without a replacement; the
+icon is always a plain template glyph and engine/pressure state lives only in the panel. Executed subagent-driven, one task at a time, with an
 independent review on each; 6/6 tasks, full suite green (817 tests).
 
 - Engine detection runs every 2 s and spawns **no** process (pid file + `kill(pid, 0)` for colima;
@@ -419,7 +421,8 @@ if switching engines.
 ## Open Items
 
 **Next up:** manual GUI verification of the Container Engine Abstraction (chunk 1) on this machine
-(colima, no Docker Desktop): green tray dot follows `colima start/stop`; popover says «VM colima»;
+(colima, no Docker Desktop): ~~green tray dot follows `colima start/stop`~~ (dot removed
+2026-11-21); popover says «VM colima»;
 settings picker «Движок контейнеров» defaults to auto; cleanup shows «colima — docker в VM» +
 restart button; switching the picker to Docker Desktop hides the VM/disk/cluster cells and leaves the
 cleanup page with only minikube. Only after that — a merge request from `feat/container-engine`.
