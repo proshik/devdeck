@@ -254,6 +254,7 @@ struct ClipboardView: View {
                     }
                 }.padding(16).frame(minWidth: 260, maxWidth: .infinity, maxHeight: .infinity)
             }
+            .besideFloatingSidebar()
         }
     }
     private func clearHiddenSelection() {

@@ -174,7 +174,9 @@ struct MainWindowView: View {
             }
             .frame(minWidth: 190, idealWidth: 230, maxWidth: 300)
             commandDetail.frame(minWidth: 350, maxWidth: .infinity, maxHeight: .infinity)
-        }.navigationTitle(L10n.deckCommands)
+        }
+        .besideFloatingSidebar()
+        .navigationTitle(L10n.deckCommands)
         // The same confirmation as the editor's toolbar "Delete".
         .confirmationDialog(deletionTitle, isPresented: Binding(
             get: { pendingDeletion != nil }, set: { if !$0 { pendingDeletion = nil } }
@@ -296,6 +298,20 @@ struct MainWindowView: View {
         guard let copyID = store.duplicate(chainID: id) else { return }
         appModel.detailTab = .editor
         appModel.selection = .chain(copyID)
+    }
+}
+
+extension View {
+    /// For an `HSplitView` page in the window's detail column. The split view runs under the
+    /// floating sidebar, so its first pane's minimum already counts the sidebar's width; SwiftUI
+    /// measures that minimum for the area beside the sidebar and so counts the sidebar twice.
+    /// Once the doubled minimum exceeds the window (on the commands page, past a sidebar of about
+    /// 250 pt), the whole `NavigationSplitView` is laid out wider than the window and centred, which
+    /// cuts off the sidebar's leading part. Not reporting the minimum keeps the column within the
+    /// window (the window's minimum width leaves room for both panes beside the widest sidebar),
+    /// and leading alignment keeps the split view from being centred on the doubled width.
+    func besideFloatingSidebar() -> some View {
+        frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
     }
 }
 
