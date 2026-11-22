@@ -38,6 +38,16 @@ final class FakeDirectoryReader: DirectoryReading, @unchecked Sendable {
 
     func deny(_ path: String) { lock.lock(); denied.insert(path); lock.unlock() }
 
+    /// Put a different directory at `path` — what a swap between listing and opening looks like.
+    func replaceInode(_ path: String) {
+        lock.lock(); defer { lock.unlock() }
+        guard let old = nodes[path] else { return }
+        nextInode += 1
+        nodes[path] = DirectoryEntry(name: old.name, kind: old.kind, allocatedBytes: old.allocatedBytes,
+                                     device: old.device, inode: nextInode, linkCount: old.linkCount,
+                                     modified: old.modified)
+    }
+
     private func add(_ path: String, kind: DirectoryEntry.Kind, bytes: UInt64, device: UInt64,
                      inode: UInt64?, links: UInt32, modified: TimeInterval) {
         let parent = (path as NSString).deletingLastPathComponent
@@ -57,11 +67,14 @@ final class FakeDirectoryReader: DirectoryReading, @unchecked Sendable {
         return nodes[path]
     }
 
-    func entries(of path: String) throws -> [DirectoryEntry] {
+    func entries(of path: String, expecting: DirectoryEntry?) throws -> [DirectoryEntry] {
         lock.lock(); defer { lock.unlock() }
         _listed.append(path)
         if denied.contains(path) { throw DirectoryReadError.denied }
-        guard nodes[path]?.kind == .directory else { throw DirectoryReadError.failed }
+        guard let node = nodes[path], node.kind == .directory else { throw DirectoryReadError.failed }
+        if let expecting, expecting.device != node.device || expecting.inode != node.inode {
+            throw DirectoryReadError.failed
+        }
         return (children[path] ?? []).compactMap { nodes[path + "/" + $0] }
     }
 }
@@ -76,7 +89,7 @@ final class FakeDeletionInspector: DeletionInspecting, @unchecked Sendable {
     init(_ fs: FakeDirectoryReader) { self.fs = fs }
 
     func entry(at path: String) -> DirectoryEntry? { fs.entry(at: path) }
-    func entries(of path: String) throws -> [DirectoryEntry] { try fs.entries(of: path) }
+    func entries(of path: String, expecting: DirectoryEntry?) throws -> [DirectoryEntry] { try fs.entries(of: path, expecting: expecting) }
     func realPath(_ path: String) -> String? { fs.entry(at: path) == nil ? nil : (resolved[path] ?? path) }
     func isLockHeld(_ path: String) -> Bool { heldLocks.contains(path) }
 }

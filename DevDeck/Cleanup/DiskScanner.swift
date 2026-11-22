@@ -107,7 +107,8 @@ struct DiskScanner {
             var newestHere = own.modified
             let entries: [DirectoryEntry]
             do {
-                entries = try reader.entries(of: path)
+                // The directory must still be the one its parent listed — not a link swapped in.
+                entries = try reader.entries(of: path, expecting: own)
             } catch {
                 unreadableCount += 1
                 if unreadable.count < DiskScanner.unreadableKept { unreadable.append(path) }
@@ -118,7 +119,9 @@ struct DiskScanner {
 
             let names = Set(entries.map(\.name))
             let fileNames = Set(entries.filter { $0.kind == .file }.map(\.name))
-            for entry in entries {
+            for (index, entry) in entries.enumerated() {
+                // A flat directory of a million files must not hold a stop for its whole length.
+                if index % 1_000 == 999, isCancelled() { throw Cancelled() }
                 let childPath = path + "/" + entry.name
                 switch entry.kind {
                 case .directory:
@@ -200,9 +203,12 @@ struct DiskScanner {
 /// The category checks the scanner and the deletion guard share — one rule, two callers.
 enum DiskCategoryRules {
     /// What may not sit directly inside a project category: it would make it a project root.
+    /// Names are compared case-insensitively: on the default (case-insensitive) APFS a `.GIT`
+    /// is the same `.git` to git and to the shell's `[ -e ]`.
     static func isBuildDirectory(_ category: DiskCategory, contents: Set<String>) -> Bool {
-        if contents.contains(".git") { return false }
-        if category == .rustTarget && contents.contains("Cargo.toml") { return false }
+        let names = Set(contents.map { $0.lowercased() })
+        if names.contains(".git") { return false }
+        if category == .rustTarget && names.contains("cargo.toml") { return false }
         return true
     }
 

@@ -95,6 +95,11 @@ final class DeletionGuardTests: XCTestCase {
         crate.file("/h/work/p/target/Cargo.toml", bytes: 1)
         XCTAssertEqual(check(FakeDeletionInspector(crate), target()), .noLongerMatches)
 
+        let upper = FakeDirectoryReader(root: home)
+        project(upper)
+        upper.dir("/h/work/p/target/.Git")
+        XCTAssertEqual(check(FakeDeletionInspector(upper), target()), .noLongerMatches, "APFS ignores case")
+
         let repo = FakeDirectoryReader(root: home)
         repo.file("/h/web/package.json", bytes: 1)
         repo.dir("/h/web/node_modules/.git")

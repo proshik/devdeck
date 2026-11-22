@@ -78,7 +78,7 @@ final class DiskOverviewModelTests: XCTestCase {
         XCTAssertEqual(review.accepted.count, 2)
         XCTAssertTrue(review.rejected.isEmpty)
 
-        disk.confirmDeletion()
+        disk.confirmDeletion(review)
         let ctrl = try XCTUnwrap(runner.controller(for: CleanupCommands.macFilesID))
         XCTAssertEqual(cleanup.lastRunID, CleanupCommands.macFilesID, "its log is the page's last action")
         ctrl.started(pid: 3)
@@ -86,10 +86,11 @@ final class DiskOverviewModelTests: XCTestCase {
         XCTAssertFalse(disk.canScan, "no scan while files are being deleted")
         XCTAssertFalse(disk.canDelete)
 
+        disk.deletionPollInterval = .milliseconds(5)
         ctrl.terminate(0)
-        await yieldUntil { manager.states[CleanupCommands.macFilesID] == .succeeded }
+        // The model notices the end on its own — the page may not be open.
+        await disk.waitForDeletion()
         // The fake tree still has target: as far as the disk says, it is not gone.
-        await disk.deletionFinished(succeeded: true)
         XCTAssertEqual(disk.result?.candidates.map(\.path), ["/h/work/a/target"],
                        "an emptied cache is forgotten; a directory still on disk is kept")
         XCTAssertTrue(disk.selection.isEmpty)
@@ -110,10 +111,58 @@ final class DiskOverviewModelTests: XCTestCase {
         fs.file("/h/work/a/target/debug/.cargo-lock", bytes: 0)
         inspector.heldLocks = ["/h/work/a/target/debug/.cargo-lock"]
 
-        let review = disk.confirmDeletion()
+        let review = disk.confirmDeletion(disk.review())
 
         XCTAssertEqual(review.rejected.map(\.reason), [.buildRunning])
         XCTAssertTrue(runner.startedCommandIDs.isEmpty, "nothing left to delete → nothing runs")
+    }
+
+    /// The sheet listed the target as skipped (cargo held its lock). The build ends while the
+    /// sheet is open; "Delete" must still delete only what the sheet said it would.
+    func testAPathShownAsSkippedIsNotDeletedWhenItPassesLater() async throws {
+        let fs = tree()
+        fs.file("/h/work/a/target/debug/.cargo-lock", bytes: 0)
+        let runner = FakeCommandRunner()
+        let cleanup = CleanupModel(manager: ProcessManager(runner: runner), probe: FakeDockerUsageProbe([:]),
+                                   facts: FakeEngineFactsProbe())
+        let inspector = FakeDeletionInspector(fs)
+        inspector.heldLocks = ["/h/work/a/target/debug/.cargo-lock"]
+        let disk = DiskOverviewModel(cleanup: cleanup, root: "/h", reader: fs, inspector: inspector,
+                                     volume: FakeVolumeUsageProbe(), store: FakeDiskScanStore())
+        disk.startScan()
+        await disk.waitForScan()
+        disk.toggle("/h/work/a/target")
+        disk.toggle("/h/.cache")
+        let shown = disk.review()
+        XCTAssertEqual(shown.rejected.map(\.candidate.path), ["/h/work/a/target"])
+
+        inspector.heldLocks = []   // the build finished while the sheet was open
+        disk.confirmDeletion(shown)
+
+        let ctrl = try XCTUnwrap(runner.controller(for: CleanupCommands.macFilesID))
+        XCTAssertFalse(ctrl.command.command.contains("/h/work/a"), ctrl.command.command)
+        XCTAssertTrue(ctrl.command.command.contains("/h/.cache"))
+    }
+
+    /// Stopped from its log: the run goes idle, not failed — still its end, still reconciled.
+    func testAStoppedDeletionIsReconciledToo() async throws {
+        let fs = tree()
+        let runner = FakeCommandRunner()
+        let (disk, _, manager) = models(fs, runner: runner)
+        disk.deletionPollInterval = .milliseconds(5)
+        disk.startScan()
+        await disk.waitForScan()
+        disk.toggle("/h/.cache")
+        disk.confirmDeletion(disk.review())
+        try XCTUnwrap(runner.controller(for: CleanupCommands.macFilesID)).started(pid: 9)
+
+        manager.stop(CleanupCommands.macFilesID)
+        await disk.waitForDeletion()
+
+        XCTAssertTrue(disk.sizesMayBeStale)
+        XCTAssertTrue(disk.selection.isEmpty)
+        XCTAssertEqual(disk.result?.candidates.map(\.path), ["/h/work/a/target", "/h/.cache"],
+                       "a stopped run did not empty the cache — it stays offered")
     }
 
     func testNothingScansWhileADockerCleanupRuns() async throws {
@@ -145,9 +194,9 @@ private final class SlowReader: DirectoryReading, @unchecked Sendable {
     var started: Bool { lock.lock(); defer { lock.unlock() }; return _started }
     func release() { gate.signal() }
     func entry(at path: String) -> DirectoryEntry? { inner.entry(at: path) }
-    func entries(of path: String) throws -> [DirectoryEntry] {
+    func entries(of path: String, expecting: DirectoryEntry?) throws -> [DirectoryEntry] {
         lock.lock(); let first = !_started; _started = true; lock.unlock()
         if first { _ = gate.wait(timeout: .now() + 5) }
-        return try inner.entries(of: path)
+        return try inner.entries(of: path, expecting: expecting)
     }
 }

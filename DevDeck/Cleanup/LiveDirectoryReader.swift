@@ -11,9 +11,20 @@ struct LiveDirectoryReader: DirectoryReading {
         return Self.entry(name: (path as NSString).lastPathComponent, info)
     }
 
-    func entries(of path: String) throws -> [DirectoryEntry] {
+    func entries(of path: String, expecting: DirectoryEntry?) throws -> [DirectoryEntry] {
         let fd = open(path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
         guard fd >= 0 else { throw Self.error(errno) }
+        if let expecting {
+            // O_NOFOLLOW guards the last component only; an ancestor swapped for a link since the
+            // parent was listed would land somewhere else — the inode says whether it did.
+            var opened = stat()
+            guard fstat(fd, &opened) == 0,
+                  UInt64(bitPattern: Int64(opened.st_dev)) == expecting.device,
+                  opened.st_ino == expecting.inode else {
+                close(fd)
+                throw DirectoryReadError.failed
+            }
+        }
         guard let dir = fdopendir(fd) else {
             let code = errno
             close(fd)
@@ -21,7 +32,13 @@ struct LiveDirectoryReader: DirectoryReading {
         }
         defer { closedir(dir) }
         var out: [DirectoryEntry] = []
-        while let raw = readdir(dir) {
+        while true {
+            errno = 0
+            guard let raw = readdir(dir) else {
+                // nil is both the end and an error; only errno tells them apart.
+                if errno != 0 { throw Self.error(errno) }
+                break
+            }
             var buffer = raw.pointee.d_name
             let capacity = MemoryLayout.size(ofValue: buffer)
             let name = withUnsafePointer(to: &buffer) {
@@ -29,8 +46,13 @@ struct LiveDirectoryReader: DirectoryReading {
             }
             if name == "." || name == ".." { continue }
             var info = stat()
-            // Vanished between readdir and stat — a temp file of a running build; skip it.
-            guard fstatat(fd, name, &info, AT_SYMLINK_NOFOLLOW) == 0 else { continue }
+            guard fstatat(fd, name, &info, AT_SYMLINK_NOFOLLOW) == 0 else {
+                let code = errno
+                // Vanished between readdir and stat — a temp file of a running build; skip it.
+                if code == ENOENT { continue }
+                // Names readable but not their entries: what this directory holds is unknown.
+                throw Self.error(code)
+            }
             out.append(Self.entry(name: name, info))
         }
         return out

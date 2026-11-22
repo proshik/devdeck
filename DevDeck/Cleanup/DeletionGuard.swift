@@ -73,7 +73,9 @@ struct LiveDeletionInspector: DeletionInspecting {
     private let reader = LiveDirectoryReader()
 
     func entry(at path: String) -> DirectoryEntry? { reader.entry(at: path) }
-    func entries(of path: String) throws -> [DirectoryEntry] { try reader.entries(of: path) }
+    func entries(of path: String, expecting: DirectoryEntry?) throws -> [DirectoryEntry] {
+        try reader.entries(of: path, expecting: expecting)
+    }
 
     func realPath(_ path: String) -> String? {
         guard let resolved = Darwin.realpath(path, nil) else { return nil }

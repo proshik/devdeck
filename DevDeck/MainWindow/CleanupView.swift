@@ -86,9 +86,6 @@ struct CleanupView: View {
         .onChange(of: lastRunState) { _, new in
             guard new == .succeeded || isFailed(new) else { return }
             Task {
-                if model.lastRunID == CleanupCommands.macFilesID {
-                    await disk.deletionFinished(succeeded: new == .succeeded)
-                }
                 await manager.refreshVMDisk()
                 await model.refresh()
             }
@@ -104,7 +101,7 @@ struct CleanupView: View {
         }
         .sheet(item: $review) { sheet in
             DeletionConfirmation(review: sheet.review) {
-                disk.confirmDeletion()
+                disk.confirmDeletion(sheet.review)
                 review = nil
             } cancel: {
                 review = nil
@@ -237,7 +234,8 @@ struct CleanupView: View {
 
     private func largestSection(_ result: DiskScanResult, proxy: ScrollViewProxy) -> some View {
         let top = result.tree.children.filter { $0.bytes >= Self.largestFloor }
-        let rest = result.tree.bytes - top.reduce(0) { $0 + $1.bytes }
+        let shown = top.reduce(UInt64(0)) { $0 + $1.bytes }
+        let rest = result.tree.bytes > shown ? result.tree.bytes - shown : 0
         return Section {
             ForEach(top, id: \.name) { node in
                 if node.name == ".colima", model.visibleHosts.contains(.colima) {

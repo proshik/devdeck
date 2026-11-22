@@ -350,12 +350,15 @@ struct LiveDockerUsageProbe: DockerUsageProbing {
             let args = ["ssh", "--", script]
             return [("/opt/homebrew/bin/minikube", args), ("/usr/bin/env", ["minikube"] + args)]
         case .dockerDesktop:
-            return [("/usr/bin/env", ["DOCKER_HOST=unix://" + DockerHost.dockerDesktopSocket(home: home),
+            return [("/usr/bin/env", ["-u", "DOCKER_CONTEXT", "-u", "BUILDX_BUILDER",
+                                      "DOCKER_HOST=unix://" + DockerHost.dockerDesktopSocket(home: home),
                                       "PATH=" + dockerDesktopPATH, "/bin/sh", "-c", script])]
         }
     }
 
+    /// Docker Desktop's bundled CLI — the probe and the cleanup commands both put it first.
+    static let dockerDesktopBin = "/Applications/Docker.app/Contents/Resources/bin"
     /// Where Docker Desktop puts its CLI, ahead of the usual places.
-    static let dockerDesktopPATH = ["/Applications/Docker.app/Contents/Resources/bin", "/usr/local/bin",
+    static let dockerDesktopPATH = [dockerDesktopBin, "/usr/local/bin",
                                     "/opt/homebrew/bin", "/usr/bin", "/bin"].joined(separator: ":")
 }

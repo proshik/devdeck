@@ -75,19 +75,43 @@ final class DiskScannerTests: XCTestCase {
         XCTAssertEqual(result.tree.bytes, gb, "what could be read is still counted")
     }
 
+    /// The six folders the user chose not to enter (design §8.1) — spelled out here, not taken
+    /// from the production list, so dropping one from it fails this test.
     func testProtectedFoldersAreNotEvenListed() throws {
+        let required = ["Desktop", "Documents", "Downloads", "Library/Mobile Documents",
+                        "Library/Containers", "Library/Group Containers"]
         let fs = FakeDirectoryReader(root: home)
-        for relative in DiskScanner.protectedRelativePaths { fs.file("/h/\(relative)/f", bytes: gb) }
+        for relative in required { fs.file("/h/\(relative)/f", bytes: gb) }
         fs.file("/h/Library/Caches/c", bytes: gb)
 
         let result = try scan(fs)
 
-        for relative in DiskScanner.protectedRelativePaths {
+        for relative in required {
             XCTAssertFalse(fs.listed.contains("/h/\(relative)"), "\(relative) would raise a macOS consent prompt")
         }
-        XCTAssertEqual(Set(result.skipped), Set(DiskScanner.protectedRelativePaths.map { "/h/\($0)" }))
+        XCTAssertEqual(Set(result.skipped), Set(required.map { "/h/\($0)" }))
         XCTAssertFalse(result.isPartial, "skipping on purpose is not a read failure")
         XCTAssertEqual(result.tree.bytes, gb)
+    }
+
+    func testADirectorySwappedBetweenListingAndOpeningIsNotRead() throws {
+        let fs = FakeDirectoryReader(root: home)
+        fs.file("/h/work/p/x", bytes: gb)
+        let swapping = SwapOnFirstList(fs, swap: "/h/work")
+
+        let result = try DiskScanner(reader: swapping, root: home).scan()
+
+        XCTAssertEqual(result.unreadable, ["/h/work"])
+        XCTAssertEqual(result.tree.bytes, 0)
+    }
+
+    func testCancellationStopsInsideAFlatDirectory() {
+        let fs = FakeDirectoryReader(root: home)
+        for i in 0..<5_000 { fs.file("/h/flat/f\(i)", bytes: 1) }
+        var asked = 0
+        // Two directory entries pass (root, flat); the stop comes while flat's files are counted.
+        XCTAssertThrowsError(try scan(fs) { asked += 1; return asked > 2 })
+        XCTAssertLessThan(asked, 6)
     }
 
     func testCancellationStopsTheWalk() {
@@ -132,6 +156,19 @@ final class DiskScannerTests: XCTestCase {
         fs.file("/h/work/repo/Cargo.toml", bytes: 1)
         fs.dir("/h/work/repo/target/.git")
         fs.file("/h/work/repo/target/x", bytes: gb)
+
+        XCTAssertTrue(try scan(fs).candidates.isEmpty)
+    }
+
+    /// APFS is case-insensitive by default: `.GIT` is a repository to git and to the shell.
+    func testProjectRootMarkersMatchInAnyCase() throws {
+        let fs = FakeDirectoryReader(root: home)
+        fs.file("/h/w/a/Cargo.toml", bytes: 1)
+        fs.dir("/h/w/a/target/.GIT")
+        fs.file("/h/w/a/target/x", bytes: gb)
+        fs.file("/h/w/b/Cargo.toml", bytes: 1)
+        fs.file("/h/w/b/target/CARGO.TOML", bytes: 1)
+        fs.file("/h/w/b/target/y", bytes: gb)
 
         XCTAssertTrue(try scan(fs).candidates.isEmpty)
     }
@@ -232,5 +269,19 @@ final class DiskScannerTests: XCTestCase {
 
         XCTAssertEqual(result.candidates.count, 1)
         XCTAssertEqual(result.tree.bytes, 2 * gb + 1)
+    }
+}
+
+/// Hands out the listing of `swap`'s parent, then puts another directory at `swap` — the
+/// scanner then opens a directory that is not the one it was told about.
+private final class SwapOnFirstList: DirectoryReading, @unchecked Sendable {
+    private let fs: FakeDirectoryReader
+    private let swap: String
+    init(_ fs: FakeDirectoryReader, swap: String) { self.fs = fs; self.swap = swap }
+    func entry(at path: String) -> DirectoryEntry? { fs.entry(at: path) }
+    func entries(of path: String, expecting: DirectoryEntry?) throws -> [DirectoryEntry] {
+        let out = try fs.entries(of: path, expecting: expecting)
+        if path == (swap as NSString).deletingLastPathComponent { fs.replaceInode(swap) }
+        return out
     }
 }

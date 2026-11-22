@@ -28,8 +28,13 @@ enum DirectoryReadError: Error, Equatable, Sendable {
 protocol DirectoryReading: Sendable {
     /// `lstat` of a single path; nil when it does not exist.
     func entry(at path: String) -> DirectoryEntry?
-    /// The entries of a directory, `.` and `..` excluded.
-    func entries(of path: String) throws -> [DirectoryEntry]
+    /// The entries of a directory, `.` and `..` excluded. With `expecting`, the directory opened
+    /// must be that one (same device and inode) — otherwise `.failed`.
+    func entries(of path: String, expecting: DirectoryEntry?) throws -> [DirectoryEntry]
+}
+
+extension DirectoryReading {
+    func entries(of path: String) throws -> [DirectoryEntry] { try entries(of: path, expecting: nil) }
 }
 
 // MARK: - Known categories
@@ -143,6 +148,21 @@ struct DiskScanResult: Codable, Equatable, Sendable {
     var skipped: [String]
 
     var isPartial: Bool { unreadableCount > 0 }
+
+    /// A saved file is someone's to edit: a node smaller than its kept children is not a scan
+    /// this code wrote, and is not shown.
+    var isConsistent: Bool {
+        func ok(_ node: DiskNode) -> Bool {
+            var sum: UInt64 = 0
+            for child in node.children {
+                let (next, overflow) = sum.addingReportingOverflow(child.bytes)
+                guard !overflow, ok(child) else { return false }
+                sum = next
+            }
+            return sum <= node.bytes
+        }
+        return ok(tree)
+    }
 
     /// Drop the candidates that are gone and take their bytes out of the tree, so the page stays
     /// truthful after a deletion without a rescan. `stillThere` is asked per removed path.

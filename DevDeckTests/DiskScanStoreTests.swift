@@ -40,6 +40,17 @@ final class DiskScanStoreTests: XCTestCase {
         store.save(result)
         XCTAssertNil(store.load())
     }
+
+    /// A hand-edited file whose children outweigh their parent would make the page subtract into
+    /// a negative — it is not a scan this code wrote, and reads as none.
+    func testAnInconsistentTreeReadsAsNeverScanned() throws {
+        var result = try DiskScanner(reader: FakeDirectoryReader(root: "/h"), root: "/h").scan()
+        result.tree.bytes = 0
+        result.tree.children = [DiskNode(name: "work", bytes: 5_000_000_000)]
+        let store = DiskScanStore(url: directory.appendingPathComponent("disk-scan.json"))
+        store.save(result)
+        XCTAssertNil(store.load())
+    }
 }
 
 /// The live reader against a real temp tree: link counts, symlinks and allocated sizes as `lstat`

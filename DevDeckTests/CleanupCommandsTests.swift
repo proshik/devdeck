@@ -108,10 +108,13 @@ final class CleanupCommandsTests: XCTestCase {
     /// Its daemon is reached from the Mac: the docker CLI with DOCKER_HOST on its socket, whatever
     /// docker context is current.
     func testDockerDesktopCommandsTalkToItsSocketFromTheMac() {
+        let prefix = "env -u DOCKER_CONTEXT -u BUILDX_BUILDER DOCKER_HOST=\"unix://$HOME/.docker/run/docker.sock\" "
+            + "PATH=\"/Applications/Docker.app/Contents/Resources/bin:$PATH\" sh -c "
         XCTAssertEqual(CleanupCommands.command(.buildCache, on: .dockerDesktop).command,
-                       "env DOCKER_HOST=\"unix://$HOME/.docker/run/docker.sock\" sh -c 'docker builder prune -a -f'")
+                       prefix + "'docker builder prune -a -f'",
+                       "a remote Buildx builder or another context must never receive the prune")
         XCTAssertEqual(CleanupCommands.removeTestContainers(ids: ["a1"], on: .dockerDesktop).command,
-                       "env DOCKER_HOST=\"unix://$HOME/.docker/run/docker.sock\" sh -c 'docker rm -f -v a1'")
+                       prefix + "'docker rm -f -v a1'")
     }
 
     func testTestContainerIDsArePinned() {

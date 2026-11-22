@@ -22,7 +22,7 @@ struct DiskScanStore: DiskScanStoring {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         guard let result = try? decoder.decode(DiskScanResult.self, from: data),
-              result.version == DiskScanResult.currentVersion else { return nil }
+              result.version == DiskScanResult.currentVersion, result.isConsistent else { return nil }
         return result
     }
 

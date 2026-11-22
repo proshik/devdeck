@@ -35,6 +35,10 @@ final class DiskOverviewModel {
     @ObservationIgnored private var scanTask: Task<Void, Never>?
     /// What the deletion now running was asked to remove — forgotten once it finishes.
     @ObservationIgnored private var removing: [DiskCandidate] = []
+    /// Waits for that run to end, whether or not the page is still open.
+    @ObservationIgnored private var deletionWatch: Task<Void, Never>?
+    /// How often the watch looks at the run's state.
+    @ObservationIgnored var deletionPollInterval: Duration = .milliseconds(250)
     /// How often the page sees the scan's progress.
     @ObservationIgnored var progressInterval: Duration = .milliseconds(250)
 
@@ -154,23 +158,53 @@ final class DiskOverviewModel {
         return review
     }
 
-    /// "Delete" in the confirmation: check again (time has passed since it opened), then run one
-    /// command for every path still passing. Returns the review it acted on.
+    /// "Delete" in the confirmation. Only what the confirmation listed as going is considered —
+    /// a path it showed as skipped is never added because it has passed since — and each is
+    /// checked once more (time has passed since it opened). Returns what it acted on.
     @discardableResult
-    func confirmDeletion() -> Review {
-        let review = review()
+    func confirmDeletion(_ shown: Review) -> Review {
+        let guardian = DeletionGuard(inspector: inspector, root: root)
+        var review = Review(accepted: [], rejected: shown.rejected)
+        for candidate in shown.accepted where selection.contains(candidate.path) {
+            if let reason = guardian.check(candidate) {
+                review.rejected.append(.init(candidate: candidate, reason: reason))
+            } else {
+                review.accepted.append(candidate)
+            }
+        }
         guard canDelete, !review.accepted.isEmpty else { return review }
         removing = review.accepted
         cleanup.start(CleanupCommands.removeMacFiles(review.accepted))
+        watchDeletion()
         return review
     }
 
     var deletionState: ProcessManager.RunState? { cleanup.state(of: CleanupCommands.macFilesID) }
 
+    /// The run's state is `.running` from the moment it starts; anything else afterwards —
+    /// succeeded, failed, or idle after a stop from its log — is its end. Owned by the model, so
+    /// leaving the page does not lose it.
+    private func watchDeletion() {
+        deletionWatch?.cancel()
+        deletionWatch = Task { [weak self] in
+            while let self, !Task.isCancelled, self.deletionState == .running {
+                try? await Task.sleep(for: self.deletionPollInterval)
+            }
+            guard let self, !Task.isCancelled else { return }
+            await self.deletionFinished(succeeded: self.deletionState == .succeeded)
+        }
+    }
+
+    /// For tests: the deletion's end, reconciled.
+    func waitForDeletion() async {
+        await deletionWatch?.value
+    }
+
     /// The deletion command ended (any way): drop what is gone from the result, keep what is not.
-    /// A removed directory is checked on disk; a category emptied in place (`~/Library/Caches`)
-    /// is gone when the command succeeded — apps start refilling it at once, so "exists" says nothing.
-    func deletionFinished(succeeded: Bool) async {
+    /// A removed directory is checked on disk. A category emptied in place (`~/Library/Caches`)
+    /// is gone when the whole run succeeded, or — after a partial failure — when it is empty now;
+    /// apps start refilling it at once, so "exists" says nothing about it.
+    private func deletionFinished(succeeded: Bool) async {
         guard !removing.isEmpty else { return }
         let finished = removing
         removing = []
@@ -181,7 +215,10 @@ final class DiskOverviewModel {
                 guard let category = byPath[path] else { return true }
                 switch category.removal {
                 case .directory: return inspector.entry(at: path) != nil
-                case .contents, .goModCache: return !succeeded
+                case .contents, .goModCache:
+                    if succeeded { return false }
+                    guard inspector.entry(at: path) != nil else { return false }
+                    return (try? inspector.entries(of: path).isEmpty) != true
                 }
             }
             result = updated

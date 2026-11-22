@@ -72,38 +72,57 @@ enum CleanupCommands {
     static let macFilesID = UUID(uuidString: "C1EA0000-0000-4000-8000-000000000200")!
 
     /// One command for everything the user confirmed, a step per path. The candidates have passed
-    /// `DeletionGuard` just before; each step re-checks the cheap part of it in the shell — the
-    /// directory is still a directory and not a link, its manifest is still next to it — so a swap
-    /// in between is skipped, not followed. A failed step does not stop the others; the exit code
-    /// says whether every one of them went through.
+    /// `DeletionGuard` just before; each step repeats the guard in the shell at the moment it runs,
+    /// so a change in between is skipped, not followed. A failed step does not stop the others;
+    /// the exit code says whether every one of them went through.
     static func removeMacFiles(_ candidates: [DiskCandidate]) -> Command {
         let steps = candidates.map(removalStep)
         let script = (["rc=0"] + steps + ["exit $rc"]).joined(separator: "\n")
         return Command(id: macFilesID, name: L10n.macFilesCommandName(count: candidates.count), command: script)
     }
 
+    /// A step runs in its own subshell and is anchored before it deletes anything: it `cd -P`s
+    /// into the directory it acts on (or its parent) and requires `pwd -P` to be exactly the
+    /// confirmed path — so no component, the last or any ancestor, may have become a link since —
+    /// and then deletes by a name relative to that working directory, which a later swap of an
+    /// ancestor cannot redirect. `rm -x` never crosses into another mounted volume, and an entry
+    /// on another device is never handed to `rm` at all. The scan's project-root rule (no `.git`
+    /// inside, no `Cargo.toml` inside a target) is checked again here; APFS resolves `.GIT` too.
     static func removalStep(_ candidate: DiskCandidate) -> String {
-        let path = shellQuote(candidate.path)
-        var guards = ["[ -d \(path) ]", "[ ! -L \(path) ]"]
-        if let manifest = candidate.category.projectManifest {
-            let parent = (candidate.path as NSString).deletingLastPathComponent
-            guards.append("[ -f \(shellQuote(parent + "/" + manifest)) ]")
-        }
-        let action: String
+        let skipped = "echo 'skipped: no longer what the scan found'; exit 1"
+        let body: String
         switch candidate.category.removal {
         case .directory:
-            action = "rm -rf -- \(path)"
+            let parent = (candidate.path as NSString).deletingLastPathComponent
+            let name = shellQuote((candidate.path as NSString).lastPathComponent)
+            var checks = ["[ -d \(name) ]", "[ ! -L \(name) ]", "[ ! -e \(name)/.git ]",
+                          "[ \"$(/usr/bin/stat -f %d \(name))\" = \"$(/usr/bin/stat -f %d .)\" ]"]
+            if let manifest = candidate.category.projectManifest {
+                checks.append("[ -f \(shellQuote(manifest)) ]")
+            }
+            if candidate.category == .rustTarget { checks.append("[ ! -e \(name)/Cargo.toml ]") }
+            body = anchor(parent) + "if \(checks.joined(separator: " && ")); then /bin/rm -rfx -- \(name); else \(skipped); fi"
         case .contents:
-            // find does not follow links (-P is its default); rm -rf on a link removes the link.
-            action = "find \(path) -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +"
+            // Everything inside, dot-files included (zsh: D), nothing when empty (N); the folder stays.
+            body = anchor(candidate.path)
+                + "dev=$(/usr/bin/stat -f %d .); r=0; for e in ./*(DN); do "
+                + "if [ \"$(/usr/bin/stat -f %d \"$e\")\" = \"$dev\" ]; then /bin/rm -rfx -- \"$e\" || r=1; "
+                + "else echo \"skipped, another volume: $e\"; fi; done; exit $r"
         case .goModCache:
-            // go clean cleans whatever GOMODCACHE points at — only when that is the path shown.
-            guards.append("[ \"$(go env GOMODCACHE 2>/dev/null)\" = \(path) ]")
-            action = "go clean -modcache"
+            // Module files are read-only; go clean handles that. GOMODCACHE pins it to the confirmed
+            // path whatever `go env -w` says, and a non-empty GOFLAGS replaces any inherited one
+            // (an inherited `-cache` would clear the build cache too).
+            body = anchor(candidate.path)
+                + "cd .. && GOMODCACHE=\(shellQuote(candidate.path)) GOFLAGS=-modcacherw go clean -modcache"
         }
-        return "echo \(shellQuote("→ " + candidate.path))\n"
-            + "if \(guards.joined(separator: " && ")); then \(action) || rc=1; "
-            + "else echo 'skipped: no longer what the scan found'; rc=1; fi"
+        return "echo \(shellQuote("→ " + candidate.path))\n( \(body) ) || rc=1"
+    }
+
+    /// Enter `path` without following any link on the way and stop unless it is exactly `path`.
+    private static func anchor(_ path: String) -> String {
+        let quoted = shellQuote(path)
+        return "cd -P -- \(quoted) 2>/dev/null && [ \"$(pwd -P)\" = \(quoted) ] "
+            + "|| { echo 'skipped: no longer what the scan found'; exit 1; }; "
     }
 }
 
@@ -118,7 +137,10 @@ extension DockerHost {
         case .colima: return "colima ssh -- sh -c \(shellQuote(script))"
         case .minikube: return "minikube ssh -- \(shellQuote(script))"
         case .dockerDesktop:
-            return "env DOCKER_HOST=\"unix://$HOME/.docker/run/docker.sock\" sh -c \(shellQuote(script))"
+            // Its own CLI first on PATH (the login shell may know no other docker), and nothing
+            // inherited may point the CLI elsewhere: no context, no remote Buildx builder.
+            return "env -u DOCKER_CONTEXT -u BUILDX_BUILDER DOCKER_HOST=\"unix://$HOME/.docker/run/docker.sock\" "
+                + "PATH=\"\(LiveDockerUsageProbe.dockerDesktopBin):$PATH\" sh -c \(shellQuote(script))"
         }
     }
 }

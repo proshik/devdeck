@@ -69,11 +69,15 @@ enum AppRuntime {
     /// Release builds have no such argument.
     static let diskScanRoot: String = {
         #if DEBUG
-        if developmentDirectory != nil,
-           let index = ProcessInfo.processInfo.arguments.firstIndex(of: diskScanRootArgument),
-           ProcessInfo.processInfo.arguments.indices.contains(index + 1) {
-            let path = ProcessInfo.processInfo.arguments[index + 1]
-            if path.hasPrefix("/") { return path }
+        let arguments = ProcessInfo.processInfo.arguments
+        if let index = arguments.firstIndex(of: diskScanRootArgument) {
+            // Asked for a throwaway root and not given a usable one: stop rather than quietly
+            // offer the real home folder for deletion.
+            guard developmentDirectory != nil, arguments.indices.contains(index + 1),
+                  arguments[index + 1].hasPrefix("/") else {
+                preconditionFailure("\(diskScanRootArgument) requires an absolute path and \(developmentDirectoryArgument)")
+            }
+            return arguments[index + 1]
         }
         #endif
         return NSHomeDirectory()
