@@ -164,8 +164,9 @@ extension DockerHost {
         case .minikube: return "minikube ssh -- \(shellQuote(script))"
         case .dockerDesktop:
             // Its own CLI first on PATH (the login shell may know no other docker), and nothing
-            // inherited may point the CLI elsewhere: no context, no remote Buildx builder.
-            return "env -u DOCKER_CONTEXT -u BUILDX_BUILDER DOCKER_HOST=\"unix://$HOME/.docker/run/docker.sock\" "
+            // inherited or saved may point the CLI elsewhere: no context, and Buildx's `default`
+            // builder — the one of DOCKER_HOST's daemon — over any builder `buildx use` remembered.
+            return "env -u DOCKER_CONTEXT BUILDX_BUILDER=default DOCKER_HOST=\"unix://$HOME/.docker/run/docker.sock\" "
                 + "PATH=\"\(LiveDockerUsageProbe.dockerDesktopBin):$PATH\" sh -c \(shellQuote(script))"
         }
     }

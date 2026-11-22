@@ -350,7 +350,7 @@ struct LiveDockerUsageProbe: DockerUsageProbing {
             let args = ["ssh", "--", script]
             return [("/opt/homebrew/bin/minikube", args), ("/usr/bin/env", ["minikube"] + args)]
         case .dockerDesktop:
-            return [("/usr/bin/env", ["-u", "DOCKER_CONTEXT", "-u", "BUILDX_BUILDER",
+            return [("/usr/bin/env", ["-u", "DOCKER_CONTEXT", "BUILDX_BUILDER=default",
                                       "DOCKER_HOST=unix://" + DockerHost.dockerDesktopSocket(home: home),
                                       "PATH=" + dockerDesktopPATH, "/bin/sh", "-c", script])]
         }

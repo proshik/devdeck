@@ -148,11 +148,11 @@ final class DockerUsageTests: XCTestCase {
         XCTAssertEqual(desktop.count, 1)
         XCTAssertEqual(desktop[0].0, "/usr/bin/env")
         let args = desktop[0].1
-        XCTAssertEqual(Array(args[0...3]), ["-u", "DOCKER_CONTEXT", "-u", "BUILDX_BUILDER"])
-        XCTAssertEqual(args[4], "DOCKER_HOST=unix:///Users/u/.docker/run/docker.sock")
-        XCTAssertTrue(args[5].hasPrefix("PATH=/Applications/Docker.app/Contents/Resources/bin:"))
-        XCTAssertEqual(Array(args[6...7]), ["/bin/sh", "-c"])
-        XCTAssertTrue(args[8].contains(DockerUsage.sectionMarker))
+        XCTAssertEqual(Array(args[0...2]), ["-u", "DOCKER_CONTEXT", "BUILDX_BUILDER=default"])
+        XCTAssertEqual(args[3], "DOCKER_HOST=unix:///Users/u/.docker/run/docker.sock")
+        XCTAssertTrue(args[4].hasPrefix("PATH=/Applications/Docker.app/Contents/Resources/bin:"))
+        XCTAssertEqual(Array(args[5...6]), ["/bin/sh", "-c"])
+        XCTAssertTrue(args[7].contains(DockerUsage.sectionMarker))
     }
 
     func testNestedDaemonVolumeSizeIsPickedOutOfTheListing() throws {
