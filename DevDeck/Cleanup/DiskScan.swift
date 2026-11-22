@@ -22,6 +22,8 @@ enum DirectoryReadError: Error, Equatable, Sendable {
     case denied
     /// Anything else (vanished mid-scan, not a directory any more, I/O error).
     case failed
+    /// The task reading it was cancelled — a stop, not a read failure.
+    case cancelled
 }
 
 /// Behind a protocol → the scanner is tested on an in-memory tree, never on the real home folder.
@@ -161,7 +163,15 @@ struct DiskScanResult: Codable, Equatable, Sendable {
             }
             return sum <= node.bytes
         }
-        return ok(tree)
+        guard ok(tree) else { return false }
+        // Candidates are summed when ticked: their total must fit, and none outweighs the tree.
+        var sum: UInt64 = 0
+        for candidate in candidates {
+            let (next, overflow) = sum.addingReportingOverflow(candidate.bytes)
+            guard !overflow, candidate.bytes <= tree.bytes else { return false }
+            sum = next
+        }
+        return true
     }
 
     /// Drop the candidates that are gone and take their bytes out of the tree, so the page stays

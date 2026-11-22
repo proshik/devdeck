@@ -94,6 +94,21 @@ final class DiskScannerTests: XCTestCase {
         XCTAssertEqual(result.tree.bytes, gb)
     }
 
+    /// On case-insensitive APFS `documents` is `Documents`, and `library` is `Library`.
+    func testProtectedAndToolOwnedFoldersMatchInAnyCase() throws {
+        let fs = FakeDirectoryReader(root: home)
+        fs.file("/h/documents/f", bytes: gb)
+        fs.file("/h/library/App/package.json", bytes: 1)
+        fs.file("/h/library/App/node_modules/m.js", bytes: gb)
+
+        let result = try scan(fs)
+
+        XCTAssertFalse(fs.listed.contains("/h/documents"))
+        XCTAssertTrue(result.candidates.isEmpty)
+        XCTAssertTrue(DiskCategoryRules.isToolOwned("/h/LIBRARY/x/node_modules", root: "/h"))
+        XCTAssertEqual(result.tree.bytes, gb + 1, "the documents file is not counted")
+    }
+
     func testADirectorySwappedBetweenListingAndOpeningIsNotRead() throws {
         let fs = FakeDirectoryReader(root: home)
         fs.file("/h/work/p/x", bytes: gb)

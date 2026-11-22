@@ -74,54 +74,80 @@ enum CleanupCommands {
     /// One command for everything the user confirmed, a step per path. The candidates have passed
     /// `DeletionGuard` just before; each step repeats the guard in the shell at the moment it runs,
     /// so a change in between is skipped, not followed. A failed step does not stop the others;
-    /// the exit code says whether every one of them went through.
-    static func removeMacFiles(_ candidates: [DiskCandidate]) -> Command {
-        let steps = candidates.map(removalStep)
-        let script = (["rc=0"] + steps + ["exit $rc"]).joined(separator: "\n")
+    /// the exit code says whether every one of them went through. `device` is the home folder's
+    /// volume as the guard saw it — every step and every operand must still be on it. `skipped`
+    /// are the paths the last check turned away, named in the log with their reason.
+    static func removeMacFiles(_ candidates: [DiskCandidate], device: UInt64,
+                               skipped: [(path: String, reason: String)] = []) -> Command {
+        let notes = skipped.map { "echo \(shellQuote("skipped: \($0.path) — \($0.reason)"))" }
+        let steps = candidates.map { removalStep($0, device: device) }
+        let script = (["rc=0"] + notes + steps + ["exit $rc"]).joined(separator: "\n")
         return Command(id: macFilesID, name: L10n.macFilesCommandName(count: candidates.count), command: script)
     }
 
     /// A step runs in its own subshell and is anchored before it deletes anything: it `cd -P`s
-    /// into the directory it acts on (or its parent) and requires `pwd -P` to be exactly the
-    /// confirmed path — so no component, the last or any ancestor, may have become a link since —
-    /// and then deletes by a name relative to that working directory, which a later swap of an
-    /// ancestor cannot redirect. `rm -x` never crosses into another mounted volume, and an entry
-    /// on another device is never handed to `rm` at all. The scan's project-root rule (no `.git`
-    /// inside, no `Cargo.toml` inside a target) is checked again here; APFS resolves `.GIT` too.
-    static func removalStep(_ candidate: DiskCandidate) -> String {
+    /// into the directory it acts on (or its parent) and requires the physical working directory
+    /// to be exactly the confirmed path — so no component, the last or any ancestor, may have
+    /// become a link since — and to be on the confirmed volume. It then deletes by a name relative
+    /// to that working directory, which a later swap of an ancestor cannot redirect. `rm -x`
+    /// never crosses into another mounted volume, and an entry on another device is never handed
+    /// to `rm` at all. The scan's project-root rule (no `.git` inside, no `Cargo.toml` inside a
+    /// target) is checked again here — APFS resolves `.GIT` too — and so is cargo's build lock.
+    ///
+    /// What the shell cannot close: a concurrent rename of the leaf itself between its checks and
+    /// `rm` opening it (design §5.7, known limits).
+    static func removalStep(_ candidate: DiskCandidate, device: UInt64) -> String {
         let skipped = "echo 'skipped: no longer what the scan found'; exit 1"
+        let dev = shellQuote(String(device))
         let body: String
         switch candidate.category.removal {
         case .directory:
             let parent = (candidate.path as NSString).deletingLastPathComponent
             let name = shellQuote((candidate.path as NSString).lastPathComponent)
             var checks = ["[ -d \(name) ]", "[ ! -L \(name) ]", "[ ! -e \(name)/.git ]",
-                          "[ \"$(/usr/bin/stat -f %d \(name))\" = \"$(/usr/bin/stat -f %d .)\" ]"]
+                          "[ \"$(/usr/bin/stat -f %d \(name))\" = \(dev) ]"]
             if let manifest = candidate.category.projectManifest {
                 checks.append("[ -f \(shellQuote(manifest)) ]")
             }
-            if candidate.category == .rustTarget { checks.append("[ ! -e \(name)/Cargo.toml ]") }
-            body = anchor(parent) + "if \(checks.joined(separator: " && ")); then /bin/rm -rfx -- \(name); else \(skipped); fi"
+            var lockCheck = ""
+            if candidate.category == .rustTarget {
+                checks.append("[ ! -e \(name)/Cargo.toml ]")
+                // cargo holds a flock on <target>/<profile>/.cargo-lock for a whole build; -k keeps
+                // the file, -t 0 does not wait, exit 75 means it is held.
+                lockCheck = "for l in \(name)/*/.cargo-lock(N); do /usr/bin/lockf -kns -t 0 \"$l\" true "
+                    + "|| { echo 'skipped: a cargo build is running'; exit 1; }; done; "
+            }
+            body = anchor(parent, device: dev) + lockCheck
+                + "if \(checks.joined(separator: " && ")); then /bin/rm -rfx -- \(name); else \(skipped); fi"
         case .contents:
-            // Everything inside, dot-files included (zsh: D), nothing when empty (N); the folder stays.
-            body = anchor(candidate.path)
-                + "dev=$(/usr/bin/stat -f %d .); r=0; for e in ./*(DN); do "
-                + "if [ \"$(/usr/bin/stat -f %d \"$e\")\" = \"$dev\" ]; then /bin/rm -rfx -- \"$e\" || r=1; "
+            // Everything inside, dot-files included (zsh: D), nothing when empty (N); the folder
+            // stays. An unlistable folder would glob to nothing and look emptied — it fails instead.
+            body = anchor(candidate.path, device: dev)
+                + "[ -r . ] || { echo 'failed: the folder cannot be listed'; exit 1; }; "
+                + "r=0; for e in ./*(DN); do "
+                + "if ! d=$(/usr/bin/stat -f %d \"$e\"); then echo \"failed to inspect: $e\"; r=1; "
+                + "elif [ \"$d\" = \(dev) ]; then /bin/rm -rfx -- \"$e\" || r=1; "
                 + "else echo \"skipped, another volume: $e\"; fi; done; exit $r"
         case .goModCache:
-            // Module files are read-only; go clean handles that. GOMODCACHE pins it to the confirmed
-            // path whatever `go env -w` says, and a non-empty GOFLAGS replaces any inherited one
-            // (an inherited `-cache` would clear the build cache too).
-            body = anchor(candidate.path)
-                + "cd .. && GOMODCACHE=\(shellQuote(candidate.path)) GOFLAGS=-modcacherw go clean -modcache"
+            // Module files are read-only; go clean handles that. Only when Go's own cache is the
+            // confirmed path (design §5.5); GOMODCACHE then pins it whatever changes meanwhile, and
+            // a non-empty GOFLAGS replaces an inherited one (`-cache` would clear the build cache).
+            let path = shellQuote(candidate.path)
+            body = anchor(candidate.path, device: dev)
+                + "g=$(go env GOMODCACHE && echo .) && [ \"${g%??}\" = \(path) ] "
+                + "|| { echo 'skipped: go env GOMODCACHE is not this folder'; exit 1; }; "
+                + "cd .. && GOMODCACHE=\(path) GOFLAGS=-modcacherw go clean -modcache"
         }
         return "echo \(shellQuote("→ " + candidate.path))\n( \(body) ) || rc=1"
     }
 
-    /// Enter `path` without following any link on the way and stop unless it is exactly `path`.
-    private static func anchor(_ path: String) -> String {
+    /// Enter `path` without following any link on the way and stop unless it is exactly `path` on
+    /// the confirmed volume. `$(…)` drops trailing newlines, so a sentinel after `pwd -P` keeps
+    /// them: a name ending in a newline compares as itself, not as its neighbour without one.
+    private static func anchor(_ path: String, device dev: String) -> String {
         let quoted = shellQuote(path)
-        return "cd -P -- \(quoted) 2>/dev/null && [ \"$(pwd -P)\" = \(quoted) ] "
+        return "cd -P -- \(quoted) 2>/dev/null && p=$(pwd -P && echo .) && [ \"${p%??}\" = \(quoted) ] "
+            + "&& [ \"$(/usr/bin/stat -f %d .)\" = \(dev) ] "
             + "|| { echo 'skipped: no longer what the scan found'; exit 1; }; "
     }
 }

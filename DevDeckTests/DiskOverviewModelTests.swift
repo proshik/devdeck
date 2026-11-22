@@ -85,6 +85,7 @@ final class DiskOverviewModelTests: XCTestCase {
         await yieldUntil { manager.states[CleanupCommands.macFilesID] == .running }
         XCTAssertFalse(disk.canScan, "no scan while files are being deleted")
         XCTAssertFalse(disk.canDelete)
+        XCTAssertTrue(ctrl.command.command.contains("= '1' ]"), "every step is bound to the home volume")
 
         disk.deletionPollInterval = .milliseconds(5)
         ctrl.terminate(0)
@@ -140,8 +141,28 @@ final class DiskOverviewModelTests: XCTestCase {
         disk.confirmDeletion(shown)
 
         let ctrl = try XCTUnwrap(runner.controller(for: CleanupCommands.macFilesID))
-        XCTAssertFalse(ctrl.command.command.contains("/h/work/a"), ctrl.command.command)
+        XCTAssertFalse(ctrl.command.command.contains("→ /h/work/a/target"), "no step for it")
+        XCTAssertTrue(ctrl.command.command.contains("skipped: /h/work/a/target"), "named in the log as skipped")
         XCTAssertTrue(ctrl.command.command.contains("/h/.cache"))
+    }
+
+    /// The run has ended but its watch has not reconciled it yet: a scan now would be overwritten
+    /// by that bookkeeping, a second deletion would replace the batch — neither starts.
+    func testNothingStartsUntilTheLastDeletionIsReconciled() async throws {
+        let runner = FakeCommandRunner()
+        let (disk, _, manager) = models(tree(), runner: runner)
+        disk.deletionPollInterval = .seconds(30)
+        disk.startScan()
+        await disk.waitForScan()
+        disk.toggle("/h/.cache")
+        disk.confirmDeletion(disk.review())
+        let ctrl = try XCTUnwrap(runner.controller(for: CleanupCommands.macFilesID))
+        ctrl.terminate(0)
+        await yieldUntil { manager.states[CleanupCommands.macFilesID] == .succeeded }
+
+        XCTAssertFalse(disk.canScan)
+        disk.toggle("/h/work/a/target")
+        XCTAssertFalse(disk.canDelete)
     }
 
     /// Stopped from its log: the run goes idle, not failed — still its end, still reconciled.

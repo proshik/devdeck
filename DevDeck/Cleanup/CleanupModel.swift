@@ -60,16 +60,18 @@ final class CleanupModel {
         isRefreshing = true
         defer { isRefreshing = false }
         let probe = self.probe, factsProbe = self.factsProbe
-        let (facts, usage) = await Task.detached(priority: .utility) { () -> (EngineFacts, [DockerHost: DockerUsage]) in
-            let facts = factsProbe.sample()
-            var out: [DockerHost: DockerUsage] = [:]
-            for host in DockerHost.displayOrder where facts.shouldProbe(host) {
-                if let u = probe.sample(host) { out[host] = u }
-            }
-            return (facts, out)
-        }.value
+        let facts = await Task.detached(priority: .utility) { factsProbe.sample() }.value
         if facts != self.facts { self.facts = facts }
-        self.usage = usage
+        // A host no longer probed must not keep its old numbers.
+        for host in DockerHost.allCases where !facts.shouldProbe(host) { usage[host] = nil }
+        // Each daemon answers on its own: one that hangs (a wedged socket) must not keep the
+        // others' sections empty.
+        await withTaskGroup(of: (DockerHost, DockerUsage?).self) { group in
+            for host in DockerHost.displayOrder where facts.shouldProbe(host) {
+                group.addTask { await Task.detached(priority: .utility) { (host, probe.sample(host)) }.value }
+            }
+            for await (host, sample) in group { usage[host] = sample }
+        }
     }
 
     func run(_ action: CleanupAction, on host: DockerHost) {

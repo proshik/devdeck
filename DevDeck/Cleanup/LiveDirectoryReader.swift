@@ -33,6 +33,8 @@ struct LiveDirectoryReader: DirectoryReading {
         defer { closedir(dir) }
         var out: [DirectoryEntry] = []
         while true {
+            // A flat directory of a million entries must not hold a stop for its whole length.
+            if out.count % 1_000 == 999, Task.isCancelled { throw DirectoryReadError.cancelled }
             errno = 0
             guard let raw = readdir(dir) else {
                 // nil is both the end and an error; only errno tells them apart.

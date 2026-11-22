@@ -67,8 +67,13 @@ final class DiskOverviewModel {
 
     // MARK: scan
 
+    /// A finished deletion not yet taken out of the result. Until it is, neither a scan (it would
+    /// be overwritten by stale bookkeeping) nor another deletion (it would replace the batch
+    /// being reconciled) may start.
+    private var isReconciling: Bool { !removing.isEmpty }
+
     /// Scanning reads the disk the cleanups are writing: neither starts while the other runs.
-    var canScan: Bool { !isScanning && !cleanup.isBusy }
+    var canScan: Bool { !isScanning && !cleanup.isBusy && !isReconciling }
 
     func startScan() {
         guard canScan else { return }
@@ -128,7 +133,7 @@ final class DiskOverviewModel {
     var selectedBytes: UInt64 { selectedCandidates.reduce(0) { $0 + $1.bytes } }
 
     /// Deleting is offered when something is ticked and nothing else is running or scanning.
-    var canDelete: Bool { !selection.isEmpty && !isScanning && !cleanup.isBusy }
+    var canDelete: Bool { !selection.isEmpty && !isScanning && !cleanup.isBusy && !isReconciling }
 
     // MARK: deletion
 
@@ -172,12 +177,18 @@ final class DiskOverviewModel {
                 review.accepted.append(candidate)
             }
         }
-        guard canDelete, !review.accepted.isEmpty else { return review }
+        // The volume the guard just checked against: every step must still find its path on it.
+        guard canDelete, !review.accepted.isEmpty, let device = inspector.entry(at: root)?.device else { return review }
         removing = review.accepted
-        cleanup.start(CleanupCommands.removeMacFiles(review.accepted))
+        let skipped = review.rejected.map { ($0.candidate.path, L10n.diskRejection($0.reason)) }
+        cleanup.start(CleanupCommands.removeMacFiles(review.accepted, device: device, skipped: skipped))
         watchDeletion()
         return review
     }
+
+    /// Whether the last `confirmDeletion` started a run — the sheet stays open with the new
+    /// reasons when it did not.
+    var isDeleting: Bool { isReconciling }
 
     var deletionState: ProcessManager.RunState? { cleanup.state(of: CleanupCommands.macFilesID) }
 

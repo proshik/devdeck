@@ -48,8 +48,8 @@ struct DiskScanner {
         }
         var walk = Walk(reader: reader, root: root, device: rootEntry.device,
                         isCancelled: isCancelled, progress: progress)
-        let protected = Set(Self.protectedRelativePaths.map { root + "/" + $0 })
-        walk.protected = protected
+        // APFS is case-insensitive by default: `documents` is the same folder as `Documents`.
+        walk.protected = Set(Self.protectedRelativePaths.map { (root + "/" + $0).lowercased() })
         var tree = try walk.directory(at: root, name: (root as NSString).lastPathComponent,
                                       own: rootEntry, context: .free)
         tree.name = root
@@ -109,6 +109,8 @@ struct DiskScanner {
             do {
                 // The directory must still be the one its parent listed — not a link swapped in.
                 entries = try reader.entries(of: path, expecting: own)
+            } catch DirectoryReadError.cancelled {
+                throw Cancelled()
             } catch {
                 unreadableCount += 1
                 if unreadable.count < DiskScanner.unreadableKept { unreadable.append(path) }
@@ -125,7 +127,7 @@ struct DiskScanner {
                 let childPath = path + "/" + entry.name
                 switch entry.kind {
                 case .directory:
-                    if protected.contains(childPath) {
+                    if protected.contains(childPath.lowercased()) {
                         skipped.append(childPath)
                         continue
                     }
@@ -136,7 +138,7 @@ struct DiskScanner {
                     let childContext: Context
                     if category != nil { childContext = .inCategory }
                     else if context == .free && path == root
-                                && (entry.name.hasPrefix(".") || entry.name == "Library") { childContext = .toolOwned }
+                                && DiskCategoryRules.isToolOwnedTopLevel(entry.name) { childContext = .toolOwned }
                     else { childContext = context }
                     var child = try directory(at: childPath, name: entry.name, own: entry, context: childContext)
                     newestHere = max(newestHere, newest)
@@ -216,6 +218,11 @@ enum DiskCategoryRules {
     static func isToolOwned(_ path: String, root: String) -> Bool {
         guard path.hasPrefix(root + "/") else { return false }
         let first = path.dropFirst(root.count + 1).split(separator: "/").first ?? ""
-        return first.hasPrefix(".") || first == "Library"
+        return isToolOwnedTopLevel(String(first))
+    }
+
+    /// A top-level folder tools keep their own data in. Any case: `library` is `Library` on APFS.
+    static func isToolOwnedTopLevel(_ name: String) -> Bool {
+        name.hasPrefix(".") || name.lowercased() == "library"
     }
 }

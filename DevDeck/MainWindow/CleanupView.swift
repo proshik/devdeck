@@ -101,8 +101,9 @@ struct CleanupView: View {
         }
         .sheet(item: $review) { sheet in
             DeletionConfirmation(review: sheet.review) {
-                disk.confirmDeletion(sheet.review)
-                review = nil
+                let acted = disk.confirmDeletion(sheet.review)
+                // Nothing passed the last check: keep the sheet, now showing why.
+                review = disk.isDeleting ? nil : ReviewSheet(review: acted)
             } cancel: {
                 review = nil
             }

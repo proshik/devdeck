@@ -43,6 +43,16 @@ final class DiskScanStoreTests: XCTestCase {
 
     /// A hand-edited file whose children outweigh their parent would make the page subtract into
     /// a negative — it is not a scan this code wrote, and reads as none.
+    func testCandidatesThatCannotBeSummedReadAsNeverScanned() throws {
+        var result = try DiskScanner(reader: FakeDirectoryReader(root: "/h"), root: "/h").scan()
+        result.tree.bytes = .max
+        result.candidates = [DiskCandidate(path: "/h/a/target", category: .rustTarget, bytes: .max - 1, newestModification: 0),
+                             DiskCandidate(path: "/h/b/target", category: .rustTarget, bytes: .max - 1, newestModification: 0)]
+        let store = DiskScanStore(url: directory.appendingPathComponent("disk-scan.json"))
+        store.save(result)
+        XCTAssertNil(store.load(), "ticking both would overflow the total")
+    }
+
     func testAnInconsistentTreeReadsAsNeverScanned() throws {
         var result = try DiskScanner(reader: FakeDirectoryReader(root: "/h"), root: "/h").scan()
         result.tree.bytes = 0
@@ -56,6 +66,25 @@ final class DiskScanStoreTests: XCTestCase {
 /// The live reader against a real temp tree: link counts, symlinks and allocated sizes as `lstat`
 /// gives them — the semantics the scanner relies on.
 final class LiveDirectoryReaderTests: XCTestCase {
+    /// The scanner was told about one directory; a different one now sits at the path. The live
+    /// reader compares what it opened with what it was told and refuses.
+    func testADirectoryReplacedSinceItWasListedIsRefused() throws {
+        let fm = FileManager.default
+        let raw = fm.temporaryDirectory.appendingPathComponent("reader-\(UUID().uuidString)").path
+        try fm.createDirectory(atPath: raw + "/d", withIntermediateDirectories: true)
+        defer { try? fm.removeItem(atPath: raw) }
+        let reader = LiveDirectoryReader()
+        let told = try XCTUnwrap(reader.entry(at: raw + "/d"))
+        XCTAssertNoThrow(try reader.entries(of: raw + "/d", expecting: told))
+
+        try fm.moveItem(atPath: raw + "/d", toPath: raw + "/old")   // keeps the old inode alive
+        try fm.createDirectory(atPath: raw + "/d", withIntermediateDirectories: true)
+
+        XCTAssertThrowsError(try reader.entries(of: raw + "/d", expecting: told)) {
+            XCTAssertEqual($0 as? DirectoryReadError, .failed)
+        }
+    }
+
     func testReadsATempTreeTheWayTheScannerNeeds() throws {
         let fm = FileManager.default
         let base = fm.temporaryDirectory.appendingPathComponent("reader-\(UUID().uuidString)").resolvingSymlinksInPath().path
