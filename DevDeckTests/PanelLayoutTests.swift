@@ -157,6 +157,7 @@ final class PanelLayoutTests: XCTestCase {
         XCTAssertLessThan(popoverContent.bounds.height, 700, "all visible monitoring modules must fit the content cap")
         popover.performClose(nil)
 
+        let cleanup = CleanupModel(manager: manager, probe: FakeDockerUsageProbe([:]), facts: FakeEngineFactsProbe())
         let mainRoot = MainWindowView()
             .environment(store).environment(manager).environment(appModel)
             .environment(UpdateController()).environment(energy).environment(engine).environment(proxy)
@@ -164,7 +165,8 @@ final class PanelLayoutTests: XCTestCase {
             .environment(AwakeModel(manager: manager, hasJournal: { false }))
             .environment(ClipboardModel()).environment(DisplayBrightnessModel())
             .environment(PermissionsModel(probe: FakePermissionProbe(), flags: { .init() }))
-            .environment(CleanupModel(manager: manager, probe: FakeDockerUsageProbe([:])))
+            .environment(cleanup)
+            .environment(DiskOverviewModel.fake(cleanup: cleanup))
             .environment(DeckMonitoringModel(network: NetworkMonitoringModel(probe: EmptyNetworkProbe(), routes: StaticNetworkRouteProbe()), interval: .milliseconds(20), refresh: {}, refreshHeavy: {}))
             .defaultAppStorage(AppRuntime.preferences)
         let mainHosting = NSHostingController(rootView: mainRoot)

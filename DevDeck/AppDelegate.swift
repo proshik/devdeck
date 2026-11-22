@@ -16,6 +16,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return ProxyManager(credentials: credentials)
     }()
     let cleanupModel: CleanupModel
+    let diskOverview: DiskOverviewModel
     let claudeTabs = ClaudeTabsModel(defaults: AppRuntime.preferences)
     let energy = EnergyModel()
     let awake: AwakeModel
@@ -49,6 +50,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     override init() {
         manager = ProcessManager(runner: RoutingCommandRunner(), notifier: notifier)
         cleanupModel = CleanupModel(manager: manager)
+        diskOverview = DiskOverviewModel(cleanup: cleanupModel, root: AppRuntime.diskScanRoot)
         awake = AwakeModel(manager: manager)
         monitoring = DeckMonitoringModel(manager: manager, energy: energy, store: store, engine: engine)
         super.init()
@@ -79,8 +81,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // The engine is known before the first probe asks for it; the tray timer keeps it fresh.
         engine.preference = { [weak store] in store?.config.settings.containerEngine ?? .auto }
         engine.refresh()
-        cleanupModel.engineKind = { [weak engine] in engine?.activeKind }
-        cleanupModel.engineName = { [weak engine] in engine?.activeName }
         // Adopt daemons that survived a previous session (crash / "keep in background") → don't fight over the port.
         if !AppRuntime.isIsolated { manager.adoptSurvivingDaemons(commands: store.commandsByID) }
         // Read the memory-monitoring flags live from the config — no copy when they change.

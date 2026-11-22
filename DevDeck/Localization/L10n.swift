@@ -241,25 +241,43 @@ enum L10n {
     // MARK: - Cleanup (VM disk & memory)
 
     static var cleanup: String { t("Cleanup", "Очистка") }
-    static func cleanupIntro(engineName: String?) -> String {
-        let name = engineName ?? "VM"
-        return t("Where the \(name) disk goes and what can be freed. Named volumes (databases, module caches) and running containers are never touched.",
-                 "Куда уходит диск \(name) и что можно освободить. Именованные volumes (базы, кэши модулей) и работающие контейнеры не трогаются.")
+    static var cleanupIntro: String {
+        t("Where the Mac disk goes and what can be freed, then each container engine installed here. Named volumes (databases, module caches), running containers and unknown folders are never touched.",
+          "Куда уходит диск Mac и что можно освободить, ниже — каждый установленный движок контейнеров. Именованные volumes (базы, кэши модулей), работающие контейнеры и неизвестные папки не трогаются.")
     }
-    /// How a docker host is named in the UI: the engine's own daemon by the engine's name.
-    static func dockerHostLabel(_ host: DockerHost, engineName: String?) -> String {
+    /// How a docker host is named in the UI.
+    static func dockerHostLabel(_ host: DockerHost) -> String {
         switch host {
-        case .engineVM: return engineName ?? "VM"
+        case .colima: return "colima"
+        case .dockerDesktop: return "Docker Desktop"
         case .minikube: return "minikube"
         }
     }
-    static func dockerHostTitle(_ host: DockerHost, engineName: String?) -> String {
+    /// `driver`: minikube's own driver name; `engine`: the engine whose disk holds its node.
+    static func dockerHostTitle(_ host: DockerHost, minikubeDriver driver: String? = nil, minikubeEngine engine: DockerHost? = nil) -> String {
         switch host {
-        case .engineVM:
-            let name = dockerHostLabel(host, engineName: engineName)
-            return t("\(name) — the docker VM", "\(name) — docker в VM")
-        case .minikube: return t("minikube — inside the cluster node", "minikube — внутри ноды кластера")
+        case .colima: return t("Colima — docker in the VM", "Colima — docker в VM")
+        case .dockerDesktop: return t("Docker Desktop — docker in the VM", "Docker Desktop — docker в VM")
+        case .minikube:
+            let base = t("Minikube — inside the cluster node", "Minikube — внутри ноды кластера")
+            switch (driver, engine) {
+            case let (driver?, engine?):
+                return base + t(" · \(driver) driver, on \(dockerHostLabel(engine))", " · драйвер \(driver), в \(dockerHostLabel(engine))")
+            case let (driver?, nil): return base + t(" · \(driver) driver", " · драйвер \(driver)")
+            case let (nil, engine?): return base + t(" · on \(dockerHostLabel(engine))", " · в \(dockerHostLabel(engine))")
+            case (nil, nil): return base
+            }
         }
+    }
+    static var engineNotRunning: String { t("Not running", "Не запущен") }
+    static var vmDiskFileLabel: String { t("VM disk file on the Mac", "Файл диска VM на Mac") }
+    static var vmDiskFileNote: String {
+        t("What the VM's disk takes on the Mac. Freeing space inside the VM does not shrink this file.",
+          "Сколько диск VM занимает на Mac. Освобождение места внутри VM этот файл не уменьшает.")
+    }
+    static var dockerRawUnavailable: String {
+        t("size unavailable — Docker.raw sits in other apps' data, which DevDeck does not open without permission",
+          "размер недоступен — Docker.raw лежит в данных других приложений, куда DevDeck не заходит без разрешения")
     }
     static var dockerHostUnavailable: String { t("Not running or unreachable", "Не запущен или недоступен") }
     static var usageImages: String { t("Images", "Образы") }
@@ -280,12 +298,13 @@ enum L10n {
         t("of which \(size) is the minikube node's own disk — broken down below",
           "из них \(size) — диск ноды minikube, он разобран ниже")
     }
-    /// Only minikube has one: its whole docker lives inside a single volume colima already counted.
-    static func dockerHostNote(_ host: DockerHost, engineName: String?) -> String? {
+    /// Only minikube has one: its whole docker lives inside a single volume its engine already counted.
+    static func dockerHostNote(_ host: DockerHost, minikubeEngine engine: DockerHost?) -> String? {
         switch host {
-        case .engineVM: return nil
+        case .colima, .dockerDesktop: return nil
         case .minikube:
-            let name = engineName ?? "VM"
+            guard let engine else { return nil }
+            let name = dockerHostLabel(engine)
             return t("All of it sits inside that one minikube volume on the \(name) disk — freeing anything here frees the \(name) disk too.",
                      "Всё это лежит внутри того самого тома minikube на диске \(name) — освобождая здесь, вы освобождаете и диск \(name).")
         }
@@ -305,8 +324,8 @@ enum L10n {
         case .unusedImages: return t("Unused images", "Неиспользуемые образы")
         }
     }
-    static func cleanupConfirmTitle(_ action: CleanupAction, _ host: DockerHost, engineName: String?) -> String {
-        let name = dockerHostLabel(host, engineName: engineName)
+    static func cleanupConfirmTitle(_ action: CleanupAction, _ host: DockerHost) -> String {
+        let name = dockerHostLabel(host)
         return t("Free “\(cleanupActionTitle(action))” in \(name)?",
                  "Освободить «\(cleanupActionTitle(action))» в \(name)?")
     }
@@ -340,30 +359,30 @@ enum L10n {
     static var cleanupLastRun: String { t("Last action", "Последнее действие") }
     static var cleanupHelp: String { t("Cleanup: VM disk & memory", "Очистка: диск и память VM") }
     static var cleanupDiskHint: String { t("VM disk is almost full — free up space…", "Диск VM почти заполнен — освободить…") }
-    static func cleanupCommandName(_ action: CleanupAction, _ host: DockerHost, engineName: String?) -> String {
-        let name = dockerHostLabel(host, engineName: engineName)
+    static func cleanupCommandName(_ action: CleanupAction, _ host: DockerHost) -> String {
+        let name = dockerHostLabel(host)
         return t("Cleanup: \(cleanupActionTitle(action).lowercased()) (\(name))",
                  "Очистка: \(cleanupActionTitle(action).lowercased()) (\(name))")
     }
 
     /// What each button costs afterwards, shown under it — the same action means different things
     /// on the two daemons, so the text is per host.
-    static func cleanupEffect(_ action: CleanupAction, _ host: DockerHost, engineName: String?) -> String {
-        let name = dockerHostLabel(.engineVM, engineName: engineName)
+    static func cleanupEffect(_ action: CleanupAction, _ host: DockerHost) -> String {
+        let name = dockerHostLabel(host)
         switch (action, host) {
-        case (.deadContainers, .engineVM):
+        case (.deadContainers, .colima), (.deadContainers, .dockerDesktop):
             return t("A removed container can't be started again with docker start, and its logs are gone. Running containers and named volumes stay.",
                      "Удалённый контейнер уже не запустить через docker start, его логи пропадут. Работающие контейнеры и именованные volumes останутся.")
         case (.deadContainers, .minikube):
             return t("The logs of pods' previous runs (kubectl logs --previous) and of finished Jobs are gone. Running pods are not affected.",
                      "Пропадут логи прошлых запусков подов (kubectl logs --previous) и завершившихся Job. Работающие поды не затрагиваются.")
-        case (.buildCache, .engineVM):
+        case (.buildCache, .colima), (.buildCache, .dockerDesktop):
             return t("The next docker build in \(name) starts cold. Builds inside minikube are not affected.",
                      "Следующий docker build в \(name) пойдёт без кэша. На сборки внутри minikube не влияет.")
         case (.buildCache, .minikube):
             return t("The next image build in minikube (docker-env) starts from scratch and takes much longer. Pods are not affected.",
                      "Следующая сборка образов в minikube (через docker-env) пойдёт с нуля и займёт заметно дольше. Поды не затрагиваются.")
-        case (.unusedImages, .engineVM):
+        case (.unusedImages, .colima), (.unusedImages, .dockerDesktop):
             return t("Images are pulled again on next use — e.g. postgres on the next testcontainers run. Locally built ones have to be rebuilt.",
                      "Образы скачаются заново при следующем запуске — например, postgres при следующем прогоне testcontainers. Собранные локально придётся пересобрать.")
         case (.unusedImages, .minikube):
@@ -397,8 +416,8 @@ enum L10n {
         t("Only containers testcontainers labelled and running for over an hour — a younger one may be a run in progress. Your own long-lived containers are never touched.",
           "Только контейнеры с меткой testcontainers, которые работают дольше часа: более молодой может быть идущим прогоном. Ваши долгоживущие контейнеры не трогаются.")
     }
-    static func testContainersConfirmTitle(_ host: DockerHost, engineName: String?, count: Int) -> String {
-        let name = dockerHostLabel(host, engineName: engineName)
+    static func testContainersConfirmTitle(_ host: DockerHost, count: Int) -> String {
+        let name = dockerHostLabel(host)
         return t("Remove \(count) abandoned test containers in \(name)?",
                  "Удалить брошенные тестовые контейнеры (\(count)) в \(name)?")
     }
@@ -406,8 +425,8 @@ enum L10n {
         t("Stops and removes the test containers running for over an hour, with their anonymous volumes — the databases of test runs that ended without cleaning up. Named volumes stay.",
           "Остановит и удалит тестовые контейнеры, которые работают дольше часа, вместе с их анонимными volumes — базами прогонов, которые завершились, не убрав за собой. Именованные volumes останутся.")
     }
-    static func testContainersCommandName(_ host: DockerHost, engineName: String?) -> String {
-        let name = dockerHostLabel(host, engineName: engineName)
+    static func testContainersCommandName(_ host: DockerHost) -> String {
+        let name = dockerHostLabel(host)
         return t("Cleanup: abandoned test containers (\(name))",
                  "Очистка: брошенные тестовые контейнеры (\(name))")
     }
@@ -422,7 +441,7 @@ enum L10n {
     static var usageUnaccounted: String { t("Other", "Прочее") }
     static func usageUnaccountedRow(_ size: String, _ host: DockerHost) -> String {
         switch host {
-        case .engineVM:
+        case .colima, .dockerDesktop:
             return t("\(size) · not in docker's figures: container logs, service data",
                      "\(size) · не учтено docker: логи контейнеров, служебные данные")
         case .minikube:

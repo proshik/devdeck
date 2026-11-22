@@ -1,18 +1,21 @@
+import AppKit
 import SwiftUI
 
-/// The Cleanup page: what the colima disk is actually made of — the fill bar first, then each
-/// daemon's own footprint biggest-first, with one button per category saying what it will free —
-/// plus the VM-memory explainer with a colima restart and the log of the last action. Every button
-/// confirms first and runs through the normal runner, so nothing here has its own process code.
+/// The Cleanup page: where the Mac disk goes first — the volume bar, the home-folder scan, the
+/// known categories that can be freed and the largest folders — then one block per installed
+/// container engine: what its docker is made of, with a button per category saying what it will
+/// free, and for colima the VM-memory explainer with a restart. Every button confirms first and
+/// runs through the normal runner, so nothing here has its own process code.
 ///
-/// One grouped Form like the window's other pages (UI-02): a section per daemon and for the VM
-/// memory, each action a row with its button at the trailing edge and what it costs under it.
+/// One grouped Form like the window's other pages (UI-02): a section per subject, each action a
+/// row with its button at the trailing edge and what it costs under it.
 struct CleanupView: View {
     @Environment(CleanupModel.self) private var model
+    @Environment(DiskOverviewModel.self) private var disk
     @Environment(ProcessManager.self) private var manager
-    @Environment(EngineModel.self) private var engine
 
     @State private var pending: Pending?
+    @State private var review: ReviewSheet?
 
     private enum Pending: Identifiable {
         case action(CleanupAction, DockerHost)
@@ -28,42 +31,64 @@ struct CleanupView: View {
         }
     }
 
+    private struct ReviewSheet: Identifiable {
+        let id = UUID()
+        let review: DiskOverviewModel.Review
+    }
+
+    /// Scroll targets: the VM-disk row of the folders list jumps to its engine's section.
+    private static func anchor(_ host: DockerHost) -> String { "section.\(host.rawValue)" }
+
     var body: some View {
-        Form {
-            header
-            ForEach(model.visibleHosts, id: \.self) { hostSection($0) }
-            if engine.activeKind == .colima { memorySection }
-            if let id = model.lastRunID {
-                Section(L10n.cleanupLastRun) {
-                    LogView(id: id).frame(height: 220)
+        ScrollViewReader { proxy in
+            Form {
+                Section {
+                    EmptyView()
+                } footer: {
+                    FormFooter(L10n.cleanupIntro)
+                }
+                macDiskSection
+                if let result = disk.result {
+                    candidatesSection(result)
+                    largestSection(result, proxy: proxy)
+                }
+                ForEach(model.visibleHosts, id: \.self) { host in
+                    hostSection(host).id(Self.anchor(host))
+                    if host == .colima, model.isRunning(.colima) { memorySection }
+                }
+                if let id = model.lastRunID {
+                    Section(L10n.cleanupLastRun) {
+                        LogView(id: id).frame(height: 220)
+                    }
                 }
             }
+            .formStyle(.grouped)
         }
-        .formStyle(.grouped)
         .navigationTitle(L10n.cleanup)
         .toolbar {
             // No spinner here: in the macOS 26 toolbar it sits in an empty glass capsule, and each
-            // host box already shows its own progress while the disabled button says the rest.
+            // box already shows its own progress while the disabled button says the rest.
             ToolbarItem {
-                Button(L10n.cleanupRefresh) {
-                    Task {
-                        await manager.refreshVMDisk()
-                        await manager.refreshVMSample()
-                        await model.refresh()
-                    }
+                Button(L10n.cleanupRefresh) { Task { await refreshAll() } }
+                    .disabled(model.isRefreshing)
+            }
+            ToolbarItem {
+                if disk.isScanning {
+                    Button(L10n.diskScanStop) { disk.stopScan() }
+                } else {
+                    Button(L10n.diskScan) { disk.startScan() }
+                        .disabled(!disk.canScan)
                 }
-                .disabled(model.isRefreshing)
             }
         }
-        .task {
-            await manager.refreshVMDisk()
-            await manager.refreshVMSample()
-            await model.refresh()
-        }
-        // A finished action changes the numbers — re-read them (and the disk) without a click.
+        .task { await refreshAll() }
+        // A finished action changes the numbers — re-read them (and the disks) without a click.
         .onChange(of: lastRunState) { _, new in
             guard new == .succeeded || isFailed(new) else { return }
             Task {
+                if model.lastRunID == CleanupCommands.macFilesID {
+                    await disk.deletionFinished(succeeded: new == .succeeded)
+                }
                 await manager.refreshVMDisk()
                 await model.refresh()
             }
@@ -77,99 +102,276 @@ struct CleanupView: View {
         } message: { p in
             Text(confirmMessage(p))
         }
-    }
-
-    // MARK: header
-
-    /// The page's explanation, then the disk bar the rest of the page breaks down.
-    @ViewBuilder
-    private var header: some View {
-        Section {
-            EmptyView()
-        } footer: {
-            FormFooter(L10n.cleanupIntro(engineName: engine.activeName))
-        }
-        if let disk = manager.cachedVMDisk {
-            Section {
-                HStack(spacing: 8) {
-                    Text(L10n.diskVM)
-                    GeometryReader { geo in
-                        ZStack(alignment: .leading) {
-                            Capsule().fill(Color.secondary.opacity(0.20))
-                            Capsule().fill(pressureColor(disk.fraction))
-                                .frame(width: max(2, geo.size.width * disk.fraction))
-                        }
-                    }
-                    .frame(height: 6)
-                    Text(disk.format()).monospacedDigit().foregroundStyle(pressureColor(disk.fraction))
-                }
-                if disk.fraction >= VMDiskInfo.cleanupHintFraction {
-                    Text(L10n.cleanupDiskPressureNote)
-                        .font(.caption)
-                        .foregroundStyle(pressureColor(disk.fraction))
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+        .sheet(item: $review) { sheet in
+            DeletionConfirmation(review: sheet.review) {
+                disk.confirmDeletion()
+                review = nil
+            } cancel: {
+                review = nil
             }
         }
     }
 
-    // MARK: per-daemon section
+    private func refreshAll() async {
+        await disk.refreshMacDisk()
+        await manager.refreshVMDisk()
+        await manager.refreshVMSample()
+        await model.refresh()
+    }
 
-    private func hostSection(_ host: DockerHost) -> some View {
+    // MARK: Mac disk
+
+    private var macDiskSection: some View {
         Section {
-            if let usage = model.usage[host] {
-                ForEach(usageEntries(usage, host)) { entry in
-                    VStack(alignment: .leading, spacing: 2) {
-                        usageRow(entry.label, entry.row)
-                        // The node's disk is one of colima's volumes; say so, or the two sections
-                        // read as 45 GB counted twice.
-                        if entry.isVolumes {
-                            if let nested = usage.nestedDaemonVolumeBytes, nested > 0 {
-                                volumeDetailLine(L10n.usageNestedVolume(DockerUsage.formatBytes(nested)))
-                            }
-                            // The two lines add up to most of the row above — which is the whole
-                            // point: the volumes are where the disk went, and this says where to.
-                            if let abandoned = usage.pruneableVolumeBytes, abandoned > 0 {
-                                volumeDetailLine(L10n.usageAbandonedVolumes(DockerUsage.formatBytes(abandoned)))
-                            }
+            if let mac = disk.macDisk {
+                DiskBar(label: L10n.macDisk, info: mac)
+            }
+            if let progress = disk.progress {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text(L10n.diskScanning(files: Self.count(progress.files),
+                                           size: DockerUsage.formatBytes(progress.bytes),
+                                           current: progress.current))
+                        .monospacedDigit().foregroundStyle(.secondary)
+                        .lineLimit(1).truncationMode(.middle)
+                }
+            }
+            if let result = disk.result {
+                Text(L10n.diskScanned(date: AppDateFormat.dayMonthTime(result.scannedAt),
+                                      files: Self.count(result.fileCount)))
+                    .foregroundStyle(.secondary)
+                if result.isPartial {
+                    DisclosureGroup {
+                        ForEach(result.unreadable, id: \.self) { path in
+                            Text(Self.tilde(path, root: result.root)).font(.caption).foregroundStyle(.secondary)
                         }
+                    } label: {
+                        Text(L10n.diskPartial(result.unreadableCount)).foregroundStyle(.secondary)
                     }
                 }
-                // Without it the rows add up to less than the disk: minikube keeps its PVCs,
-                // etcd and logs in the same volume, beside the docker it reports on.
-                if let other = unaccounted(usage, host), other >= Self.unaccountedFloor {
-                    usageLine(L10n.usageUnaccounted,
-                              L10n.usageUnaccountedRow(DockerUsage.formatBytes(other), host))
+                if disk.sizesMayBeStale {
+                    Text(L10n.diskAfterRun).font(.caption).foregroundStyle(.secondary)
                 }
-                // The opposite gap: rows past the disk are shared layers counted twice.
-                if let over = overcounted(usage, host), over >= Self.unaccountedFloor {
-                    Text(L10n.usageOvercounted(DockerUsage.formatBytes(over)))
+            } else if !disk.isScanning {
+                Text(L10n.diskNeverScanned).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        } header: {
+            Text(L10n.macDisk)
+        }
+    }
+
+    // MARK: can be freed
+
+    private func candidatesSection(_ result: DiskScanResult) -> some View {
+        Section {
+            if result.candidates.isEmpty {
+                Text(L10n.diskCanFreeEmpty).foregroundStyle(.secondary)
+            }
+            ForEach(result.candidates, id: \.path) { candidate in
+                candidateRow(candidate, result: result)
+            }
+            if result.smallCandidateCount > 0 {
+                Text(L10n.diskSmallCandidates(count: result.smallCandidateCount,
+                                              size: DockerUsage.formatBytes(result.smallCandidateBytes)))
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            if !result.candidates.isEmpty {
+                FormActionRow {
+                    if disk.deletionState == .running { ProgressView().controlSize(.small) }
+                    Button(L10n.diskFreeSelected(DockerUsage.formatBytes(disk.selectedBytes))) {
+                        review = ReviewSheet(review: disk.review())
+                    }
+                    .disabled(!disk.canDelete)
+                }
+            }
+        } header: {
+            Text(L10n.diskCanFree)
+        } footer: {
+            FormFooter(L10n.diskCanFreeNote)
+        }
+    }
+
+    private func candidateRow(_ candidate: DiskCandidate, result: DiskScanResult) -> some View {
+        let age = Date().timeIntervalSince1970 - candidate.newestModification
+        let recent = candidate.newestModification > 0 && age < DiskOverviewModel.recentlyChanged
+        return Toggle(isOn: Binding(get: { disk.selection.contains(candidate.path) },
+                                    set: { _ in disk.toggle(candidate.path) })) {
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(L10n.diskCategoryTitle(candidate.category, project: Self.projectName(candidate)))
+                    Spacer(minLength: 8)
+                    Text(DockerUsage.formatBytes(candidate.bytes)).monospacedDigit()
+                }
+                Text(detailLine(candidate, result: result, age: age))
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                if recent {
+                    Text(L10n.diskMaybeBuilding).font(.caption).foregroundStyle(.orange)
+                }
+            }
+        }
+        .toggleStyle(.checkbox)
+        .disabled(disk.isScanning || model.isBusy)
+    }
+
+    private func detailLine(_ candidate: DiskCandidate, result: DiskScanResult, age: TimeInterval) -> String {
+        var parts: [String] = []
+        if candidate.category.fixedRelativePath == nil || candidate.category == .goModules {
+            parts.append(Self.tilde(candidate.path, root: result.root))
+        }
+        if candidate.newestModification > 0 { parts.append(L10n.diskModified(L10n.age(max(0, age)))) }
+        parts.append(L10n.diskCategoryCost(candidate.category))
+        return parts.joined(separator: " · ")
+    }
+
+    private static func projectName(_ candidate: DiskCandidate) -> String? {
+        guard candidate.category.projectManifest != nil else { return nil }
+        return ((candidate.path as NSString).deletingLastPathComponent as NSString).lastPathComponent
+    }
+
+    // MARK: largest folders
+
+    /// Top-level folders from this size are listed one by one; the rest is one "other" line.
+    static let largestFloor: UInt64 = 1_073_741_824
+
+    private func largestSection(_ result: DiskScanResult, proxy: ScrollViewProxy) -> some View {
+        let top = result.tree.children.filter { $0.bytes >= Self.largestFloor }
+        let rest = result.tree.bytes - top.reduce(0) { $0 + $1.bytes }
+        return Section {
+            ForEach(top, id: \.name) { node in
+                if node.name == ".colima", model.visibleHosts.contains(.colima) {
+                    FormNavigationRow(title: "~/.colima (\(L10n.diskVMDiskLabel))",
+                                      value: DockerUsage.formatBytes(node.bytes)) {
+                        withAnimation { proxy.scrollTo(Self.anchor(.colima), anchor: .top) }
+                    }
+                } else {
+                    FolderRow(node: node, path: result.root + "/" + node.name, root: result.root)
+                }
+            }
+            if rest > 0 {
+                LabeledContent(L10n.diskOther) {
+                    Text(DockerUsage.formatBytes(rest)).monospacedDigit().foregroundStyle(.secondary)
+                }
+            }
+            if !result.skipped.isEmpty {
+                DisclosureGroup {
+                    ForEach(result.skipped, id: \.self) { path in
+                        Text(Self.tilde(path, root: result.root)).font(.caption).foregroundStyle(.secondary)
+                    }
+                } label: {
+                    Text(L10n.diskSkippedTitle).foregroundStyle(.secondary)
+                }
+            }
+        } header: {
+            Text(L10n.diskLargest)
+        } footer: {
+            FormFooter(L10n.diskLargestNote + (result.skipped.isEmpty ? "" : " " + L10n.diskSkippedNote))
+        }
+    }
+
+    // MARK: per-engine sections
+
+    @ViewBuilder
+    private func hostSection(_ host: DockerHost) -> some View {
+        Section {
+            if host == .colima, model.isRunning(.colima), let vm = manager.cachedVMDisk {
+                DiskBar(label: L10n.diskVM, info: vm)
+                if vm.fraction >= VMDiskInfo.cleanupHintFraction {
+                    Text(L10n.cleanupDiskPressureNote)
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(DiskBar.color(vm.fraction))
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                if let tests = usage.testContainers, !tests.isEmpty {
-                    VStack(alignment: .leading, spacing: 2) { testContainersRows(usage, tests, host) }
-                    testContainersActionRow(host)
-                }
-                ForEach(CleanupAction.allCases, id: \.self) { action in
-                    actionRow(action, host).id(RowID(host: host, item: action.rawValue))
-                }
+            }
+            if let usage = model.usage[host] {
+                usageRows(usage, host)
             } else if model.isRefreshing && model.usage.isEmpty {
                 ProgressView().controlSize(.small).frame(maxWidth: .infinity)
             } else {
-                Text(L10n.dockerHostUnavailable).foregroundStyle(.secondary)
+                Text(host == .minikube || model.isRunning(host) ? L10n.dockerHostUnavailable : L10n.engineNotRunning)
+                    .foregroundStyle(.secondary)
             }
+            vmDiskFileRows(host)
         } header: {
-            Text(L10n.dockerHostTitle(host, engineName: engine.activeName))
+            Text(L10n.dockerHostTitle(host, minikubeDriver: host == .minikube ? model.facts.minikubeDriver : nil,
+                                      minikubeEngine: host == .minikube ? model.minikubeEngine : nil))
         } footer: {
-            if model.usage[host] != nil, let note = L10n.dockerHostNote(host, engineName: engine.activeName) {
+            if model.usage[host] != nil, let note = L10n.dockerHostNote(host, minikubeEngine: model.minikubeEngine) {
                 FormFooter(note)
             }
         }
     }
 
-    /// A row's identity in the Form. Both daemons have the same categories and actions, and a Form
+    @ViewBuilder
+    private func usageRows(_ usage: DockerUsage, _ host: DockerHost) -> some View {
+        ForEach(usageEntries(usage, host)) { entry in
+            VStack(alignment: .leading, spacing: 2) {
+                usageRow(entry.label, entry.row)
+                // The node's disk is one of the engine's volumes; say so, or the two sections
+                // read as 45 GB counted twice.
+                if entry.isVolumes {
+                    if let nested = usage.nestedDaemonVolumeBytes, nested > 0 {
+                        volumeDetailLine(L10n.usageNestedVolume(DockerUsage.formatBytes(nested)))
+                    }
+                    // The two lines add up to most of the row above — which is the whole
+                    // point: the volumes are where the disk went, and this says where to.
+                    if let abandoned = usage.pruneableVolumeBytes, abandoned > 0 {
+                        volumeDetailLine(L10n.usageAbandonedVolumes(DockerUsage.formatBytes(abandoned)))
+                    }
+                }
+            }
+        }
+        // Without it the rows add up to less than the disk: minikube keeps its PVCs,
+        // etcd and logs in the same volume, beside the docker it reports on.
+        if let other = unaccounted(usage, host), other >= Self.unaccountedFloor {
+            usageLine(L10n.usageUnaccounted, L10n.usageUnaccountedRow(DockerUsage.formatBytes(other), host))
+                .id(RowID(host: host, item: "unaccounted"))
+        }
+        // The opposite gap: rows past the disk are shared layers counted twice.
+        if let over = overcounted(usage, host), over >= Self.unaccountedFloor {
+            Text(L10n.usageOvercounted(DockerUsage.formatBytes(over)))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .id(RowID(host: host, item: "overcounted"))
+        }
+        if let tests = usage.testContainers, !tests.isEmpty {
+            VStack(alignment: .leading, spacing: 2) { testContainersRows(usage, tests, host) }
+                .id(RowID(host: host, item: "tests"))
+            testContainersActionRow(host).id(RowID(host: host, item: "tests.action"))
+        }
+        ForEach(CleanupAction.allCases, id: \.self) { action in
+            actionRow(action, host).id(RowID(host: host, item: action.rawValue))
+        }
+    }
+
+    /// What the VM's disk takes on the Mac — shown whether the engine runs or not.
+    @ViewBuilder
+    private func vmDiskFileRows(_ host: DockerHost) -> some View {
+        switch host {
+        case .colima:
+            ForEach(model.facts.colimaDisks, id: \.instance) { file in
+                LabeledContent(L10n.vmDiskFileLabel + (model.facts.colimaDisks.count > 1 ? " · \(file.instance)" : "")) {
+                    Text(file.allocatedBytes.map(DockerUsage.formatBytes) ?? "—")
+                        .monospacedDigit().foregroundStyle(.secondary)
+                }
+                .help(L10n.vmDiskFileNote)
+                .id(RowID(host: host, item: "disk.\(file.instance)"))
+            }
+        case .dockerDesktop:
+            VStack(alignment: .leading, spacing: 2) {
+                Text(L10n.vmDiskFileLabel)
+                Text(L10n.dockerRawUnavailable).font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .id(RowID(host: host, item: "disk"))
+        case .minikube:
+            EmptyView()
+        }
+    }
+
+    /// A row's identity in the Form. The daemons have the same categories and actions, and a Form
     /// keys rows by ID across all its sections: the same ID in two sections shifts the rows — the
     /// colima section's last row turned into its footer and minikube's footer into a row.
     struct RowID: Hashable {
@@ -205,12 +407,13 @@ struct CleanupView: View {
         total(host).flatMap { usage.overcountedBytes(of: $0) }
     }
 
-    /// The whole the rows should add up to: the VM disk for the engine's daemon, the node's volume
-    /// (as the engine's daemon measures it) for minikube.
+    /// The whole the rows should add up to: the VM disk for colima's daemon, the node's volume
+    /// (as its engine's daemon measures it) for minikube. Docker Desktop has no disk probe.
     private func total(_ host: DockerHost) -> UInt64? {
         switch host {
-        case .engineVM: return manager.cachedVMDisk?.usedBytes
-        case .minikube: return model.usage[.engineVM]?.nestedDaemonVolumeBytes
+        case .colima: return manager.cachedVMDisk?.usedBytes
+        case .dockerDesktop: return nil
+        case .minikube: return model.minikubeEngine.flatMap { model.usage[$0]?.nestedDaemonVolumeBytes }
         }
     }
 
@@ -262,7 +465,7 @@ struct CleanupView: View {
 
     private func actionRow(_ action: CleanupAction, _ host: DockerHost) -> some View {
         actionRow(title: L10n.cleanupActionTitle(action),
-                  effect: L10n.cleanupEffect(action, host, engineName: engine.activeName),
+                  effect: L10n.cleanupEffect(action, host),
                   running: model.state(action, on: host) == .running,
                   estimate: model.estimate(action, on: host),
                   enabled: true) { pending = .action(action, host) }
@@ -295,7 +498,7 @@ struct CleanupView: View {
         } actions: {
             if running { ProgressView().controlSize(.small) }
             Button(title, action: action)
-                .disabled(model.isBusy || !enabled)
+                .disabled(model.isBusy || disk.isScanning || !enabled)
         }
     }
 
@@ -304,14 +507,14 @@ struct CleanupView: View {
     private var memorySection: some View {
         Section {
             if let vm = manager.vmMemorySample() {
-                LabeledContent(HeaderMetric.vmEngine.title(engineName: engine.activeName)) {
-                    Text(vm.format()).monospacedDigit().foregroundStyle(pressureColor(vm.fraction))
+                LabeledContent(HeaderMetric.vmEngine.title(engineName: "colima")) {
+                    Text(vm.format()).monospacedDigit().foregroundStyle(DiskBar.color(vm.fraction))
                 }
             }
             FormActionRow {
                 if model.restartState == .running { ProgressView().controlSize(.small) }
-                Button(L10n.restartEngine(engine.activeName ?? "colima")) { pending = .restart }
-                    .disabled(model.isBusy)
+                Button(L10n.restartEngine("colima")) { pending = .restart }
+                    .disabled(model.isBusy || disk.isScanning)
             }
         } header: {
             Text(L10n.cleanupMemorySection)
@@ -324,11 +527,10 @@ struct CleanupView: View {
 
     private var pendingTitle: String {
         switch pending {
-        case .action(let a, let h): return L10n.cleanupConfirmTitle(a, h, engineName: engine.activeName)
+        case .action(let a, let h): return L10n.cleanupConfirmTitle(a, h)
         case .testContainers(let h):
-            return L10n.testContainersConfirmTitle(h, engineName: engine.activeName,
-                                                   count: model.abandonedTestContainers(on: h).count)
-        case .restart: return L10n.restartEngineConfirmTitle(engine.activeName ?? "colima")
+            return L10n.testContainersConfirmTitle(h, count: model.abandonedTestContainers(on: h).count)
+        case .restart: return L10n.restartEngineConfirmTitle("colima")
         case nil: return ""
         }
     }
@@ -352,7 +554,7 @@ struct CleanupView: View {
         switch p {
         case .action(let a, let h): model.run(a, on: h)
         case .testContainers(let h): model.removeAbandonedTestContainers(on: h)
-        case .restart: model.restartEngine()
+        case .restart: model.restartColima()
         }
     }
 
@@ -365,7 +567,130 @@ struct CleanupView: View {
         return false
     }
 
-    private func pressureColor(_ fraction: Double) -> Color {
+    static func count(_ value: Int) -> String {
+        value.formatted(.number.locale(AppDateFormat.locale()))
+    }
+
+    /// `/Users/u/work/x` → `~/work/x`.
+    static func tilde(_ path: String, root: String) -> String {
+        path == root ? "~" : (path.hasPrefix(root + "/") ? "~" + path.dropFirst(root.count) : path)
+    }
+}
+
+/// "Mac disk ████░░ 694 / 926 GB · 79%" — the same bar for the Mac volume and the VM disk.
+struct DiskBar: View {
+    let label: String
+    let info: VMDiskInfo
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text(label)
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Color.secondary.opacity(0.20))
+                    Capsule().fill(Self.color(info.fraction))
+                        .frame(width: max(2, geo.size.width * info.fraction))
+                }
+            }
+            .frame(height: 6)
+            Text(info.format()).monospacedDigit().foregroundStyle(Self.color(info.fraction))
+        }
+    }
+
+    static func color(_ fraction: Double) -> Color {
         fraction < 0.70 ? .green : (fraction < 0.85 ? .yellow : .red)
+    }
+}
+
+/// A folder of the scan: its size, a Finder button, and — when the scan kept bigger folders inside
+/// it — a disclosure down to them. Measured only; nothing here deletes.
+private struct FolderRow: View {
+    let node: DiskNode
+    let path: String
+    let root: String
+
+    var body: some View {
+        if node.children.isEmpty {
+            label
+        } else {
+            DisclosureGroup {
+                ForEach(node.children, id: \.name) { child in
+                    FolderRow(node: child, path: path + "/" + child.name, root: root)
+                }
+                if node.otherBytes >= DiskScanner.treeFloor {
+                    LabeledContent(L10n.diskOther) {
+                        Text(DockerUsage.formatBytes(node.otherBytes)).monospacedDigit().foregroundStyle(.secondary)
+                    }
+                }
+            } label: {
+                label
+            }
+        }
+    }
+
+    private var label: some View {
+        FormActionRow {
+            VStack(alignment: .leading, spacing: 1) {
+                Text(path == root + "/" + node.name ? CleanupView.tilde(path, root: root) : node.name)
+                    .lineLimit(1).truncationMode(.middle)
+                if let category = node.category {
+                    Text(L10n.diskCategoryTitle(category, project: nil)).font(.caption).foregroundStyle(.secondary)
+                }
+            }
+        } actions: {
+            Text(DockerUsage.formatBytes(node.bytes)).monospacedDigit().foregroundStyle(.secondary)
+            Button(L10n.diskShowInFinder) {
+                NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
+            }
+            .controlSize(.small)
+        }
+    }
+}
+
+/// The last word before a deletion: every path, its size, the total — and what will be skipped
+/// and why. A sheet rather than an alert: an alert cannot hold the full list.
+private struct DeletionConfirmation: View {
+    let review: DiskOverviewModel.Review
+    let confirm: () -> Void
+    let cancel: () -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Form {
+                Section {
+                    ForEach(review.accepted, id: \.path) { candidate in
+                        LabeledContent {
+                            Text(DockerUsage.formatBytes(candidate.bytes)).monospacedDigit()
+                        } label: {
+                            Text(candidate.path).lineLimit(1).truncationMode(.middle).textSelection(.enabled)
+                        }
+                    }
+                } header: {
+                    Text(L10n.diskConfirmTitle)
+                } footer: {
+                    FormFooter(L10n.diskConfirmNote)
+                }
+                if !review.rejected.isEmpty {
+                    Section(L10n.diskConfirmSkipped) {
+                        ForEach(review.rejected, id: \.self) { item in
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(item.candidate.path).lineLimit(1).truncationMode(.middle)
+                                Text(L10n.diskRejection(item.reason)).font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
+            }
+            .formStyle(.grouped)
+            HStack {
+                Spacer()
+                Button(L10n.cancel, role: .cancel, action: cancel).keyboardShortcut(.cancelAction)
+                Button(L10n.diskConfirmDelete(DockerUsage.formatBytes(review.acceptedBytes)),
+                       role: .destructive, action: confirm)
+                    .disabled(review.accepted.isEmpty)
+            }
+            .padding()
+        }
+        .frame(minWidth: 560, minHeight: 320)
     }
 }

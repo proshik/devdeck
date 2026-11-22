@@ -21,10 +21,27 @@ final class CleanupLayoutTests: XCTestCase {
                                               startedAt: now.addingTimeInterval(-86_400), volumes: [])]
         let manager = ProcessManager(runner: FakeCommandRunner(), vmMonitoringEnabled: { false },
                                      hostMonitoringEnabled: { false })
-        let model = CleanupModel(manager: manager, probe: FakeDockerUsageProbe([.engineVM: usage, .minikube: usage]))
+        var facts = EngineFacts()
+        (facts.colimaInstalled, facts.colimaRunning) = (true, true)
+        (facts.dockerDesktopInstalled, facts.dockerDesktopRunning) = (true, true)
+        facts.minikubeInstalled = true
+        facts.colimaDisks = [VMDiskFile(instance: "colima", path: "/h/.colima/_lima/_disks/colima/datadisk",
+                                        allocatedBytes: 97_000_000_000)]
+        let model = CleanupModel(manager: manager,
+                                 probe: FakeDockerUsageProbe([.colima: usage, .dockerDesktop: usage, .minikube: usage]),
+                                 facts: FakeEngineFactsProbe(facts))
         model.now = { now }
         let engine = EngineModel(candidates: [FakeEngine(.colima, running: true)])
         engine.refresh()
+        // A finished scan with candidates and big folders, so the Mac-disk sections are drawn too.
+        let fs = FakeDirectoryReader(root: "/h")
+        fs.file("/h/work/grount/Cargo.toml", bytes: 1)
+        fs.file("/h/work/grount/target/debug/x", bytes: 92_000_000_000)
+        fs.file("/h/Library/Caches/c", bytes: 39_000_000_000)
+        fs.file("/h/.colima/_lima/_disks/colima/datadisk", bytes: 91_000_000_000)
+        let scanned = try DiskScanner(reader: fs, root: "/h").scan()
+        let disk = DiskOverviewModel.fake(cleanup: model, fs: fs, store: FakeDiskScanStore(scanned))
+        disk.toggle("/h/work/grount/target")
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }
         let store = CommandStore(configURL: directory.appendingPathComponent("config.json"))
@@ -35,8 +52,8 @@ final class CleanupLayoutTests: XCTestCase {
         var checked = false
         for width: CGFloat in [600, 684] {
             let hosting = NSHostingController(rootView: CleanupView()
-                .environment(model).environment(manager).environment(engine).environment(store)
-                .frame(width: width, height: 1800))
+                .environment(model).environment(disk).environment(manager).environment(engine).environment(store)
+                .frame(width: width, height: 3600))
             let window = NSWindow(contentViewController: hosting)
             window.isReleasedWhenClosed = false
             window.setFrameOrigin(NSPoint(x: -2600, y: -2600))
@@ -49,12 +66,13 @@ final class CleanupLayoutTests: XCTestCase {
                     hosting.view.layoutSubtreeIfNeeded()
                 }
                 XCTAssertNotNil(model.usage[.minikube], "the fake usage must be on the page")
+                XCTAssertNotNil(model.usage[.dockerDesktop])
                 try saveSnapshot(hosting.view, name: "cleanup-form-\(Int(width))-\(language.rawValue)")
                 let (cards, buttons) = cardsAndButtons(in: hosting.view)
                 guard cards.count >= 3, !buttons.isEmpty else { continue }
                 checked = true
-                // Four actions per daemon section and the colima restart.
-                XCTAssertGreaterThanOrEqual(buttons.count, 9, "\(Int(width)) \(language)")
+                // Four actions per daemon section, the colima restart, the candidates and Free Selected.
+                XCTAssertGreaterThanOrEqual(buttons.count, 15, "\(Int(width)) \(language)")
                 for button in buttons {
                     XCTAssertTrue(cards.contains { $0.insetBy(dx: -1, dy: -1).contains(button) },
                                   "a button at \(button) is outside every card (\(Int(width)) \(language))")

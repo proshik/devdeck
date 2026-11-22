@@ -2,13 +2,26 @@ import Foundation
 
 // MARK: - DockerHost
 
-/// Which docker daemon a figure or a cleanup refers to: the container engine's own (the VM's
-/// daemon), or the one inside the minikube node container — where `minikube docker-env` builds
-/// and the cluster's images live, all of it inside the single `minikube` volume on the VM's disk.
+/// Which docker daemon a figure or a cleanup refers to: colima's (inside its VM), Docker Desktop's
+/// (reached from the Mac through its socket), or the one inside the minikube node container —
+/// where `minikube docker-env` builds and the cluster's images live, all of it inside the single
+/// `minikube` volume on the disk of whichever engine runs the node.
 ///
-/// Order matters: `CleanupCommands.id(_:on:)` derives ids from the position in `allCases`.
+/// Order matters: `CleanupCommands.id(_:on:)` derives ids from the position in `allCases`, so a
+/// new host goes at the end and the existing ids stay what they were.
 enum DockerHost: String, CaseIterable, Hashable, Sendable {
-    case engineVM, minikube
+    case colima, minikube, dockerDesktop
+
+    /// The order the page shows them in: the engines, then the cluster that lives on one of them.
+    static let displayOrder: [DockerHost] = [.colima, .dockerDesktop, .minikube]
+
+    /// Whether this host is a container engine's own daemon (not the cluster inside one).
+    var isEngine: Bool { self != .minikube }
+
+    /// Docker Desktop's engine socket — the docker CLI on the Mac talks to it directly.
+    static func dockerDesktopSocket(home: String = NSHomeDirectory()) -> String {
+        home + "/.docker/run/docker.sock"
+    }
 }
 
 // MARK: - DockerUsage
@@ -318,19 +331,31 @@ struct LiveDockerUsageProbe: DockerUsageProbing {
     """
 
     func sample(_ host: DockerHost) -> DockerUsage? {
-        let (binary, args) = Self.invocation(host)
-        let out = ProcessTree.run("/opt/homebrew/bin/\(binary)", args)
-            ?? ProcessTree.run("/usr/bin/env", [binary] + args)
-        return out.flatMap(DockerUsage.parse)
+        for (launchPath, args) in Self.invocations(host) {
+            if let out = ProcessTree.run(launchPath, args) { return DockerUsage.parse(out) }
+        }
+        return nil
     }
 
-    /// colima (lima) shell-escapes each argument → `sh -c <script>` is safe; minikube joins its
-    /// arguments verbatim → the script must already be one argument.
-    /// engineVM is reached through colima only for now — Docker Desktop is the next spec's job.
-    static func invocation(_ host: DockerHost) -> (binary: String, args: [String]) {
+    /// Tried in order until one launches. colima (lima) shell-escapes each argument →
+    /// `sh -c <script>` is safe; minikube joins its arguments verbatim → the script must already be
+    /// one argument. Docker Desktop's daemon is reached from the Mac itself: the docker CLI with
+    /// `DOCKER_HOST` pointing at its socket, whatever the current docker context says.
+    static func invocations(_ host: DockerHost, home: String = NSHomeDirectory()) -> [(String, [String])] {
         switch host {
-        case .engineVM: return ("colima", ["ssh", "--", "sh", "-c", script])
-        case .minikube: return ("minikube", ["ssh", "--", script])
+        case .colima:
+            let args = ["ssh", "--", "sh", "-c", script]
+            return [("/opt/homebrew/bin/colima", args), ("/usr/bin/env", ["colima"] + args)]
+        case .minikube:
+            let args = ["ssh", "--", script]
+            return [("/opt/homebrew/bin/minikube", args), ("/usr/bin/env", ["minikube"] + args)]
+        case .dockerDesktop:
+            return [("/usr/bin/env", ["DOCKER_HOST=unix://" + DockerHost.dockerDesktopSocket(home: home),
+                                      "PATH=" + dockerDesktopPATH, "/bin/sh", "-c", script])]
         }
     }
+
+    /// Where Docker Desktop puts its CLI, ahead of the usual places.
+    static let dockerDesktopPATH = ["/Applications/Docker.app/Contents/Resources/bin", "/usr/local/bin",
+                                    "/opt/homebrew/bin", "/usr/bin", "/bin"].joined(separator: ":")
 }

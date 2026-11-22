@@ -15,6 +15,7 @@ struct DevDeckApp: App {
                 .environment(appDelegate.updateController)
                 .environment(appDelegate.proxyManager)
                 .environment(appDelegate.cleanupModel)
+                .environment(appDelegate.diskOverview)
                 .environment(appDelegate.claudeTabs)
                 .environment(appDelegate.engine)
                 .environment(appDelegate.energy)

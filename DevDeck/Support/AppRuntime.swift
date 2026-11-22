@@ -61,6 +61,24 @@ enum AppRuntime {
 
     static var isIsolated: Bool { isTesting || developmentDirectory != nil }
 
+    static let diskScanRootArgument = "--dev-scan-root"
+
+    /// The folder the Cleanup page scans and may delete inside — the home folder. A development
+    /// launch (it has its own data directory) can point it at a throwaway tree instead, so a real
+    /// deletion is tried on fake `Cargo.toml` + `target` folders and never on the user's files.
+    /// Release builds have no such argument.
+    static let diskScanRoot: String = {
+        #if DEBUG
+        if developmentDirectory != nil,
+           let index = ProcessInfo.processInfo.arguments.firstIndex(of: diskScanRootArgument),
+           ProcessInfo.processInfo.arguments.indices.contains(index + 1) {
+            let path = ProcessInfo.processInfo.arguments[index + 1]
+            if path.hasPrefix("/") { return path }
+        }
+        #endif
+        return NSHomeDirectory()
+    }()
+
     static var supportDirectory: URL {
         if isTesting {
             return FileManager.default.temporaryDirectory

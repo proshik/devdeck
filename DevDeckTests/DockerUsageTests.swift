@@ -132,13 +132,26 @@ final class DockerUsageTests: XCTestCase {
     }
 
     func testProbeScriptReachesMinikubeAsASingleArgument() {
-        let colima = LiveDockerUsageProbe.invocation(.engineVM)
-        XCTAssertEqual(colima.binary, "colima")
-        XCTAssertEqual(Array(colima.args.prefix(4)), ["ssh", "--", "sh", "-c"])
-        let minikube = LiveDockerUsageProbe.invocation(.minikube)
-        XCTAssertEqual(minikube.binary, "minikube")
-        XCTAssertEqual(minikube.args.count, 3, "minikube joins argv verbatim — the script must stay one word")
-        XCTAssertTrue(minikube.args[2].contains(DockerUsage.sectionMarker))
+        let colima = LiveDockerUsageProbe.invocations(.colima)
+        XCTAssertEqual(colima.map(\.0), ["/opt/homebrew/bin/colima", "/usr/bin/env"])
+        XCTAssertEqual(Array(colima[0].1.prefix(4)), ["ssh", "--", "sh", "-c"])
+        XCTAssertEqual(colima[1].1.first, "colima")
+        let minikube = LiveDockerUsageProbe.invocations(.minikube)
+        XCTAssertEqual(minikube[0].0, "/opt/homebrew/bin/minikube")
+        XCTAssertEqual(minikube[0].1.count, 3, "minikube joins argv verbatim — the script must stay one word")
+        XCTAssertTrue(minikube[0].1[2].contains(DockerUsage.sectionMarker))
+    }
+
+    /// Docker Desktop is probed from the Mac: its socket in DOCKER_HOST, its CLI first on PATH.
+    func testDockerDesktopProbeUsesItsSocketOnTheMac() {
+        let desktop = LiveDockerUsageProbe.invocations(.dockerDesktop, home: "/Users/u")
+        XCTAssertEqual(desktop.count, 1)
+        XCTAssertEqual(desktop[0].0, "/usr/bin/env")
+        let args = desktop[0].1
+        XCTAssertEqual(args[0], "DOCKER_HOST=unix:///Users/u/.docker/run/docker.sock")
+        XCTAssertTrue(args[1].hasPrefix("PATH=/Applications/Docker.app/Contents/Resources/bin:"))
+        XCTAssertEqual(Array(args[2...3]), ["/bin/sh", "-c"])
+        XCTAssertTrue(args[4].contains(DockerUsage.sectionMarker))
     }
 
     func testNestedDaemonVolumeSizeIsPickedOutOfTheListing() throws {
@@ -246,7 +259,7 @@ final class DockerUsageTests: XCTestCase {
     }
 
     func testProbeScriptListsTestContainersOfEveryLibrary() {
-        let script = LiveDockerUsageProbe.invocation(.minikube).args[2]
+        let script = LiveDockerUsageProbe.invocations(.minikube)[0].1[2]
         XCTAssertTrue(script.contains("label=org.testcontainers.managed-by"), "testcontainers-rs")
         XCTAssertTrue(script.contains("label=org.testcontainers "), "Java, Go and the rest")
     }
