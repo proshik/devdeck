@@ -198,6 +198,27 @@ final class DiskOverviewModelTests: XCTestCase {
         XCTAssertFalse(disk.isScanning)
     }
 
+    /// "A build may be running" is about build output. A cache is written all the time by
+    /// whatever runs — flagging it says nothing (seen live: ~/Library/Caches "changed 0 min ago").
+    func testOnlyBuildOutputIsFlaggedAsPossiblyBuilding() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        func flagged(_ category: DiskCategory, minutesAgo: Double) -> Bool {
+            DiskOverviewModel.mayBeBuilding(DiskCandidate(path: "/h/x", category: category, bytes: 1,
+                                                          newestModification: now.timeIntervalSince1970 - minutesAgo * 60),
+                                            now: now)
+        }
+        XCTAssertTrue(flagged(.rustTarget, minutesAgo: 5))
+        XCTAssertTrue(flagged(.nodeModules, minutesAgo: 5))
+        XCTAssertTrue(flagged(.xcodeDerivedData, minutesAgo: 5))
+        XCTAssertFalse(flagged(.rustTarget, minutesAgo: 90), "older than an hour")
+        for cache in [DiskCategory.libraryCaches, .userCache, .goModules, .npmCache, .gradleCaches, .cargoRegistry, .minikubeCache] {
+            XCTAssertFalse(flagged(cache, minutesAgo: 0), "\(cache)")
+        }
+        XCTAssertFalse(DiskOverviewModel.mayBeBuilding(DiskCandidate(path: "/h/x", category: .rustTarget, bytes: 1,
+                                                                     newestModification: 0), now: now),
+                       "an unknown time is not a recent one")
+    }
+
     func testTheMacDiskBarReadsTheVolume() async {
         let (disk, _, _) = models(tree())
         await disk.refreshMacDisk()

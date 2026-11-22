@@ -101,6 +101,9 @@ enum DiskCategory: String, Codable, CaseIterable, Sendable {
     }
 
     static let projectCategories: [DiskCategory] = [.rustTarget, .nodeModules]
+
+    /// What a build writes — the categories where a recent change may mean a build is running.
+    var isBuildOutput: Bool { self == .rustTarget || self == .nodeModules || self == .xcodeDerivedData }
     static let fixedCategories: [DiskCategory] = allCases.filter { $0.fixedRelativePath != nil }
 }
 

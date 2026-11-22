@@ -25,6 +25,13 @@ final class DiskOverviewModel {
     /// A candidate changed more recently than this is flagged "a build may be running".
     static let recentlyChanged: TimeInterval = 3600
 
+    /// Build output changed within the last hour. Caches are left out: whatever runs on the Mac
+    /// writes into them all the time, so on them the flag would always be up and mean nothing.
+    static func mayBeBuilding(_ candidate: DiskCandidate, now: Date) -> Bool {
+        guard candidate.category.isBuildOutput, candidate.newestModification > 0 else { return false }
+        return now.timeIntervalSince1970 - candidate.newestModification < recentlyChanged
+    }
+
     /// The folder scanned and the one every deletion must stay inside, resolved through `realpath`.
     @ObservationIgnored let root: String
     @ObservationIgnored private let cleanup: CleanupModel

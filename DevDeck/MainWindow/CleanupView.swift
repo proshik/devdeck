@@ -191,8 +191,9 @@ struct CleanupView: View {
     }
 
     private func candidateRow(_ candidate: DiskCandidate, result: DiskScanResult) -> some View {
-        let age = Date().timeIntervalSince1970 - candidate.newestModification
-        let recent = candidate.newestModification > 0 && age < DiskOverviewModel.recentlyChanged
+        let now = Date()
+        let age = now.timeIntervalSince1970 - candidate.newestModification
+        let recent = DiskOverviewModel.mayBeBuilding(candidate, now: now)
         return Toggle(isOn: Binding(get: { disk.selection.contains(candidate.path) },
                                     set: { _ in disk.toggle(candidate.path) })) {
             VStack(alignment: .leading, spacing: 2) {
@@ -627,12 +628,16 @@ private struct FolderRow: View {
         }
     }
 
+    private var title: String {
+        path == root + "/" + node.name ? CleanupView.tilde(path, root: root) : node.name
+    }
+
     private var label: some View {
         FormActionRow {
             VStack(alignment: .leading, spacing: 1) {
-                Text(path == root + "/" + node.name ? CleanupView.tilde(path, root: root) : node.name)
-                    .lineLimit(1).truncationMode(.middle)
-                if let category = node.category {
+                Text(title).lineLimit(1).truncationMode(.middle)
+                // `~/.cache` under `~/.cache` says nothing; "Go modules" under `mod` does.
+                if let category = node.category, L10n.diskCategoryTitle(category, project: nil) != title {
                     Text(L10n.diskCategoryTitle(category, project: nil)).font(.caption).foregroundStyle(.secondary)
                 }
             }
