@@ -24,6 +24,23 @@ Launch, stop, and monitor local dev commands and long-running daemons
 
 > Swift + SwiftUI/AppKit · `NSStatusItem` + `NSPopover` · sandbox-free · menu bar launch, Dock and ⌘Tab while the full window is open.
 
+<table>
+  <tr>
+    <td width="36%">
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="docs/images/menu-bar-panel-dark.png">
+        <img src="docs/images/menu-bar-panel-light.png" alt="The menu bar panel: commands, daemons, a chain and port forwards with run and stop buttons; one failed command is red, two daemons and a port forward are running">
+      </picture>
+    </td>
+    <td width="64%">
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="docs/images/main-window-dark.png">
+        <img src="docs/images/main-window-light.png" alt="The main window: the sidebar, the list of commands, daemons and chains, and the live log of a running daemon">
+      </picture>
+    </td>
+  </tr>
+</table>
+
 ---
 
 ## Features
