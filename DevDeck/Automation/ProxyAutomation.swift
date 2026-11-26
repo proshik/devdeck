@@ -32,9 +32,7 @@ final class ProxyAutomation {
         // The client validates too; a hand-made socket request is checked again here.
         if let problem = Self.invalid(request) { return AutomationFields.usage(problem) }
         do {
-            let settings = config().settings
-            guard settings.automationEnabled else { throw AutomationRefusal.automationDisabled }
-            guard settings.automationProxyEnabled else { throw AutomationRefusal.proxyAutomationDisabled }
+            try requireAccess()
             switch request.action {
             case .list: return list()
             case .status: return AutomationFields.response([clientBlock(), shareBlock()])
@@ -50,6 +48,12 @@ final class ProxyAutomation {
         }
     }
 
+    private func requireAccess() throws {
+        let settings = config().settings
+        guard settings.automationEnabled else { throw AutomationRefusal.automationDisabled }
+        guard settings.automationProxyEnabled else { throw AutomationRefusal.proxyAutomationDisabled }
+    }
+
     private static func invalid(_ request: AutomationProxyRequest) -> String? {
         switch request.action {
         case .use:
@@ -61,6 +65,7 @@ final class ProxyAutomation {
             if let port = request.port, !AutomationProxyRequest.validPorts.contains(port) {
                 return L10n.automationUsageBadPort(String(port))
             }
+            if let username = request.username, username.contains(":") { return L10n.automationUsageBadUsername }
         default:
             break
         }
@@ -221,12 +226,15 @@ final class ProxyAutomation {
 
     private func use(_ target: String) async throws -> AutomationResponse {
         try requireWritableConfig()
+        // The pair a new choice stops: the answer comes once it has exited, as the contract says.
+        let previousPair = [proxy.activeRemoteProxy?.tunnelCommandID, RemoteProxy.bridgeDaemonID].compactMap { $0 }
         if target == AutomationProxyRequest.noneTarget {
             let settings = config().settings
             if settings.activeRemoteProxyID != nil { proxy.setActiveRemoteProxy(nil) }
             if settings.activeProxyName != nil { proxy.setActiveProxy(nil) }
             let after = config().settings
             guard after.activeRemoteProxyID == nil, after.activeProxyName == nil else { return notSaved() }
+            if let pending = try await awaitStopped(previousPair) { return pending }
             return AutomationFields.response([clientBlock(message: L10n.automationProxyCleared)])
         }
         switch try resolve(target) {
@@ -237,6 +245,7 @@ final class ProxyAutomation {
             }
             proxy.setActiveProxy(found)
             guard config().settings.activeProxyName == found.name else { return notSaved() }
+            if let pending = try await awaitStopped(previousPair) { return pending }
             return AutomationFields.response([clientBlock()])
         case .remote(let remote):
             guard let tunnel = tunnel(of: remote) else { throw AutomationRefusal.remoteTunnelMissing(remote.name) }
@@ -277,6 +286,18 @@ final class ProxyAutomation {
         return proxy.clientPassword(for: name)?.isEmpty == false
     }
 
+    /// Wait for stopped remote daemons to exit; a timed-out answer when they do not in time.
+    private func awaitStopped(_ ids: [UUID]) async throws -> AutomationResponse? {
+        func up(_ id: UUID) -> Bool { processManager?.states[id] == .running || processManager?.states[id] == .daemonRunning }
+        let deadline = ContinuousClock.now + stopWait
+        while ids.contains(where: up), ContinuousClock.now < deadline {
+            try await Task.sleep(for: pollInterval)
+        }
+        guard ids.contains(where: up) else { return nil }
+        return AutomationFields.response([clientBlock(message: L10n.automationRemoteStopPending)],
+                                         code: AutomationExitCode.timedOut)
+    }
+
     /// Wait for the tunnel and the bridge `setActiveRemoteProxy` started (or left running).
     private func awaitRemote(_ remote: RemoteProxy, tunnelID: UUID) async throws -> AutomationResponse {
         let ids = [tunnelID, RemoteProxy.bridgeDaemonID]
@@ -286,6 +307,17 @@ final class ProxyAutomation {
                 // Someone chose another proxy meanwhile; report what is selected now.
                 return AutomationFields.response([clientBlock(message: L10n.automationProxySelectionChanged)],
                                                  code: AutomationExitCode.failed)
+            }
+            // Still waiting for the previous pair to exit: what the ids show belongs to earlier runs.
+            if proxy.pendingRemoteStart == remote.id {
+                if ContinuousClock.now >= deadline {
+                    let seconds = Int(startWait.components.seconds)
+                    return AutomationFields.response(
+                        [clientBlock(message: L10n.automationRemoteTimedOut(remote.name, seconds))],
+                        code: AutomationExitCode.timedOut)
+                }
+                try await Task.sleep(for: pollInterval)
+                continue
             }
             let states = ids.map { processManager?.states[$0] }
             if let conflict = ids.lazy.compactMap({ self.processManager?.portConflicts[$0] }).first {
@@ -318,15 +350,17 @@ final class ProxyAutomation {
         let name = proxy.activeProxy?.name
         proxy.checkActiveProxy()
         if case .unavailable(let reason) = proxy.clientCheck { throw AutomationRefusal.proxyCheckUnavailable(reason) }
+        // This request's probe: a selection change or another check replaces the token.
+        let token = proxy.clientCheckToken
         let deadline = ContinuousClock.now + checkWait
-        while proxy.clientCheck == .running, ContinuousClock.now < deadline {
+        while proxy.clientCheck == .running, proxy.clientCheckToken == token, ContinuousClock.now < deadline {
             try await Task.sleep(for: pollInterval)
         }
         var fields = AutomationFields()
         let code: Int32
         // The result is the shared check row's: another check of another proxy may have replaced it.
         let checked = proxy.clientCheck
-        if proxy.activeProxy?.name != name, checked != .running {
+        if proxy.clientCheckToken != token || proxy.activeProxy?.name != name {
             fields.add("status", "failed")
             fields.add("proxy", name)
             fields.add("message", L10n.automationProxySelectionChanged)
@@ -375,6 +409,10 @@ final class ProxyAutomation {
                 return AutomationFields.response([shareBlock(message: L10n.automationShareStopPending)],
                                                  code: AutomationExitCode.timedOut)
             }
+            // The world moved during the wait: the switches, the share settings, the file.
+            try requireAccess()
+            try requireStartable(config().proxy)
+            try requireWritableConfig()
         }
         proxy.setShareEnabled(true)
         guard config().settings.proxyShareEnabled else { return notSaved() }
@@ -418,10 +456,17 @@ final class ProxyAutomation {
         try requireWritableConfig()
         // `saveShare` restarts exactly when the Proxy page's Save would: enabled and up.
         let restarts = config().settings.proxyShareEnabled && shareIsUp
+        let launches = processManager?.launchCounts[ProxyShare.daemonID] ?? 0
         proxy.saveShare(updated)
         guard config().proxy == updated else { return notSaved() }
         guard restarts else {
             return AutomationFields.response([shareBlock(restarted: false, message: L10n.automationShareSaved)])
+        }
+        // A restart launches synchronously; without a new launch only the old listener is left,
+        // stopping (the config file could not be written — the diagnostic log says why).
+        guard (processManager?.launchCounts[ProxyShare.daemonID] ?? 0) > launches else {
+            return AutomationFields.response([shareBlock(restarted: false, message: L10n.automationShareNotStarted)],
+                                             code: AutomationExitCode.failed)
         }
         let response = try await awaitShare(restarted: true)
         // Another change replaced this one while its listener was coming up.
@@ -442,6 +487,8 @@ final class ProxyAutomation {
         guard !share.username.trimmingCharacters(in: .whitespaces).isEmpty else {
             throw AutomationRefusal.shareUsernameMissing
         }
+        // Basic credentials split at the first colon: such a username can never log in.
+        guard !share.username.contains(":") else { throw AutomationRefusal.shareUsernameInvalid }
         guard proxy.sharePassword()?.isEmpty == false else { throw AutomationRefusal.sharePasswordMissing }
     }
 

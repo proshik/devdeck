@@ -195,6 +195,29 @@ final class AwakeAutomationTests: XCTestCase {
         XCTAssertEqual(result.exitCode, AutomationExitCode.failed)
     }
 
+    func testAWaitIsNotSatisfiedByASessionStartedAfterItsCancel() async throws {
+        let request = Task { await self.handle(.on) }
+        await sleepUntil({ self.runner.startedCommandIDs.count == 1 })
+        try XCTUnwrap(runner.controller(for: AwakeHelper.daemonID)).cancel()
+        await yieldUntil { !self.model.isBusy }
+        model.start()   // another session, before the waiting request polls again
+        readySince = now
+        try XCTUnwrap(runner.controller(for: AwakeHelper.daemonID)).started(pid: nil)
+        let response = await request.value
+        XCTAssertEqual(response.exitCode, AutomationExitCode.failed, response.stdout)
+    }
+
+    func testOffAfterAStartThatFailedBeforeTheHelperIsStillOff() async throws {
+        let request = Task { await self.handle(.on) }
+        await sleepUntil({ self.runner.startedCommandIDs.count == 1 })
+        let controller = try XCTUnwrap(runner.controller(for: AwakeHelper.daemonID))
+        controller.line("Cannot create keep-awake lease.", .stderr)
+        controller.terminate(1)
+        _ = await request.value
+        let off = await handle(.off)
+        XCTAssertEqual(off.exitCode, AutomationExitCode.success, off.stdout)
+    }
+
     func testOffWithAnUnrestoredJournalIsNotASuccess() async {
         let journaled = AwakeModel(manager: ProcessManager(runner: runner, notifier: FakeNotifier()),
                                    hasJournal: { true })

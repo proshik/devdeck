@@ -269,8 +269,11 @@ enum AutomationCLI {
                         return failure(arg.hasPrefix("--") ? L10n.automationUsageUnknownOption(optionName(arg))
                                                            : L10n.automationUsageExtraArgument(arg))
                     }
-                    // An empty service name or username is a value: the host name, no username.
-                    guard let value = queue.popFirst() else { return failure(L10n.automationUsageMissingValue(arg)) }
+                    // An empty service name or username is a value: the host name, no username. Another
+                    // option is not: `--service-name --password=…` must not save the password as a name.
+                    guard let value = queue.popFirst(), !value.hasPrefix("--") else {
+                        return failure(L10n.automationUsageMissingValue(arg))
+                    }
                     switch arg {
                     case "--port":
                         guard let port = Int(value), AutomationProxyRequest.validPorts.contains(port) else {
@@ -288,16 +291,19 @@ enum AutomationCLI {
                     case "--service-name":
                         body.serviceName = value
                     default:
+                        guard !value.contains(":") else { return failure(L10n.automationUsageBadUsername) }
                         body.username = value
                     }
                 }
                 guard body.setsShareField else { return failure(L10n.automationUsageNoShareField) }
                 return request(body)
             default:
-                return failure(L10n.automationUsageUnknownShareAction(sub))
+                return failure(sub.hasPrefix("--") ? L10n.automationUsageUnknownOption(optionName(sub))
+                                                   : L10n.automationUsageUnknownShareAction(sub))
             }
         default:
-            return failure(L10n.automationUsageUnknownProxyAction(first))
+            return failure(first.hasPrefix("--") ? L10n.automationUsageUnknownOption(optionName(first))
+                                                 : L10n.automationUsageUnknownProxyAction(first))
         }
     }
 
@@ -308,7 +314,8 @@ enum AutomationCLI {
         }
         guard let first = args.first else { return failure(L10n.automationUsageNoAwakeAction) }
         guard let action = AutomationAwakeRequest.Action(rawValue: first) else {
-            return failure(L10n.automationUsageUnknownAwakeAction(first))
+            return failure(first.hasPrefix("--") ? L10n.automationUsageUnknownOption(optionName(first))
+                                                 : L10n.automationUsageUnknownAwakeAction(first))
         }
         var seconds: Int?
         var rest = args.dropFirst()[...]
@@ -317,7 +324,9 @@ enum AutomationCLI {
                 return failure(arg.hasPrefix("--") ? L10n.automationUsageUnknownOption(optionName(arg)) : L10n.automationUsageExtraArgument(arg))
             }
             guard action == .on else { return failure(L10n.automationUsageForOnlyOn) }
-            guard let value = rest.popFirst(), !value.isEmpty else { return failure(L10n.automationUsageMissingValue(arg)) }
+            guard let value = rest.popFirst(), !value.isEmpty, !value.hasPrefix("--") else {
+                return failure(L10n.automationUsageMissingValue(arg))
+            }
             guard let parsed = awakeDuration(value) else { return failure(L10n.automationUsageBadDuration(value)) }
             seconds = parsed
         }

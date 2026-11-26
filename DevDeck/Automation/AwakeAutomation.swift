@@ -67,9 +67,14 @@ final class AwakeAutomation {
                 return AutomationFields.response([block()], code: AutomationExitCode.failed)
             }
         }
+        // The session this request waits for: another start (after a cancel) is another session.
+        let session = launches
         let deadline = ContinuousClock.now + startWait
-        while model.isBusy, !model.isActive, ContinuousClock.now < deadline {
+        while launches == session, model.isBusy, !model.isActive, ContinuousClock.now < deadline {
             try await Task.sleep(for: pollInterval)
+        }
+        guard launches == session else {
+            return AutomationFields.response([block(message: L10n.automationAwakeReplaced)], code: AutomationExitCode.failed)
         }
         if model.isActive { return AutomationFields.response([block()]) }
         if model.isBusy {
@@ -81,10 +86,13 @@ final class AwakeAutomation {
         return AutomationFields.response([block(message: message)], code: AutomationExitCode.failed)
     }
 
+    private var launches: Int { model.manager.launchCounts[AwakeHelper.daemonID] ?? 0 }
+
     private func off() async throws -> AutomationResponse {
         guard model.isBusy else {
             // A helper that died mid-session leaves its journal: sleep may still be disabled.
-            let code = model.recoveryAvailable || model.error != nil ? AutomationExitCode.failed : AutomationExitCode.success
+            // An earlier start that failed before the helper ran changed nothing: off is still off.
+            let code = model.recoveryAvailable ? AutomationExitCode.failed : AutomationExitCode.success
             return AutomationFields.response([block()], code: code)
         }
         if model.recovering { throw AutomationRefusal.awakeRecovering }
@@ -97,7 +105,7 @@ final class AwakeAutomation {
             return AutomationFields.response([block(message: L10n.awakeStopping)], code: AutomationExitCode.timedOut)
         }
         model.refresh()
-        if model.recoveryAvailable || model.error != nil {
+        if model.recoveryAvailable {
             return AutomationFields.response([block()], code: AutomationExitCode.failed)
         }
         return AutomationFields.response([block(message: L10n.automationAwakeStopped)])

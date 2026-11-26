@@ -518,6 +518,97 @@ final class ProxyAutomationTests: XCTestCase {
         XCTAssertFalse(unknown.stderr.contains("\u{1B}"))
     }
 
+    // MARK: review round 2
+
+    func testShareOnRechecksCredentialsAfterWaitingForTheOldListener() async throws {
+        runner.eagerScripts[ProxyShare.daemonID] = [.started(pid: nil)]
+        runner.autoTerminateOnStopCode = nil
+        _ = await handle(.init(action: .shareOn))
+        let dying = try XCTUnwrap(runner.controller(for: ProxyShare.daemonID))
+        manager.setShareEnabled(false)
+        let on = Task { await self.handle(.init(action: .shareOn)) }
+        try await Task.sleep(for: .milliseconds(30))
+        try update { $0.proxy.authEnabled = true; $0.proxy.username = "" }   // saved in the UI meanwhile
+        dying.terminate(0)
+        let response = await on.value
+        XCTAssertEqual(response.exitCode, AutomationExitCode.refused)
+        XCTAssertEqual(response.stderr, AutomationRefusal.shareUsernameMissing.message)
+        XCTAssertFalse(store.config.settings.proxyShareEnabled)
+        XCTAssertEqual(runner.startedCommandIDs.count, 1)
+    }
+
+    func testUseNoneAnswersOnceThePairHasExited() async throws {
+        runner.autoTerminateOnStopCode = nil
+        let remote = addRemote()
+        _ = await handle(.init(action: .use, target: "vds"))
+        let tunnel = try XCTUnwrap(runner.controller(for: remote.tunnelCommandID!))
+        let bridge = try XCTUnwrap(runner.controller(for: RemoteProxy.bridgeDaemonID))
+        let none = Task { await self.handle(.init(action: .use, target: "none")) }
+        try await Task.sleep(for: .milliseconds(50))
+        tunnel.terminate(143)
+        bridge.terminate(0)
+        let response = await none.value
+        XCTAssertEqual(response.exitCode, AutomationExitCode.success)
+        XCTAssertNotEqual(processManager.states[remote.tunnelCommandID!], .daemonRunning)
+        XCTAssertNotEqual(processManager.states[RemoteProxy.bridgeDaemonID], .daemonRunning)
+    }
+
+    func testUseNoneTimesOutWhenThePairDoesNotExit() async {
+        runner.autoTerminateOnStopCode = nil
+        addRemote()
+        _ = await handle(.init(action: .use, target: "vds"))
+        let response = await handle(.init(action: .use, target: "none"))
+        XCTAssertEqual(response.exitCode, AutomationExitCode.timedOut)
+        XCTAssertNil(store.config.settings.activeRemoteProxyID, "the choice is cleared either way")
+    }
+
+    func testShareSetWhoseRestartCouldNotLaunchFails() async throws {
+        let shareFile = FakePrivateFile()
+        manager = ProxyManager(discovering: discovery, advertiser: FakeProxyAdvertising(), credentials: credentials,
+                               lanIP: { "192.168.1.42" }, gostPath: { _ in nil }, exitIPProbe: { _ in nil },
+                               exitIPAttempts: 1, exitIPRetryDelay: .milliseconds(1),
+                               envFile: FakePrivateFile(), shareConfigFile: shareFile, bridgeConfigFile: FakePrivateFile())
+        manager.store = store
+        manager.processManager = processManager
+        runner.eagerScripts[ProxyShare.daemonID] = [.started(pid: nil)]
+        runner.autoTerminateOnStopCode = nil
+        _ = await handle(.init(action: .shareOn))
+        shareFile.writeSucceeds = false
+        let response = await handle(.init(action: .shareSet, port: 8899))
+        XCTAssertEqual(response.exitCode, AutomationExitCode.failed, response.stdout)
+        XCTAssertEqual(blocks(response)[0]["restarted"], "no")
+    }
+
+    func testACheckReplacedByAnotherCheckOfTheSameProxyFails() async throws {
+        await announce([lan("A")])
+        _ = await handle(.init(action: .use, target: "A"))
+        exitIPBox.delay = 0.3
+        let first = Task { await self.handle(.init(action: .check)) }
+        try await Task.sleep(for: .milliseconds(50))
+        manager.checkActiveProxy()
+        let response = await first.value
+        XCTAssertEqual(response.exitCode, AutomationExitCode.failed, response.stdout)
+    }
+
+    func testAnHTTPErrorPageIsNoExitIP() async {
+        await announce([lan("A")])
+        _ = await handle(.init(action: .use, target: "A"))
+        exitIP = "<html>503 Service Unavailable</html>"
+        let response = await handle(.init(action: .check))
+        XCTAssertEqual(response.exitCode, AutomationExitCode.failed)
+        XCTAssertNil(blocks(response)[0]["exitIP"])
+        XCTAssertTrue(isIPAddress("203.0.113.7"))
+        XCTAssertTrue(isIPAddress("2001:db8::1"))
+        XCTAssertFalse(isIPAddress("captive.portal"))
+        XCTAssertFalse(isIPAddress(""))
+    }
+
+    func testAUsernameWithAColonIsRejected() async {
+        let response = await handle(.init(action: .shareSet, username: "team:op"))
+        XCTAssertEqual(response.exitCode, AutomationExitCode.usage)
+        XCTAssertEqual(store.config.proxy.username, "")
+    }
+
     func testRouterReachesProxyAutomation() async {
         let router = AutomationRequestRouter(
             service: AutomationService(manager: processManager, config: { [unowned self] in self.store.config }),

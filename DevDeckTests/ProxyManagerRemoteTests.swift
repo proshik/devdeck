@@ -162,6 +162,52 @@ final class ProxyManagerRemoteTests: XCTestCase {
         XCTAssertEqual(rig.store.config.settings.activeRemoteProxyID, second.id)
     }
 
+    /// Choosing the same proxy again while its start waits joins that start: no early pre-check
+    /// against the old ssh, and the route is not usable until the new pair is up.
+    func testReselectingDuringAPendingSwitchJoinsIt() async throws {
+        let rig = makeRig()
+        rig.runner.autoTerminateOnStopCode = nil   // read at launch: the old pair takes its time to exit
+        addAndSelect(rig)
+        await rig.bringBothUp()
+        let firstTunnel = try XCTUnwrap(rig.tunnelController)
+        rig.manager.addRemoteProxy(name: "vds2", destination: "user@vds2", localPort: 18888, socksPort: 1080)
+        let second = try XCTUnwrap(rig.store.config.remoteProxies.first { $0.name == "vds2" })
+        rig.manager.setActiveRemoteProxy(second)
+        rig.manager.setActiveRemoteProxy(second)
+        XCTAssertEqual(rig.manager.pendingRemoteStart, second.id)
+        XCTAssertFalse(rig.runner.startedCommandIDs.contains(second.tunnelCommandID!))
+        XCTAssertEqual(rig.manager.routing(for: Command(name: "x", command: "x", routeThroughProxy: true)), .unavailable,
+                       "the bridge still running is the previous proxy's")
+        firstTunnel.terminate(143)
+        rig.bridgeController?.terminate(0)
+        await sleepUntil({ rig.runner.startedCommandIDs.contains(second.tunnelCommandID!) })
+        XCTAssertEqual(rig.runner.startedCommandIDs.filter { $0 == second.tunnelCommandID! }.count, 1)
+        XCTAssertNil(rig.manager.pendingRemoteStart)
+    }
+
+    /// A → B → C while A's tunnel still exits: C waits for A too, not only for B.
+    func testAThirdChoiceStillWaitsForTheFirstTunnel() async throws {
+        let rig = makeRig()
+        rig.runner.autoTerminateOnStopCode = nil
+        addAndSelect(rig)
+        await rig.bringBothUp()
+        let firstTunnel = try XCTUnwrap(rig.tunnelController)
+        rig.manager.addRemoteProxy(name: "vds2", destination: "u@2", localPort: 18888, socksPort: 1080)
+        rig.manager.addRemoteProxy(name: "vds3", destination: "u@3", localPort: 18888, socksPort: 1080)
+        let second = try XCTUnwrap(rig.store.config.remoteProxies.first { $0.name == "vds2" })
+        let third = try XCTUnwrap(rig.store.config.remoteProxies.first { $0.name == "vds3" })
+        rig.manager.setActiveRemoteProxy(second)
+        rig.bridgeController?.terminate(0)   // the bridge is gone, A's ssh is not
+        try? await Task.sleep(for: .milliseconds(100))
+        rig.manager.setActiveRemoteProxy(third)
+        try? await Task.sleep(for: .milliseconds(150))
+        XCTAssertFalse(rig.runner.startedCommandIDs.contains(third.tunnelCommandID!),
+                       "the first tunnel still holds the port")
+        firstTunnel.terminate(143)
+        await sleepUntil({ rig.runner.startedCommandIDs.contains(third.tunnelCommandID!) })
+        XCTAssertFalse(rig.runner.startedCommandIDs.contains(second.tunnelCommandID!))
+    }
+
     /// Deselecting while a switch waits for the old pair: nothing starts afterwards.
     func testDeselectDuringASwitchStartsNothing() async throws {
         let rig = makeRig()

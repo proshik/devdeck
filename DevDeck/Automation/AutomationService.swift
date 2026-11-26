@@ -72,6 +72,7 @@ enum AutomationRefusal: Error, Equatable, LocalizedError {
     /// `--auth on` / `share on` with auth: the Keychain has no share password, or no username is set.
     case sharePasswordMissing
     case shareUsernameMissing
+    case shareUsernameInvalid
     /// `awake on` under serious/critical thermal pressure.
     case awakeThermal
     /// `awake on|off` while "Restore sleep" runs: it cannot be interrupted.
@@ -111,6 +112,7 @@ enum AutomationRefusal: Error, Equatable, LocalizedError {
         case .gostMissing: L10n.gostNotFound
         case .sharePasswordMissing: L10n.automationSharePasswordMissing
         case .shareUsernameMissing: L10n.automationShareUsernameMissing
+        case .shareUsernameInvalid: L10n.automationUsageBadUsername
         case .awakeThermal: L10n.awakeThermalStop
         case .awakeRecovering: L10n.automationAwakeRecovering
         case .configNotSaved(let detail): L10n.automationConfigNotSaved(detail)

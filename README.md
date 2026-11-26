@@ -250,7 +250,9 @@ $DD automation awake status                      # on/off and the seconds left
 Answers are `key: value` lines on stdout (errors on stderr), exit codes are 0 done, 1 failed,
 2 still running when the wait ran out, 3 refused, 4 DevDeck not running, 5 communication, 64 usage.
 A LAN proxy that needs credentials and a password-protected share take their password on the Proxy
-page only; remote proxies are added and edited there too. `awake on` asks for administrator
+page only; remote proxies are added and edited there too. The username of a LAN proxy is kept only for
+the current choice, so the command line can re-select a protected proxy only while it is still the
+chosen one — after switching away, choose it again in DevDeck. `awake on` asks for administrator
 approval like the popover button; without a timer the session still ends when DevDeck quits, at 20%
 battery or under heat. A tunnel or share reported as up means its daemon runs, as in the popover;
 `proxy check` is what proves the route. `$DD automation help` has the details.

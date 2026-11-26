@@ -1,4 +1,5 @@
 import Foundation
+import Network
 import Observation
 
 /// Proxy Manager: shares this machine's VPN egress on the LAN (host side) and routes flagged
@@ -90,10 +91,15 @@ final class ProxyManager {
     @ObservationIgnored private var discoveryTask: Task<Void, Never>?
     /// How long a switch between remote proxies waits for the previous pair to stop.
     @ObservationIgnored private let remoteSwitchWait: Duration
+    /// Remote daemons asked to stop that may still hold their ports — a new pair waits for them.
+    @ObservationIgnored private var remoteStopping: Set<UUID> = []
+    /// The remote proxy whose start waits for `remoteStopping` to exit; its route is not usable yet.
+    @ObservationIgnored private(set) var pendingRemoteStart: UUID?
     /// Token of the in-flight exit-IP probe — a restart preempts an older, slower probe.
     @ObservationIgnored private var exitIPToken: UUID?
     /// Same preemption for the client-side check: a proxy switch must orphan a probe still out.
-    @ObservationIgnored private var clientCheckToken: UUID?
+    /// Readable so a waiting caller can tell its own probe from a later one.
+    @ObservationIgnored private(set) var clientCheckToken: UUID?
     @ObservationIgnored private var observingDaemonState = false
     @ObservationIgnored private var observingRemoteState = false
     @ObservationIgnored private var observingSettings = false
@@ -109,7 +115,8 @@ final class ProxyManager {
         gostPath: @escaping (ProxyShare) -> String? = { $0.gostPath },
         exitIPProbe: @escaping @Sendable (String) -> String? = { proxyURL in
             // `--noproxy ''`: an inherited NO_PROXY must not let the probe bypass the proxy it proves.
-            ProcessTree.run("/usr/bin/curl", ["-s", "--max-time", "5", "--noproxy", "", "-x", proxyURL,
+            // `--fail`: an HTTP error page is no exit IP.
+            ProcessTree.run("/usr/bin/curl", ["-s", "--fail", "--max-time", "5", "--noproxy", "", "-x", proxyURL,
                                               "https://api.ipify.org"])
         },
         exitIPAttempts: Int = 4,
@@ -301,6 +308,8 @@ final class ProxyManager {
     /// This is the ONLY definition of "usable" for the remote kind — the endpoint is loopback,
     /// so reachability says nothing; process state is everything.
     private func remoteDaemonsRunning(_ remote: RemoteProxy) -> Bool {
+        // While its start waits, the bridge still running is the previous proxy's.
+        guard pendingRemoteStart == nil else { return false }
         guard let tunnelID = remote.tunnelCommandID, let processManager else { return false }
         return processManager.states[tunnelID] == .daemonRunning
             && processManager.states[RemoteProxy.bridgeDaemonID] == .daemonRunning
@@ -330,33 +339,40 @@ final class ProxyManager {
         clientCheck = .idle
         defer { refreshDerivedState() }
         guard let remote else {
+            pendingRemoteStart = nil
             store?.setActiveRemoteProxy(id: nil)
             stopRemote()
-            return
-        }
-        let previous = activeRemoteProxy
-        guard let previous, previous.id != remote.id else {
-            store?.setActiveRemoteProxy(id: remote.id)
-            startRemote()
             return
         }
         // Switching from ANOTHER remote proxy: its tunnel must not outlive the selection, and the
         // bridge — one synthetic daemon shared by every remote proxy — must come back on the new
         // proxy's ports. Stop BEFORE the store changes the id (stopRemote resolves the tunnel
         // through the current selection).
-        stopRemote()
+        if let previous = activeRemoteProxy, previous.id != remote.id { stopRemote() }
         store?.setActiveRemoteProxy(id: remote.id)
+        // Chosen again while its start already waits: that start goes on, nothing is doubled.
+        guard pendingRemoteStart != remote.id else { return }
         // The new pair usually wants the very same ports (the add form proposes the same defaults),
-        // so it starts only once the old one has let go of them: the port pre-check would see the
-        // old ssh still bound and refuse, and the bridge would race its predecessor's socket.
-        let stopping = [previous.tunnelCommandID, RemoteProxy.bridgeDaemonID].compactMap { $0 }
+        // so it starts only once every pair stopped before has let go of them: the port pre-check
+        // would see an old ssh still bound and refuse, and the bridge would race its predecessor's
+        // socket. Every earlier stop counts, not just the last one (A → B → C while A still exits).
+        remoteStopping = remoteStopping.filter(isUp)
+        guard !remoteStopping.isEmpty else {
+            pendingRemoteStart = nil
+            startRemote()
+            return
+        }
+        pendingRemoteStart = remote.id
         let wait = remoteSwitchWait
         Task { @MainActor [weak self] in
             let deadline = ContinuousClock.now + wait
-            while let manager = self, stopping.contains(where: manager.isUp), ContinuousClock.now < deadline {
+            while let manager = self, manager.pendingRemoteStart == remote.id,
+                  manager.remoteStopping.contains(where: manager.isUp), ContinuousClock.now < deadline {
                 try? await Task.sleep(for: .milliseconds(50))
             }
-            guard let self, self.store?.config.settings.activeRemoteProxyID == remote.id else { return }
+            guard let self, self.pendingRemoteStart == remote.id,
+                  self.store?.config.settings.activeRemoteProxyID == remote.id else { return }
+            self.pendingRemoteStart = nil
             // forceRestart: a daemon still up after the wait is preempted rather than kept.
             self.startRemote(forceRestart: true)
             self.refreshDerivedState()
@@ -444,6 +460,8 @@ final class ProxyManager {
             return
         }
         observeRemoteDaemonState()
+        // Started again: these runs are new, not the ones a later switch has to wait out.
+        remoteStopping.subtract([tunnel.id, RemoteProxy.bridgeDaemonID])
         for command in [tunnel, remote.bridgeCommand(configPath: bridgeConfigFile.url.path)] {
             let alreadyUp = processManager.states[command.id] == .running
                 || processManager.states[command.id] == .daemonRunning
@@ -458,6 +476,7 @@ final class ProxyManager {
         if let tunnelID = store?.config.remoteProxies
             .first(where: { $0.id == store?.config.settings.activeRemoteProxyID })?.tunnelCommandID {
             processManager?.stop(tunnelID)
+            remoteStopping.insert(tunnelID)
         } else {
             // The selection may already be cleared (deselect clears first) — stop every linked
             // tunnel that is up rather than leaving an orphan behind.
@@ -465,10 +484,12 @@ final class ProxyManager {
                 if let id = remote.tunnelCommandID,
                    processManager?.states[id] == .daemonRunning || processManager?.states[id] == .running {
                     processManager?.stop(id)
+                    remoteStopping.insert(id)
                 }
             }
         }
         processManager?.stop(RemoteProxy.bridgeDaemonID)
+        remoteStopping.insert(RemoteProxy.bridgeDaemonID)
         _ = bridgeConfigFile.remove()
     }
 
@@ -750,7 +771,8 @@ final class ProxyManager {
             let output = await Task.detached(priority: .utility) { probe(url) }.value
             guard let self, self.clientCheckToken == token else { return }
             let ip = output?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            self.clientCheck = ip.isEmpty ? .failed : .success(ip)
+            // Only an address proves the route: a captive portal answers 200 with a page.
+            self.clientCheck = isIPAddress(ip) ? .success(ip) : .failed
         }
     }
 
@@ -788,6 +810,7 @@ final class ProxyManager {
         // for a selection that no longer exists. Stop BEFORE the store clears the id (stopRemote
         // resolves the tunnel command through the still-current selection).
         if store?.config.settings.activeRemoteProxyID != nil { stopRemote() }
+        pendingRemoteStart = nil
         let sameAsBefore = store?.config.settings.activeProxyName == proxy.name
         store?.setActiveProxy(name: proxy.name,
                               username: sameAsBefore ? store?.config.settings.activeProxyUsername : nil)
@@ -903,4 +926,9 @@ final class ProxyManager {
         return .routed(env: proxyEnv(host: resolved.proxy.host, port: resolved.proxy.port,
                                      user: resolved.user, pass: resolved.pass))
     }
+}
+
+/// An IPv4 or IPv6 literal — what api.ipify.org answers, and nothing a proxy's error page can be.
+func isIPAddress(_ text: String) -> Bool {
+    !text.isEmpty && (IPv4Address(text) != nil || IPv6Address(text) != nil)
 }

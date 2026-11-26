@@ -399,6 +399,18 @@ extension L10n {
     static func automationUsageBadAuth(_ value: String) -> String {
         t("--auth takes on or off, got “\(value)”.", "--auth — on или off, получено «\(value)».")
     }
+    static var automationUsageBadUsername: String {
+        t("A share username cannot contain “:” — proxy logins split at the first colon.",
+          "Имя пользователя раздачи не может содержать «:» — логин прокси делится по первому двоеточию.")
+    }
+    static var automationRemoteStopPending: String {
+        t("The choice changed, but the previous tunnel or bridge is still stopping.",
+          "Выбор изменён, но прежний туннель или мост ещё останавливается.")
+    }
+    static var automationAwakeReplaced: String {
+        t("This keep-awake request was replaced by another start; check awake status.",
+          "Этот запрос «без сна» заменил другой запуск; смотрите awake status.")
+    }
     static var automationUsageNoShareField: String {
         t("share set needs at least one of --port, --engine, --service-name, --auth, --username.",
           "share set нужен хотя бы один из --port, --engine, --service-name, --auth, --username.")
@@ -513,7 +525,9 @@ extension L10n {
             a remote one starts its ssh tunnel and bridge (the answer waits up to \(AutomationLimits.proxyStartWaitSeconds) s), choosing a
             LAN one stops them; none clears the choice. Passwords are never accepted: a LAN proxy
             without saved credentials and --auth on without a saved share password are refused —
-            enter them on the Proxy page. Remote proxies are added and edited only in DevDeck.
+            enter them on the Proxy page. The username is kept only for the current choice, so after
+            switching away choose that proxy again in DevDeck. Remote proxies are added and edited
+            only in DevDeck.
             proxy check probes the chosen proxy and prints the exit IP; "up" elsewhere means the
             daemons run, as in the popover, and only check proves the route. share set saves the share and
             restarts it if it is running, like Save on the Proxy page. awake on disables sleep after
@@ -570,7 +584,8 @@ extension L10n {
             панель: для удалённого поднимаются ssh-туннель и мост (ответ ждёт до \(AutomationLimits.proxyStartWaitSeconds) с), выбор
             LAN-прокси их гасит; none снимает выбор. Пароли не принимаются: LAN-прокси без сохранённых
             учётных данных и --auth on без сохранённого пароля раздачи — отказ, их вводят на странице
-            «Прокси». Удалённые прокси добавляются и меняются только в DevDeck. proxy check проверяет
+            «Прокси». Имя пользователя хранится только для текущего выбора: после переключения
+            выберите такой прокси снова в DevDeck. Удалённые прокси добавляются и меняются только в DevDeck. proxy check проверяет
             выбранный прокси и печатает exit IP; «поднялся» в остальных ответах значит «демоны работают»,
             как в панели, а маршрут доказывает только check. share set сохраняет раздачу и перезапускает её, если
             она работает, как «Сохранить» на странице «Прокси». awake on отключает сон после
