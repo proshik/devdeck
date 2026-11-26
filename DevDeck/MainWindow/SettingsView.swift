@@ -41,6 +41,14 @@ struct SettingsView: View {
                     get: { store.config.settings.automationEnabled },
                     set: { store.setAutomationEnabled($0) }
                 ))
+                Toggle(L10n.automationProxyToggle, isOn: Binding(
+                    get: { store.config.settings.automationProxyEnabled },
+                    set: { store.setAutomationProxyEnabled($0) }
+                ))
+                Toggle(L10n.automationAwakeToggle, isOn: Binding(
+                    get: { store.config.settings.automationAwakeEnabled },
+                    set: { store.setAutomationAwakeEnabled($0) }
+                ))
             } header: {
                 Text(L10n.automationSection)
             } footer: {

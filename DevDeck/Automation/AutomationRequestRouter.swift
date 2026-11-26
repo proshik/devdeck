@@ -7,10 +7,15 @@ import Foundation
 final class AutomationRequestRouter {
     private let service: AutomationService
     private let brightness: BrightnessAutomation?
+    private let proxy: ProxyAutomation?
+    private let awake: AwakeAutomation?
 
-    init(service: AutomationService, brightness: BrightnessAutomation? = nil) {
+    init(service: AutomationService, brightness: BrightnessAutomation? = nil,
+         proxy: ProxyAutomation? = nil, awake: AwakeAutomation? = nil) {
         self.service = service
         self.brightness = brightness
+        self.proxy = proxy
+        self.awake = awake
     }
 
     func handle(_ request: AutomationRequest) async -> AutomationResponse {
@@ -22,6 +27,18 @@ final class AutomationRequestRouter {
                 return Self.error(AutomationExitCode.usage, L10n.automationIncompleteRequest)
             }
             return await brightness.handle(body)
+        }
+        if request.operation == .proxy {
+            guard let proxy, let body = request.proxy else {
+                return Self.error(AutomationExitCode.usage, L10n.automationIncompleteRequest)
+            }
+            return await proxy.handle(body)
+        }
+        if request.operation == .awake {
+            guard let awake, let body = request.awake else {
+                return Self.error(AutomationExitCode.usage, L10n.automationIncompleteRequest)
+            }
+            return await awake.handle(body)
         }
         do {
             if request.operation == .list { return list() }
@@ -49,7 +66,7 @@ final class AutomationRequestRouter {
         case (.stop, .chain): return try await service.stopChain(id)
         case (.status, .command): return try service.commandStatus(id)
         case (.status, .chain): return try service.chainStatus(id)
-        case (.list, _), (.brightness, _): preconditionFailure("handled before resolving a target")
+        case (.list, _), (.brightness, _), (.proxy, _), (.awake, _): preconditionFailure("handled before resolving a target")
         }
     }
 

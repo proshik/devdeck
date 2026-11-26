@@ -115,6 +115,29 @@ final class ProxyManagerRemoteTests: XCTestCase {
 
     // MARK: - Lifecycle
 
+    /// Switching straight from one remote proxy to another must not leave the first tunnel running
+    /// or the bridge listening on the first proxy's port.
+    func testSwitchingRemoteToRemoteStopsTheOldTunnelAndRestartsTheBridge() async throws {
+        let rig = makeRig()
+        addAndSelect(rig)
+        await rig.bringBothUp()
+        let first = rig.remote
+        let firstTunnel = try XCTUnwrap(rig.tunnelController)
+        rig.manager.addRemoteProxy(name: "vds2", destination: "user@vds2", localPort: 18889, socksPort: 1081)
+        let second = try XCTUnwrap(rig.store.config.remoteProxies.first { $0.name == "vds2" })
+
+        rig.manager.setActiveRemoteProxy(second)
+
+        XCTAssertEqual(firstTunnel.stopCount, 1, "the previous tunnel must not outlive its selection")
+        await sleepUntil({ rig.runner.startedCommandIDs.contains(second.tunnelCommandID!) },
+                         message: "the new tunnel was not launched")
+        XCTAssertEqual(rig.runner.startedCommandIDs.filter { $0 == RemoteProxy.bridgeDaemonID }.count, 2,
+                       "the bridge restarts for the new proxy")
+        XCTAssertEqual(rig.bridgeController?.command.port, 18889)
+        XCTAssertEqual(rig.bridgeConfig.contents?.contains(#""upstreamSocks":"127.0.0.1:1081""#), true)
+        XCTAssertNotEqual(first.id, second.id)
+    }
+
     func testSelectingStartsTunnelAndBridge() async {
         let rig = makeRig()
         addAndSelect(rig)

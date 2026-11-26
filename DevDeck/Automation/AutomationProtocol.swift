@@ -29,7 +29,7 @@ enum AutomationExitCode {
     /// How a report ends the process. `status` and `list` always succeed — they only read.
     static func code(for report: AutomationReport, operation: AutomationOperation) -> Int32 {
         switch operation {
-        case .list, .status, .brightness:
+        case .list, .status, .brightness, .proxy, .awake:
             return success
         case .stop:
             return report.status == .running || report.status == .timedOut ? timedOut : success
@@ -44,7 +44,7 @@ enum AutomationExitCode {
 }
 
 enum AutomationOperation: String, Codable, Sendable {
-    case list, run, stop, status, brightness
+    case list, run, stop, status, brightness, proxy, awake
 }
 
 /// `DevDeck automation brightness …`: read or change display brightness the way the brightness
@@ -60,6 +60,40 @@ struct AutomationBrightnessRequest: Codable, Equatable, Sendable {
     var display: String? = nil
 }
 
+/// `DevDeck automation proxy …`: pick, check and share proxies through `ProxyManager`. Never
+/// carries a password; `target` is a proxy name or a remote proxy's UUID (`use` only).
+struct AutomationProxyRequest: Codable, Equatable, Sendable {
+    enum Action: String, Codable, Sendable {
+        case list, status, use, check, shareOn, shareOff, shareStatus, shareSet
+    }
+
+    var action: Action
+    var target: String? = nil
+    /// `shareSet` only: each nil field keeps its saved value.
+    var port: Int? = nil
+    var engine: ProxyEngine? = nil
+    var serviceName: String? = nil
+    var auth: Bool? = nil
+    var username: String? = nil
+
+    /// `none` after `use`: clear the selection.
+    static let noneTarget = "none"
+    static let validPorts = 1...65535
+
+    var setsShareField: Bool { port != nil || engine != nil || serviceName != nil || auth != nil || username != nil }
+}
+
+/// `DevDeck automation awake …`: keep-awake through `AwakeModel`. `seconds` is `on`'s duration
+/// (0 = indefinitely, nil = the duration chosen in the UI).
+struct AutomationAwakeRequest: Codable, Equatable, Sendable {
+    enum Action: String, Codable, Sendable {
+        case on, off, status
+    }
+
+    var action: Action
+    var seconds: Int? = nil
+}
+
 /// What the command line asks the app. Only saved items, by name or UUID — never a shell string.
 struct AutomationRequest: Codable, Equatable, Sendable {
     static let currentVersion = 1
@@ -73,6 +107,9 @@ struct AutomationRequest: Codable, Equatable, Sendable {
     var timeoutSeconds: Int? = nil
     /// `operation == .brightness` only. Optional, so the protocol version stays 1.
     var brightness: AutomationBrightnessRequest? = nil
+    /// `operation == .proxy` / `.awake` only. Optional, so the protocol version stays 1.
+    var proxy: AutomationProxyRequest? = nil
+    var awake: AutomationAwakeRequest? = nil
 }
 
 /// What the app answers: the text for each stream and the exit code, decided app-side.

@@ -119,6 +119,12 @@ enum AutomationCLI {
         if operation == .brightness {
             return parseBrightness(Array(args.dropFirst())).map { .request($0, dataDirectory: dataDirectory) }
         }
+        if operation == .proxy {
+            return parseProxy(Array(args.dropFirst())).map { .request($0, dataDirectory: dataDirectory) }
+        }
+        if operation == .awake {
+            return parseAwake(Array(args.dropFirst())).map { .request($0, dataDirectory: dataDirectory) }
+        }
 
         var positional: [String] = []
         var directory: String?
@@ -219,6 +225,134 @@ enum AutomationCLI {
         return .success(AutomationRequest(operation: .brightness,
                                           brightness: AutomationBrightnessRequest(action: action, percent: percent,
                                                                                   display: display)))
+    }
+
+    /// `proxy list | status | check | use <name|UUID|none> | share on|off|status | share set [options]`.
+    private static func parseProxy(_ args: [String]) -> Result<AutomationRequest, UsageError> {
+        func failure(_ problem: String) -> Result<AutomationRequest, UsageError> {
+            .failure(UsageError(message: L10n.automationUsage(problem)))
+        }
+        func request(_ body: AutomationProxyRequest) -> Result<AutomationRequest, UsageError> {
+            .success(AutomationRequest(operation: .proxy, proxy: body))
+        }
+        guard let first = args.first else { return failure(L10n.automationUsageNoProxyAction) }
+        var rest = Array(args.dropFirst())
+        switch first {
+        case "list", "status", "check":
+            if let extra = rest.first { return failure(extra.hasPrefix("--") ? L10n.automationUsageUnknownOption(extra)
+                                                                              : L10n.automationUsageExtraArgument(extra)) }
+            let action: AutomationProxyRequest.Action = first == "list" ? .list : first == "status" ? .status : .check
+            return request(AutomationProxyRequest(action: action))
+        case "use":
+            if let option = rest.first(where: { $0.hasPrefix("--") }) { return failure(L10n.automationUsageUnknownOption(option)) }
+            guard let target = rest.first, !target.trimmingCharacters(in: .whitespaces).isEmpty else {
+                return failure(L10n.automationUsageMissingProxy)
+            }
+            if rest.count > 1 { return failure(L10n.automationUsageExtraArgument(rest[1])) }
+            return request(AutomationProxyRequest(action: .use, target: target))
+        case "share":
+            guard let sub = rest.first else { return failure(L10n.automationUsageNoShareAction) }
+            rest.removeFirst()
+            switch sub {
+            case "on", "off", "status":
+                if let extra = rest.first {
+                    return failure(extra.hasPrefix("--") ? L10n.automationUsageUnknownOption(extra)
+                                                         : L10n.automationUsageExtraArgument(extra))
+                }
+                let action: AutomationProxyRequest.Action = sub == "on" ? .shareOn : sub == "off" ? .shareOff : .shareStatus
+                return request(AutomationProxyRequest(action: action))
+            case "set":
+                var body = AutomationProxyRequest(action: .shareSet)
+                var queue = rest[...]
+                while let arg = queue.popFirst() {
+                    guard ["--port", "--engine", "--service-name", "--auth", "--username"].contains(arg) else {
+                        return failure(arg.hasPrefix("--") ? L10n.automationUsageUnknownOption(arg)
+                                                           : L10n.automationUsageExtraArgument(arg))
+                    }
+                    // An empty service name or username is a value: the host name, no username.
+                    guard let value = queue.popFirst() else { return failure(L10n.automationUsageMissingValue(arg)) }
+                    switch arg {
+                    case "--port":
+                        guard let port = Int(value), AutomationProxyRequest.validPorts.contains(port) else {
+                            return failure(L10n.automationUsageBadPort(value))
+                        }
+                        body.port = port
+                    case "--engine":
+                        guard let engine = ProxyEngine.allCases.first(where: { $0.rawValue.lowercased() == value.lowercased() }) else {
+                            return failure(L10n.automationUsageBadEngine(value))
+                        }
+                        body.engine = engine
+                    case "--auth":
+                        guard value == "on" || value == "off" else { return failure(L10n.automationUsageBadAuth(value)) }
+                        body.auth = value == "on"
+                    case "--service-name":
+                        body.serviceName = value
+                    default:
+                        body.username = value
+                    }
+                }
+                guard body.setsShareField else { return failure(L10n.automationUsageNoShareField) }
+                return request(body)
+            default:
+                return failure(L10n.automationUsageUnknownShareAction(sub))
+            }
+        default:
+            return failure(L10n.automationUsageUnknownProxyAction(first))
+        }
+    }
+
+    /// `awake on [--for DURATION] | off | status`.
+    private static func parseAwake(_ args: [String]) -> Result<AutomationRequest, UsageError> {
+        func failure(_ problem: String) -> Result<AutomationRequest, UsageError> {
+            .failure(UsageError(message: L10n.automationUsage(problem)))
+        }
+        guard let first = args.first else { return failure(L10n.automationUsageNoAwakeAction) }
+        guard let action = AutomationAwakeRequest.Action(rawValue: first) else {
+            return failure(L10n.automationUsageUnknownAwakeAction(first))
+        }
+        var seconds: Int?
+        var rest = args.dropFirst()[...]
+        while let arg = rest.popFirst() {
+            guard arg == "--for" else {
+                return failure(arg.hasPrefix("--") ? L10n.automationUsageUnknownOption(arg) : L10n.automationUsageExtraArgument(arg))
+            }
+            guard action == .on else { return failure(L10n.automationUsageForOnlyOn) }
+            guard let value = rest.popFirst(), !value.isEmpty else { return failure(L10n.automationUsageMissingValue(arg)) }
+            guard let parsed = awakeDuration(value) else { return failure(L10n.automationUsageBadDuration(value)) }
+            seconds = parsed
+        }
+        return .success(AutomationRequest(operation: .awake, awake: AutomationAwakeRequest(action: action, seconds: seconds)))
+    }
+
+    /// `0` (indefinitely), whole seconds, or `<n>h`, `<n>m`, `<n>s` from the largest unit down,
+    /// combined (`1h30m`); 1 s…`AwakeModel.maxSeconds`. nil for anything else.
+    static func awakeDuration(_ text: String) -> Int? {
+        let value = text.lowercased()
+        if let seconds = Int(value), value.allSatisfy(\.isASCII) {
+            return seconds == 0 || (1...AwakeModel.maxSeconds).contains(seconds) ? seconds : nil
+        }
+        var total = 0
+        var digits = ""
+        var lastUnit = Int.max
+        for character in value {
+            if character.isASCII, character.isNumber { digits.append(character); continue }
+            let unit: Int
+            switch character {
+            case "h": unit = 3600
+            case "m": unit = 60
+            case "s": unit = 1
+            default: return nil
+            }
+            // Each unit once and from the largest down; `30m2h` is a typo, not 2.5 hours.
+            guard let amount = Int(digits), unit < lastUnit else { return nil }
+            guard amount <= AwakeModel.maxSeconds else { return nil }
+            total += amount * unit
+            lastUnit = unit
+            digits = ""
+        }
+        guard digits.isEmpty, lastUnit != Int.max else { return nil }
+        // Only a bare `0` means indefinitely: `0m` reads as a mistake.
+        return (1...AwakeModel.maxSeconds).contains(total) ? total : nil
     }
 
     private static func absolute(_ path: String, from currentDirectory: String) -> String {

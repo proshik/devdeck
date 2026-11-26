@@ -61,6 +61,10 @@ struct Settings: Codable, Equatable {
     var containerEngine: EnginePreference
     /// Accept requests from Shortcuts (App Intents) for commands and chains that allow it. Off by default.
     var automationEnabled: Bool
+    /// `DevDeck automation proxy …`: pick, check and share proxies. Needs `automationEnabled` too. Off by default.
+    var automationProxyEnabled: Bool
+    /// `DevDeck automation awake …`: keep-awake on/off. Needs `automationEnabled` too. Off by default.
+    var automationAwakeEnabled: Bool
 
     init(vmMemoryMonitoring: Bool = true, minikubeMemoryMonitoring: Bool = true,
          hostMemoryMonitoring: Bool = true, globalHotkeyEnabled: Bool = false,
@@ -71,7 +75,8 @@ struct Settings: Codable, Equatable {
          activeProxyAuthRequired: Bool = false, activeProxyLANPrefix: String? = nil,
          activeRemoteProxyID: UUID? = nil, claudeTabsRestore: Bool = false,
          claudeTabsCaptureSeconds: Int = 15, batteryMonitoring: Bool = true, containerEngine: EnginePreference = .auto,
-         automationEnabled: Bool = false) {
+         automationEnabled: Bool = false, automationProxyEnabled: Bool = false,
+         automationAwakeEnabled: Bool = false) {
         self.vmMemoryMonitoring = vmMemoryMonitoring
         self.minikubeMemoryMonitoring = minikubeMemoryMonitoring
         self.hostMemoryMonitoring = hostMemoryMonitoring
@@ -92,6 +97,8 @@ struct Settings: Codable, Equatable {
         self.claudeTabsCaptureSeconds = claudeTabsCaptureSeconds
         self.containerEngine = containerEngine
         self.automationEnabled = automationEnabled
+        self.automationProxyEnabled = automationProxyEnabled
+        self.automationAwakeEnabled = automationAwakeEnabled
     }
 
     enum CodingKeys: String, CodingKey {
@@ -100,7 +107,8 @@ struct Settings: Codable, Equatable {
              clusterHealthMonitoring, autoUpdateEnabled, proxyShareEnabled, proxyDiscoveryEnabled,
              activeProxyName, activeProxyUsername, activeProxyHost, activeProxyPort,
              activeProxyAuthRequired, activeProxyLANPrefix, activeRemoteProxyID, claudeTabsRestore,
-             claudeTabsCaptureSeconds, batteryMonitoring, containerEngine, automationEnabled
+             claudeTabsCaptureSeconds, batteryMonitoring, containerEngine, automationEnabled,
+             automationProxyEnabled, automationAwakeEnabled
     }
 
     init(from decoder: Decoder) throws {
@@ -129,6 +137,8 @@ struct Settings: Codable, Equatable {
         // `try?`: an unknown string (a future engine, a typo) must not fail the whole config.
         containerEngine = (try? c.decodeIfPresent(EnginePreference.self, forKey: .containerEngine)) ?? .auto
         automationEnabled = try c.decodeIfPresent(Bool.self, forKey: .automationEnabled) ?? false
+        automationProxyEnabled = try c.decodeIfPresent(Bool.self, forKey: .automationProxyEnabled) ?? false
+        automationAwakeEnabled = try c.decodeIfPresent(Bool.self, forKey: .automationAwakeEnabled) ?? false
     }
 }
 

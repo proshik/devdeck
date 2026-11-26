@@ -215,6 +215,22 @@ final class CommandStore {
         persist(updated)
     }
 
+    /// Toggle `DevDeck automation proxy …` and save atomically.
+    func setAutomationProxyEnabled(_ on: Bool) {
+        guard config.settings.automationProxyEnabled != on else { return }
+        var updated = config
+        updated.settings.automationProxyEnabled = on
+        persist(updated)
+    }
+
+    /// Toggle `DevDeck automation awake …` and save atomically.
+    func setAutomationAwakeEnabled(_ on: Bool) {
+        guard config.settings.automationAwakeEnabled != on else { return }
+        var updated = config
+        updated.settings.automationAwakeEnabled = on
+        persist(updated)
+    }
+
     /// Toggle the VM memory-monitoring flag and save atomically.
     func setVMMonitoring(_ on: Bool) {
         guard config.settings.vmMemoryMonitoring != on else { return }

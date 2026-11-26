@@ -194,7 +194,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func startAutomationSocket(_ service: AutomationService) {
         // Brightness goes through the same model as the keys and the slider (and its OSD).
         let brightness = BrightnessAutomation(model: self.brightness, config: { [weak store] in store?.config ?? .empty })
-        let router = AutomationRequestRouter(service: service, brightness: brightness)
+        // Proxy and keep-awake go through the same managers as the popover and the Proxy page.
+        let config: () -> Config = { [weak store] in store?.config ?? .empty }
+        let router = AutomationRequestRouter(service: service, brightness: brightness,
+                                             proxy: ProxyAutomation(proxy: proxyManager, config: config),
+                                             awake: AwakeAutomation(model: awake, config: config))
         let url = AutomationEndpoint.socketURL(bundleID: Bundle.main.bundleIdentifier ?? "DevDeck",
                                                dataDirectory: AppRuntime.supportDirectory)
         let server = AutomationSocketServer(socketURL: url) { request in await router.handle(request) }

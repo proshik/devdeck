@@ -181,7 +181,11 @@ final class ProxyManager {
     ///
     /// The credentials are NOT here any more — they live in the config file this command points at,
     /// so the command string is safe to log and to show.
-    func shareCommand() -> Command? {
+    func shareCommand() -> Command? { shareCommand(for: share) }
+
+    /// The command `share` would start with — nil when its engine is gost and gost is missing.
+    /// Lets a caller check a share configuration before saving it.
+    func shareCommand(for share: ProxyShare) -> Command? {
         share.toCommand(gostPath: gostPath(share), configPath: shareConfigFile.url.path)
     }
 
@@ -324,8 +328,15 @@ final class ProxyManager {
             stopRemote()
             return
         }
+        // Switching from ANOTHER remote proxy: its tunnel must not outlive the selection, and the
+        // bridge — one synthetic daemon shared by every remote proxy — must come back on the new
+        // proxy's ports. Stop BEFORE the store changes the id (stopRemote resolves the tunnel
+        // through the current selection), then force the relaunch for the same reason as
+        // `saveRemoteProxy`: right after `stop`, `states[]` still reads `.daemonRunning`.
+        let switching = store?.config.settings.activeRemoteProxyID.map { $0 != remote.id } ?? false
+        if switching { stopRemote() }
         store?.setActiveRemoteProxy(id: remote.id)
-        startRemote()
+        startRemote(forceRestart: switching)
     }
 
     /// Save edits to a remote proxy; a live pair is restarted so a port change takes effect.
@@ -671,7 +682,10 @@ final class ProxyManager {
     // MARK: - Proxied browser
 
     /// The browser button's enablement: exactly what a launch would use.
-    var canOpenProxyBrowser: Bool { resolvedEndpoint() != nil }
+    var canOpenProxyBrowser: Bool { activeProxyUsable }
+
+    /// The active proxy resolves to an endpoint a flagged command would be routed through now.
+    var activeProxyUsable: Bool { resolvedEndpoint() != nil }
 
     /// Open the separate proxied Chrome instance pointed at the ACTIVE proxy — the browser half
     /// of an OAuth login (`/login` in Claude Code). Same resolution as `routing(for:)`, so the

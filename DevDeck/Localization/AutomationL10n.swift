@@ -6,8 +6,14 @@ extension L10n {
     static var automationSection: String { t("Automation", "Автоматизация") }
     static var automationToggle: String { t("Accept requests from Shortcuts", "Принимать запросы из Shortcuts") }
     static var automationHelp: String {
-        t("Shortcuts, the `DevDeck automation` command line and coding agents can run, stop and read only the commands and chains marked “Allow from Shortcuts”. Arbitrary shell commands are never accepted. Usage: /Applications/DevDeck.app/Contents/MacOS/DevDeck automation help",
-          "Shortcuts, командная строка `DevDeck automation` и coding agents могут запускать, останавливать и опрашивать только команды и цепочки с флажком «Разрешить из Shortcuts». Произвольные shell-команды не принимаются. Справка: /Applications/DevDeck.app/Contents/MacOS/DevDeck automation help")
+        t("Shortcuts, the `DevDeck automation` command line and coding agents can run, stop and read only the commands and chains marked “Allow from Shortcuts”. Proxy selection, the proxy share and keep-awake need their own switch as well. Arbitrary shell commands are never accepted. Usage: /Applications/DevDeck.app/Contents/MacOS/DevDeck automation help",
+          "Shortcuts, командная строка `DevDeck automation` и coding agents могут запускать, останавливать и опрашивать только команды и цепочки с флажком «Разрешить из Shortcuts». Выбору и раздаче прокси и режиму «без сна» нужен ещё и свой переключатель. Произвольные shell-команды не принимаются. Справка: /Applications/DevDeck.app/Contents/MacOS/DevDeck automation help")
+    }
+    static var automationProxyToggle: String {
+        t("Proxy from the command line", "Прокси из командной строки")
+    }
+    static var automationAwakeToggle: String {
+        t("Keep-awake from the command line", "«Без сна» из командной строки")
     }
     static var allowFromShortcutsToggle: String { t("Allow from Shortcuts", "Разрешить из Shortcuts") }
     static var automationUnknownItem: String { t("Unknown DevDeck item", "Неизвестный элемент DevDeck") }
@@ -152,8 +158,8 @@ extension L10n {
     }
     static var automationUsageNoOperation: String { t("No operation given.", "Не указана операция.") }
     static func automationUsageUnknownOperation(_ value: String) -> String {
-        t("Unknown operation “\(value)”: expected list, run, stop, status or brightness.",
-          "Неизвестная операция «\(value)»: нужна list, run, stop, status или brightness.")
+        t("Unknown operation “\(value)”: expected list, run, stop, status, brightness, proxy or awake.",
+          "Неизвестная операция «\(value)»: нужна list, run, stop, status, brightness, proxy или awake.")
     }
     static func automationUsageUnknownKind(_ value: String) -> String {
         t("Unknown kind “\(value)”: expected command or chain.", "Неизвестный тип «\(value)»: нужен command или chain.")
@@ -246,13 +252,212 @@ extension L10n {
           "\(name) не подтвердил изменение за \(seconds) с; запись может ещё завершиться.")
     }
 
+    // MARK: command line — proxy
+
+    static var automationProxyDisabled: String {
+        t("Proxy automation is turned off: turn on “Proxy from the command line” in Settings → Automation.",
+          "Прокси из командной строки выключены: включите «Прокси из командной строки» в Настройки → Автоматизация.")
+    }
+    private static func proxyList(_ proxies: [String]) -> String {
+        proxies.isEmpty ? "" : t("\nProxies (type, name, id):\n", "\nПрокси (тип, имя, id):\n") + proxies.joined(separator: "\n")
+    }
+    static func automationUnknownProxy(_ query: String, _ proxies: [String], discoveryOn: Bool) -> String {
+        t("There is no proxy named or with the id “\(query)”.", "Прокси с именем или id «\(query)» нет.")
+            + (discoveryOn ? "" : t(" LAN discovery is off, so LAN proxies are not listed.",
+                                    " Поиск в сети выключен, поэтому LAN-прокси не видны."))
+            + proxyList(proxies)
+    }
+    static func automationAmbiguousProxy(_ query: String, _ proxies: [String]) -> String {
+        t("Several proxies are named “\(query)”; pass a remote proxy's UUID or rename one in DevDeck.",
+          "Несколько прокси называются «\(query)»; укажите UUID удалённого прокси или переименуйте один в DevDeck.")
+            + proxyList(proxies)
+    }
+    static func automationProxyCredentialsMissing(_ name: String) -> String {
+        t("“\(name)” needs a username and password, and none are saved for it. Choose it on the Proxy page in DevDeck and enter them there; the command line never takes passwords.",
+          "«\(name)» требует имя пользователя и пароль, а сохранённых нет. Выберите его на странице «Прокси» в DevDeck и введите их там; командная строка пароли не принимает.")
+    }
+    static func automationRemoteTunnelMissing(_ name: String) -> String {
+        t("Remote proxy “\(name)” has no tunnel command; fix it on the Proxy page.",
+          "У удалённого прокси «\(name)» нет команды туннеля; исправьте это на странице «Прокси».")
+    }
+    static var automationSharePasswordMissing: String {
+        t("Sharing with a password needs the share password saved in DevDeck: set it on the Proxy page; the command line never takes passwords.",
+          "Для раздачи с паролем нужен сохранённый в DevDeck пароль раздачи: задайте его на странице «Прокси»; командная строка пароли не принимает.")
+    }
+    static var automationShareUsernameMissing: String {
+        t("Sharing with a password needs a username: pass --username or set it on the Proxy page.",
+          "Для раздачи с паролем нужно имя пользователя: передайте --username или задайте его на странице «Прокси».")
+    }
+    static func automationProxyListEmpty(discoveryOn: Bool) -> String {
+        discoveryOn
+            ? t("No proxies: none is announced on the LAN and no remote proxy is set up.",
+                "Прокси нет: в сети никто не объявлен, удалённые прокси не настроены.")
+            : t("No proxies: LAN discovery is off and no remote proxy is set up.",
+                "Прокси нет: поиск в сети выключен, удалённые прокси не настроены.")
+    }
+    static func automationProxyUsable(_ name: String) -> String {
+        t("Commands that go through a proxy use “\(name)”.", "Команды через прокси идут через «\(name)».")
+    }
+    static func automationProxyNotUsable(_ name: String) -> String {
+        t("“\(name)” is chosen but not usable right now; commands that go through a proxy will not start.",
+          "«\(name)» выбран, но сейчас недоступен; команды через прокси не запустятся.")
+    }
+    static var automationProxyNone: String {
+        t("No proxy is chosen; commands that go through a proxy will not start.",
+          "Прокси не выбран; команды через прокси не запустятся.")
+    }
+    static var automationProxyCleared: String {
+        t("The proxy selection was cleared.", "Выбор прокси снят.")
+    }
+    static var automationProxySelectionChanged: String {
+        t("The proxy selection changed meanwhile.", "Выбор прокси тем временем изменился.")
+    }
+    static func automationRemotePortOccupied(_ name: String, _ port: Int, _ process: String, _ pid: Int32) -> String {
+        t("“\(name)” is chosen, but port \(port) is occupied by \(process) (PID \(pid)); free it or resolve it in DevDeck.",
+          "«\(name)» выбран, но порт \(port) занят процессом \(process) (PID \(pid)); освободите его или решите в DevDeck.")
+    }
+    static func automationRemoteFailed(_ name: String) -> String {
+        t("“\(name)” is chosen, but its tunnel or bridge stopped; the watchdog may retry. See the output below.",
+          "«\(name)» выбран, но его туннель или мост остановился; watchdog может перезапустить. Вывод — ниже.")
+    }
+    static func automationRemoteTimedOut(_ name: String, _ seconds: Int) -> String {
+        t("“\(name)” is chosen; its tunnel and bridge are not both up after \(seconds) s and keep starting.",
+          "«\(name)» выбран; туннель и мост за \(seconds) с не поднялись оба и продолжают запускаться.")
+    }
+    static func automationProxyCheckOK(_ name: String, _ ip: String) -> String {
+        t("Traffic through “\(name)” leaves from \(ip).", "Трафик через «\(name)» выходит с \(ip).")
+    }
+    static func automationProxyCheckFailed(_ name: String) -> String {
+        t("The check through “\(name)” got no answer.", "Проверка через «\(name)» не получила ответа.")
+    }
+    static func automationProxyCheckTimedOut(_ seconds: Int) -> String {
+        t("The check got no result within \(seconds) s.", "Проверка не дала результата за \(seconds) с.")
+    }
+    static func automationSharePortOccupied(_ port: Int, _ process: String, _ pid: Int32) -> String {
+        t("The share is not running: port \(port) is occupied by \(process) (PID \(pid)).",
+          "Раздача не работает: порт \(port) занят процессом \(process) (PID \(pid)).")
+    }
+    static func automationShareUp(_ port: Int) -> String {
+        t("This Mac shares its connection on port \(port).", "Этот Mac раздаёт соединение на порту \(port).")
+    }
+    static func automationShareAlreadyOn(_ port: Int) -> String {
+        t("The share is already running on port \(port).", "Раздача уже работает на порту \(port).")
+    }
+    static var automationShareStarting: String { t("The share is starting.", "Раздача запускается.") }
+    static func automationShareFailed(_ code: Int32) -> String {
+        t("The share listener stopped with exit code \(code).", "Listener раздачи остановился, код \(code).")
+    }
+    static var automationShareNotRunning: String {
+        t("The share is on but its listener is not running.", "Раздача включена, но listener не работает.")
+    }
+    static var automationShareOff: String { t("The share is off.", "Раздача выключена.") }
+    static var automationShareStopPending: String {
+        t("The share was turned off, but its listener is still stopping.",
+          "Раздача выключена, но listener ещё останавливается.")
+    }
+    static var automationShareUnchanged: String {
+        t("The share settings already have these values; nothing changed.",
+          "Настройки раздачи уже такие; ничего не изменилось.")
+    }
+    static var automationShareSaved: String { t("The share settings were saved.", "Настройки раздачи сохранены.") }
+    static var automationShareNotStarted: String {
+        t("The share listener was not started; the DevDeck diagnostic log says why.",
+          "Listener раздачи не запущен; причина — в диагностическом журнале DevDeck.")
+    }
+    static func automationShareTimedOut(_ seconds: Int) -> String {
+        t("The share listener is not up after \(seconds) s and keeps starting.",
+          "Listener раздачи не поднялся за \(seconds) с и продолжает запускаться.")
+    }
+
+    static var automationUsageNoProxyAction: String {
+        t("No proxy action given: expected list, status, use, check or share.",
+          "Не указано действие прокси: нужно list, status, use, check или share.")
+    }
+    static func automationUsageUnknownProxyAction(_ value: String) -> String {
+        t("Unknown proxy action “\(value)”: expected list, status, use, check or share.",
+          "Неизвестное действие прокси «\(value)»: нужно list, status, use, check или share.")
+    }
+    static var automationUsageMissingProxy: String {
+        t("use needs a proxy name, a remote proxy's UUID or none.",
+          "use нужно имя прокси, UUID удалённого прокси или none.")
+    }
+    static var automationUsageNoShareAction: String {
+        t("No share action given: expected on, off, status or set.",
+          "Не указано действие раздачи: нужно on, off, status или set.")
+    }
+    static func automationUsageUnknownShareAction(_ value: String) -> String {
+        t("Unknown share action “\(value)”: expected on, off, status or set.",
+          "Неизвестное действие раздачи «\(value)»: нужно on, off, status или set.")
+    }
+    static func automationUsageBadPort(_ value: String) -> String {
+        t("--port takes a whole number from 1 to 65535, got “\(value)”.",
+          "--port — целое число от 1 до 65535, получено «\(value)».")
+    }
+    static func automationUsageBadEngine(_ value: String) -> String {
+        t("--engine takes builtIn or gost, got “\(value)”.", "--engine — builtIn или gost, получено «\(value)».")
+    }
+    static func automationUsageBadAuth(_ value: String) -> String {
+        t("--auth takes on or off, got “\(value)”.", "--auth — on или off, получено «\(value)».")
+    }
+    static var automationUsageNoShareField: String {
+        t("share set needs at least one of --port, --engine, --service-name, --auth, --username.",
+          "share set нужен хотя бы один из --port, --engine, --service-name, --auth, --username.")
+    }
+
+    // MARK: command line — keep-awake
+
+    static var automationAwakeDisabled: String {
+        t("Keep-awake automation is turned off: turn on “Keep-awake from the command line” in Settings → Automation.",
+          "«Без сна» из командной строки выключено: включите «„Без сна“ из командной строки» в Настройки → Автоматизация.")
+    }
+    static var automationAwakeRecovering: String {
+        t("Sleep is being restored right now; this cannot be interrupted. Try again in a moment.",
+          "Сейчас восстанавливается сон; это не прерывается. Повторите чуть позже.")
+    }
+    static var automationAwakeAlreadyOn: String {
+        t("Sleep is already disabled; the running session is kept.",
+          "Сон уже отключён; текущая сессия сохранена.")
+    }
+    static func automationAwakeAuthorizationPending(_ seconds: Int) -> String {
+        t("No administrator approval within \(seconds) s. The request stays open: sleep is disabled once it is approved.",
+          "За \(seconds) с подтверждения администратора нет. Запрос остаётся открытым: сон отключится, когда его подтвердят.")
+    }
+    static var automationAwakeCancelled: String {
+        t("Administrator approval was cancelled; sleep was not disabled.",
+          "Подтверждение администратора отменено; сон не отключён.")
+    }
+    static var automationAwakeStopped: String { t("Sleep was restored.", "Сон восстановлен.") }
+    static func automationAwakeOnFor(_ remaining: String) -> String {
+        t("Sleep is disabled for another \(remaining).", "Сон отключён ещё на \(remaining).")
+    }
+    static var automationAwakeOnIndefinitely: String {
+        t("Sleep is disabled until it is turned off.", "Сон отключён до выключения.")
+    }
+    static var automationAwakeOff: String { t("Keep-awake is off.", "«Без сна» выключено.") }
+
+    static var automationUsageNoAwakeAction: String {
+        t("No keep-awake action given: expected on, off or status.",
+          "Не указано действие «без сна»: нужно on, off или status.")
+    }
+    static func automationUsageUnknownAwakeAction(_ value: String) -> String {
+        t("Unknown keep-awake action “\(value)”: expected on, off or status.",
+          "Неизвестное действие «без сна» «\(value)»: нужно on, off или status.")
+    }
+    static var automationUsageForOnlyOn: String {
+        t("--for is only for awake on.", "--for — только для awake on.")
+    }
+    static func automationUsageBadDuration(_ value: String) -> String {
+        t("--for takes 0 (until turned off), seconds or 30m, 2h, 1h30m, 90s — up to 2h; got “\(value)”.",
+          "--for — 0 (до выключения), секунды или 30m, 2h, 1h30m, 90s — не больше 2h; получено «\(value)».")
+    }
+
     static var automationHelpText: String {
         let path = "/Applications/DevDeck.app/Contents/MacOS/DevDeck"
         let codes = """
-             \(AutomationExitCode.success)  succeeded, daemon up, alreadyRunning, openedInTerminal, stopped, status, list
-             \(AutomationExitCode.failed)  failed (including a cancelled sudo prompt); brightness not confirmed by the display
-             \(AutomationExitCode.timedOut)  timedOut — still running when the wait ran out (it keeps running); no brightness readback in \(AutomationLimits.brightnessWaitSeconds) s
-             \(AutomationExitCode.refused)  refused — automation off, not allowed, unknown or ambiguous name or display, port, proxy…
+             \(AutomationExitCode.success)  succeeded, daemon up, alreadyRunning, openedInTerminal, stopped, status, list; proxy chosen/up, check ok; sleep disabled/restored
+             \(AutomationExitCode.failed)  failed (including a cancelled sudo prompt); brightness not confirmed by the display; tunnel, bridge or share down; check failed; keep-awake not approved
+             \(AutomationExitCode.timedOut)  timedOut — still running when the wait ran out (it keeps running); no brightness readback in \(AutomationLimits.brightnessWaitSeconds) s; proxy or keep-awake still starting
+             \(AutomationExitCode.refused)  refused — automation off, not allowed, unknown or ambiguous name or display, port, proxy, credentials needed…
              \(AutomationExitCode.appNotRunning)  DevDeck is not running
              \(AutomationExitCode.communication)  could not talk to DevDeck
              \(AutomationExitCode.usage) usage error
@@ -272,6 +477,12 @@ extension L10n {
               \(path) automation brightness get [--display <name|id>]
               \(path) automation brightness set <0…100> [--display <name|id>]
               \(path) automation brightness up|down [STEP] [--display <name|id>]
+              \(path) automation proxy list | status | check
+              \(path) automation proxy use <name|UUID|none>
+              \(path) automation proxy share on|off|status
+              \(path) automation proxy share set [--port N] [--engine builtIn|gost] [--service-name S] [--auth on|off] [--username U]
+              \(path) automation awake on [--for 0|SECONDS|30m|2h|1h30m]
+              \(path) automation awake off | status
               \(path) automation help
 
             A name must match exactly (quote it if it has spaces); a UUID may be in any case.
@@ -288,6 +499,20 @@ extension L10n {
             up/down without STEP is one key press; STEP is in percent. Each display is a block of
             key: value lines (status applied|atLimit|failed|timedOut, display, id, method
             ddc|native|software|none, available, brightness, approxNits, confirmed, message).
+
+            proxy and awake also need their own switch in Settings → Automation. proxy use picks a LAN
+            proxy by its exact name or a remote (VDS) proxy by name or UUID, exactly like the popover:
+            a remote one starts its ssh tunnel and bridge (the answer waits up to \(AutomationLimits.proxyStartWaitSeconds) s), choosing a
+            LAN one stops them; none clears the choice. Passwords are never accepted: a LAN proxy
+            without saved credentials and --auth on without a saved share password are refused —
+            enter them on the Proxy page. Remote proxies are added and edited only in DevDeck.
+            proxy check probes the chosen proxy and prints the exit IP. share set saves the share and
+            restarts it if it is running, like Save on the Proxy page. awake on disables sleep after
+            administrator approval (Touch ID or password; the answer waits up to \(AutomationLimits.awakeStartWaitSeconds) s): --for is up to 2h,
+            0 means until awake off, without --for the duration chosen in DevDeck. Each proxy, the
+            share and keep-awake are blocks of key: value lines (proxy list: name, type lan|remote,
+            id, live, auth, active, endpoint; awake: status on|off|starting|stopping|recovering|failed,
+            durationSeconds, remainingSeconds, message).
 
             Output: key: value lines on stdout, errors on stderr; list prints kind<TAB>UUID<TAB>name.
 
@@ -308,6 +533,12 @@ extension L10n {
               \(path) automation brightness get [--display <имя|id>]
               \(path) automation brightness set <0…100> [--display <имя|id>]
               \(path) automation brightness up|down [ШАГ] [--display <имя|id>]
+              \(path) automation proxy list | status | check
+              \(path) automation proxy use <имя|UUID|none>
+              \(path) automation proxy share on|off|status
+              \(path) automation proxy share set [--port N] [--engine builtIn|gost] [--service-name S] [--auth on|off] [--username U]
+              \(path) automation awake on [--for 0|СЕКУНДЫ|30m|2h|1h30m]
+              \(path) automation awake off | status
               \(path) automation help
 
             Имя — точное совпадение (с пробелами — в кавычках); UUID — в любом регистре.
@@ -323,6 +554,20 @@ extension L10n {
             list, меняется только этот экран. up/down без ШАГА — одно нажатие клавиши; ШАГ в процентах.
             Каждый экран — блок строк key: value (status applied|atLimit|failed|timedOut, display, id,
             method ddc|native|software|none, available, brightness, approxNits, confirmed, message).
+
+            proxy и awake требуют ещё и своего переключателя в Настройки → Автоматизация. proxy use
+            выбирает LAN-прокси по точному имени или удалённый (VDS) по имени или UUID — так же, как
+            панель: для удалённого поднимаются ssh-туннель и мост (ответ ждёт до \(AutomationLimits.proxyStartWaitSeconds) с), выбор
+            LAN-прокси их гасит; none снимает выбор. Пароли не принимаются: LAN-прокси без сохранённых
+            учётных данных и --auth on без сохранённого пароля раздачи — отказ, их вводят на странице
+            «Прокси». Удалённые прокси добавляются и меняются только в DevDeck. proxy check проверяет
+            выбранный прокси и печатает exit IP. share set сохраняет раздачу и перезапускает её, если
+            она работает, как «Сохранить» на странице «Прокси». awake on отключает сон после
+            подтверждения администратора (Touch ID или пароль; ответ ждёт до \(AutomationLimits.awakeStartWaitSeconds) с): --for до 2h,
+            0 — до awake off, без --for — длительность, выбранная в DevDeck. Каждый прокси, раздача
+            и «без сна» — блоки строк key: value (proxy list: name, type lan|remote, id, live, auth,
+            active, endpoint; awake: status on|off|starting|stopping|recovering|failed,
+            durationSeconds, remainingSeconds, message).
 
             Вывод: строки key: value в stdout, ошибки — в stderr; list печатает тип<TAB>UUID<TAB>имя.
 

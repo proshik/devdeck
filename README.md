@@ -222,6 +222,37 @@ File: `~/Library/Application Support/DevDeck/config.json` (copied from the bundl
 }
 ```
 
+## Automation (command line)
+
+`DevDeck automation …` drives the running app from a terminal, a coding agent or Shortcuts
+("Run Shell Script"). It is off by default: turn on **Settings → Automation**. Commands and chains
+are reachable only when marked **Allow from Shortcuts**; proxy and keep-awake each need their own
+switch there as well. Shell strings and passwords are never accepted.
+
+```sh
+DD=/Applications/DevDeck.app/Contents/MacOS/DevDeck
+$DD automation list                              # allowed commands and chains
+$DD automation run|stop|status command|chain <name|UUID>
+$DD automation brightness list|get|set|up|down
+
+$DD automation proxy list                        # LAN and remote proxies: type, live, auth, active
+$DD automation proxy status                      # the chosen proxy, the share and its clients
+$DD automation proxy use <name|UUID|none>        # same as choosing it in the popover
+$DD automation proxy check                       # probe the chosen proxy, print the exit IP
+$DD automation proxy share on|off|status
+$DD automation proxy share set --port 9999 --engine builtIn --auth on --username ann
+
+$DD automation awake on --for 30m                # 0 = until `awake off`; at most 2h
+$DD automation awake off
+$DD automation awake status                      # on/off and the seconds left
+```
+
+Answers are `key: value` lines on stdout (errors on stderr), exit codes are 0 done, 1 failed,
+2 still running when the wait ran out, 3 refused, 4 DevDeck not running, 5 communication, 64 usage.
+A LAN proxy that needs credentials and a password-protected share take their password on the Proxy
+page only; remote proxies are added and edited there too. `awake on` asks for administrator
+approval like the popover button. `$DD automation help` has the details.
+
 ## Remote proxy over SSH
 
 When there is no second Mac to share from, egress through a **VDS** reachable over SSH — a server in

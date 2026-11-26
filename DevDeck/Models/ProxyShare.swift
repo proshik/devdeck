@@ -3,7 +3,7 @@ import Foundation
 /// Which implementation serves the share. `builtIn` is the default: an in-process HTTP
 /// CONNECT/absolute-form listener with no external dependency. `gost` remains for peers
 /// that need SOCKS.
-enum ProxyEngine: String, Codable, CaseIterable {
+enum ProxyEngine: String, Codable, CaseIterable, Sendable {
     case builtIn, gost
 }
 

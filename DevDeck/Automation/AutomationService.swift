@@ -18,6 +18,14 @@ enum AutomationLimits {
     static let readinessWaitSeconds = 15
     /// How long `DevDeck automation brightness set|up|down` waits for the display's readback.
     static let brightnessWaitSeconds = 10
+    /// How long `proxy use <remote>` and `proxy share on|set` wait for their daemons to come up.
+    static let proxyStartWaitSeconds = 15
+    /// How long `proxy check` waits for the probe (one curl with a 5 s limit).
+    static let proxyCheckWaitSeconds = 15
+    /// How long `awake on` waits: the administrator prompt needs a person.
+    static let awakeStartWaitSeconds = 45
+    /// How long `awake off` waits for the helper to restore sleep (it polls its lease every 2 s).
+    static let awakeStopWaitSeconds = 15
 
     static func timeout(seconds: Int?) -> Duration {
         .seconds(min(max(seconds ?? defaultTimeoutSeconds, minTimeoutSeconds), maxTimeoutSeconds))
@@ -50,6 +58,24 @@ enum AutomationRefusal: Error, Equatable, LocalizedError {
     case displayUnsupported(String, [String])
     case unknownDisplay(String, [String])
     case ambiguousDisplay(String, [String])
+    /// `proxy …` / `awake …` while their own switch in Settings → Automation is off.
+    case proxyAutomationDisabled
+    case awakeAutomationDisabled
+    /// `proxy use`: lists are `type<TAB>name<TAB>id`; `discoveryOn` explains an empty LAN half.
+    case unknownProxy(String, [String], discoveryOn: Bool)
+    case ambiguousProxy(String, [String])
+    case proxyCredentialsMissing(String)
+    case remoteTunnelMissing(String)
+    /// `proxy check` found nothing to probe; the reason is the popover's own wording.
+    case proxyCheckUnavailable(String)
+    case gostMissing
+    /// `--auth on` / `share on` with auth: the Keychain has no share password, or no username is set.
+    case sharePasswordMissing
+    case shareUsernameMissing
+    /// `awake on` under serious/critical thermal pressure.
+    case awakeThermal
+    /// `awake on|off` while "Restore sleep" runs: it cannot be interrupted.
+    case awakeRecovering
 
     var message: String {
         switch self {
@@ -72,6 +98,19 @@ enum AutomationRefusal: Error, Equatable, LocalizedError {
         case .displayUnsupported(let name, let displays): L10n.automationDisplayUnsupported(name, displays)
         case .unknownDisplay(let query, let displays): L10n.automationUnknownDisplay(query, displays)
         case .ambiguousDisplay(let query, let displays): L10n.automationAmbiguousDisplay(query, displays)
+        case .proxyAutomationDisabled: L10n.automationProxyDisabled
+        case .awakeAutomationDisabled: L10n.automationAwakeDisabled
+        case .unknownProxy(let query, let proxies, let discoveryOn):
+            L10n.automationUnknownProxy(query, proxies, discoveryOn: discoveryOn)
+        case .ambiguousProxy(let query, let proxies): L10n.automationAmbiguousProxy(query, proxies)
+        case .proxyCredentialsMissing(let name): L10n.automationProxyCredentialsMissing(name)
+        case .remoteTunnelMissing(let name): L10n.automationRemoteTunnelMissing(name)
+        case .proxyCheckUnavailable(let reason): reason
+        case .gostMissing: L10n.gostNotFound
+        case .sharePasswordMissing: L10n.automationSharePasswordMissing
+        case .shareUsernameMissing: L10n.automationShareUsernameMissing
+        case .awakeThermal: L10n.awakeThermalStop
+        case .awakeRecovering: L10n.automationAwakeRecovering
         }
     }
 
@@ -462,7 +501,7 @@ final class AutomationService {
 
     private static func seconds(_ duration: Duration) -> Int { Int(duration.components.seconds) }
 
-    private static func describe(_ state: ProcessManager.RunState?) -> String {
+    static func describe(_ state: ProcessManager.RunState?) -> String {
         switch state {
         case nil, .idle?: "idle"
         case .running?: "running"
