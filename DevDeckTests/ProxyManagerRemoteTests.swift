@@ -138,6 +138,47 @@ final class ProxyManagerRemoteTests: XCTestCase {
         XCTAssertNotEqual(first.id, second.id)
     }
 
+    /// Two remote proxies on the same ports (the add form's defaults): the new tunnel starts only
+    /// once the old one has exited, so the port pre-check does not see the old ssh and refuse.
+    func testSwitchingBetweenRemotesOnTheSamePortsWaitsForTheOldPair() async throws {
+        let rig = makeRig()
+        rig.runner.autoTerminateOnStopCode = nil   // read at launch: the old pair takes its time to exit
+        addAndSelect(rig)
+        await rig.bringBothUp()
+        let firstTunnel = try XCTUnwrap(rig.tunnelController)
+        rig.manager.addRemoteProxy(name: "vds2", destination: "user@vds2", localPort: 18888, socksPort: 1080)
+        let second = try XCTUnwrap(rig.store.config.remoteProxies.first { $0.name == "vds2" })
+
+        rig.manager.setActiveRemoteProxy(second)
+        try? await Task.sleep(for: .milliseconds(150))
+        XCTAssertFalse(rig.runner.startedCommandIDs.contains(second.tunnelCommandID!),
+                       "the new tunnel must not start while the old one still holds the port")
+
+        firstTunnel.terminate(143)
+        rig.bridgeController?.terminate(0)
+        await sleepUntil({ rig.runner.startedCommandIDs.contains(second.tunnelCommandID!) },
+                         message: "the new tunnel did not start after the old one exited")
+        XCTAssertNil(rig.processManager.portConflicts[second.tunnelCommandID!])
+        XCTAssertEqual(rig.store.config.settings.activeRemoteProxyID, second.id)
+    }
+
+    /// Deselecting while a switch waits for the old pair: nothing starts afterwards.
+    func testDeselectDuringASwitchStartsNothing() async throws {
+        let rig = makeRig()
+        rig.runner.autoTerminateOnStopCode = nil   // read at launch: the old pair takes its time to exit
+        addAndSelect(rig)
+        await rig.bringBothUp()
+        rig.manager.addRemoteProxy(name: "vds2", destination: "user@vds2", localPort: 18889, socksPort: 1081)
+        let second = try XCTUnwrap(rig.store.config.remoteProxies.first { $0.name == "vds2" })
+        let tunnel = try XCTUnwrap(rig.tunnelController)
+        rig.manager.setActiveRemoteProxy(second)
+        rig.manager.setActiveRemoteProxy(nil)
+        tunnel.terminate(143)
+        rig.bridgeController?.terminate(0)
+        try? await Task.sleep(for: .milliseconds(200))
+        XCTAssertFalse(rig.runner.startedCommandIDs.contains(second.tunnelCommandID!))
+    }
+
     func testSelectingStartsTunnelAndBridge() async {
         let rig = makeRig()
         addAndSelect(rig)

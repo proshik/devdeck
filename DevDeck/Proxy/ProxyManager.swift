@@ -88,6 +88,8 @@ final class ProxyManager {
     private(set) var clientCheck: ClientCheck = .idle
 
     @ObservationIgnored private var discoveryTask: Task<Void, Never>?
+    /// How long a switch between remote proxies waits for the previous pair to stop.
+    @ObservationIgnored private let remoteSwitchWait: Duration
     /// Token of the in-flight exit-IP probe — a restart preempts an older, slower probe.
     @ObservationIgnored private var exitIPToken: UUID?
     /// Same preemption for the client-side check: a proxy switch must orphan a probe still out.
@@ -106,7 +108,9 @@ final class ProxyManager {
         lanIP: @escaping () -> String? = { currentLANIPv4() },
         gostPath: @escaping (ProxyShare) -> String? = { $0.gostPath },
         exitIPProbe: @escaping @Sendable (String) -> String? = { proxyURL in
-            ProcessTree.run("/usr/bin/curl", ["-s", "--max-time", "5", "-x", proxyURL, "https://api.ipify.org"])
+            // `--noproxy ''`: an inherited NO_PROXY must not let the probe bypass the proxy it proves.
+            ProcessTree.run("/usr/bin/curl", ["-s", "--max-time", "5", "--noproxy", "", "-x", proxyURL,
+                                              "https://api.ipify.org"])
         },
         exitIPAttempts: Int = 4,
         exitIPRetryDelay: Duration = .seconds(1),
@@ -114,8 +118,10 @@ final class ProxyManager {
         shareConfigFile: any PrivateFileWriting = LivePrivateFile(url: ProxyShare.configURL),
         bridgeConfigFile: any PrivateFileWriting = LivePrivateFile(url: RemoteProxy.bridgeConfigURL),
         browserLauncher: @escaping @MainActor ([String]) -> Bool = { launchProxyBrowser(arguments: $0) },
-        clientMonitor: ProxyClientMonitor = ProxyClientMonitor()
+        clientMonitor: ProxyClientMonitor = ProxyClientMonitor(),
+        remoteSwitchWait: Duration = .seconds(5)
     ) {
+        self.remoteSwitchWait = remoteSwitchWait
         self.discovering = discovering
         self.advertiser = advertiser
         self.credentials = credentials
@@ -328,15 +334,37 @@ final class ProxyManager {
             stopRemote()
             return
         }
+        let previous = activeRemoteProxy
+        guard let previous, previous.id != remote.id else {
+            store?.setActiveRemoteProxy(id: remote.id)
+            startRemote()
+            return
+        }
         // Switching from ANOTHER remote proxy: its tunnel must not outlive the selection, and the
         // bridge — one synthetic daemon shared by every remote proxy — must come back on the new
         // proxy's ports. Stop BEFORE the store changes the id (stopRemote resolves the tunnel
-        // through the current selection), then force the relaunch for the same reason as
-        // `saveRemoteProxy`: right after `stop`, `states[]` still reads `.daemonRunning`.
-        let switching = store?.config.settings.activeRemoteProxyID.map { $0 != remote.id } ?? false
-        if switching { stopRemote() }
+        // through the current selection).
+        stopRemote()
         store?.setActiveRemoteProxy(id: remote.id)
-        startRemote(forceRestart: switching)
+        // The new pair usually wants the very same ports (the add form proposes the same defaults),
+        // so it starts only once the old one has let go of them: the port pre-check would see the
+        // old ssh still bound and refuse, and the bridge would race its predecessor's socket.
+        let stopping = [previous.tunnelCommandID, RemoteProxy.bridgeDaemonID].compactMap { $0 }
+        let wait = remoteSwitchWait
+        Task { @MainActor [weak self] in
+            let deadline = ContinuousClock.now + wait
+            while let manager = self, stopping.contains(where: manager.isUp), ContinuousClock.now < deadline {
+                try? await Task.sleep(for: .milliseconds(50))
+            }
+            guard let self, self.store?.config.settings.activeRemoteProxyID == remote.id else { return }
+            // forceRestart: a daemon still up after the wait is preempted rather than kept.
+            self.startRemote(forceRestart: true)
+            self.refreshDerivedState()
+        }
+    }
+
+    private func isUp(_ id: UUID) -> Bool {
+        processManager?.states[id] == .running || processManager?.states[id] == .daemonRunning
     }
 
     /// Save edits to a remote proxy; a live pair is restarted so a port change takes effect.

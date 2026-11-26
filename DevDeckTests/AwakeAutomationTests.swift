@@ -174,6 +174,38 @@ final class AwakeAutomationTests: XCTestCase {
         runner.controller(for: AwakeHelper.daemonID)?.terminate(0)
     }
 
+    func testOnWhileAuthorizationIsPendingWaitsForTheSameSession() async throws {
+        model.start()   // the popover asked; its prompt is open
+        let response = Task { await self.handle(.on, seconds: 60) }
+        try await Task.sleep(for: .milliseconds(50))
+        XCTAssertEqual(runner.startedCommandIDs.count, 1, "no second helper")
+        readySince = now
+        try XCTUnwrap(runner.controller(for: AwakeHelper.daemonID)).started(pid: nil)
+        let result = await response.value
+        XCTAssertEqual(result.exitCode, AutomationExitCode.success)
+        XCTAssertEqual(fields(result)["status"], "on")
+    }
+
+    func testOnWhileAuthorizationIsPendingFailsWhenItIsCancelled() async throws {
+        model.start()
+        let response = Task { await self.handle(.on) }
+        try await Task.sleep(for: .milliseconds(50))
+        try XCTUnwrap(runner.controller(for: AwakeHelper.daemonID)).cancel()
+        let result = await response.value
+        XCTAssertEqual(result.exitCode, AutomationExitCode.failed)
+    }
+
+    func testOffWithAnUnrestoredJournalIsNotASuccess() async {
+        let journaled = AwakeModel(manager: ProcessManager(runner: runner, notifier: FakeNotifier()),
+                                   hasJournal: { true })
+        let automation = AwakeAutomation(model: journaled, config: { [unowned self] in self.config },
+                                         pollInterval: .milliseconds(5))
+        let off = await automation.handle(AutomationAwakeRequest(action: .off))
+        XCTAssertEqual(off.exitCode, AutomationExitCode.failed)
+        XCTAssertEqual(fields(off)["recoveryAvailable"], "yes")
+        XCTAssertEqual(fields(off)["message"], L10n.awakeRestoreFailed)
+    }
+
     func testHandMadeDurationsAreValidatedAppSide() async {
         for seconds in [-1, 7201] {
             let response = await handle(.on, seconds: seconds)

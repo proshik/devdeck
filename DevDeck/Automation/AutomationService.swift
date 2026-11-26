@@ -76,6 +76,8 @@ enum AutomationRefusal: Error, Equatable, LocalizedError {
     case awakeThermal
     /// `awake on|off` while "Restore sleep" runs: it cannot be interrupted.
     case awakeRecovering
+    /// A proxy change while config.json cannot be saved (it does not decode, or the write failed).
+    case configNotSaved(String)
 
     var message: String {
         switch self {
@@ -111,6 +113,7 @@ enum AutomationRefusal: Error, Equatable, LocalizedError {
         case .shareUsernameMissing: L10n.automationShareUsernameMissing
         case .awakeThermal: L10n.awakeThermalStop
         case .awakeRecovering: L10n.automationAwakeRecovering
+        case .configNotSaved(let detail): L10n.automationConfigNotSaved(detail)
         }
     }
 

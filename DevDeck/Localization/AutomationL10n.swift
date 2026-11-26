@@ -431,7 +431,15 @@ extension L10n {
         t("Sleep is disabled for another \(remaining).", "Сон отключён ещё на \(remaining).")
     }
     static var automationAwakeOnIndefinitely: String {
-        t("Sleep is disabled until it is turned off.", "Сон отключён до выключения.")
+        t("Sleep is disabled with no timer.", "Сон отключён без таймера.")
+    }
+    static func automationConfigNotSaved(_ detail: String) -> String {
+        t("DevDeck cannot save config.json right now, so nothing was changed: \(detail)",
+          "DevDeck сейчас не может сохранить config.json, поэтому ничего не изменено: \(detail)")
+    }
+    static var automationShareSuperseded: String {
+        t("Another change of the share settings replaced this one while the listener was restarting.",
+          "Пока listener перезапускался, эти настройки раздачи заменило другое изменение.")
     }
     static var automationAwakeOff: String { t("Keep-awake is off.", "«Без сна» выключено.") }
 
@@ -447,8 +455,8 @@ extension L10n {
         t("--for is only for awake on.", "--for — только для awake on.")
     }
     static func automationUsageBadDuration(_ value: String) -> String {
-        t("--for takes 0 (until turned off), seconds or 30m, 2h, 1h30m, 90s — up to 2h; got “\(value)”.",
-          "--for — 0 (до выключения), секунды или 30m, 2h, 1h30m, 90s — не больше 2h; получено «\(value)».")
+        t("--for takes 0 (no timer), seconds or 30m, 2h, 1h30m, 90s — up to 2h; got “\(value)”.",
+          "--for — 0 (без таймера), секунды или 30m, 2h, 1h30m, 90s — не больше 2h; получено «\(value)».")
     }
 
     static var automationHelpText: String {
@@ -506,10 +514,12 @@ extension L10n {
             LAN one stops them; none clears the choice. Passwords are never accepted: a LAN proxy
             without saved credentials and --auth on without a saved share password are refused —
             enter them on the Proxy page. Remote proxies are added and edited only in DevDeck.
-            proxy check probes the chosen proxy and prints the exit IP. share set saves the share and
+            proxy check probes the chosen proxy and prints the exit IP; "up" elsewhere means the
+            daemons run, as in the popover, and only check proves the route. share set saves the share and
             restarts it if it is running, like Save on the Proxy page. awake on disables sleep after
             administrator approval (Touch ID or password; the answer waits up to \(AutomationLimits.awakeStartWaitSeconds) s): --for is up to 2h,
-            0 means until awake off, without --for the duration chosen in DevDeck. Each proxy, the
+            0 means no timer (quitting DevDeck, 20% battery or heat still end it), without --for the
+            duration chosen in DevDeck. Each proxy, the
             share and keep-awake are blocks of key: value lines (proxy list: name, type lan|remote,
             id, live, auth, active, endpoint; awake: status on|off|starting|stopping|recovering|failed,
             durationSeconds, remainingSeconds, message).
@@ -561,10 +571,12 @@ extension L10n {
             LAN-прокси их гасит; none снимает выбор. Пароли не принимаются: LAN-прокси без сохранённых
             учётных данных и --auth on без сохранённого пароля раздачи — отказ, их вводят на странице
             «Прокси». Удалённые прокси добавляются и меняются только в DevDeck. proxy check проверяет
-            выбранный прокси и печатает exit IP. share set сохраняет раздачу и перезапускает её, если
+            выбранный прокси и печатает exit IP; «поднялся» в остальных ответах значит «демоны работают»,
+            как в панели, а маршрут доказывает только check. share set сохраняет раздачу и перезапускает её, если
             она работает, как «Сохранить» на странице «Прокси». awake on отключает сон после
             подтверждения администратора (Touch ID или пароль; ответ ждёт до \(AutomationLimits.awakeStartWaitSeconds) с): --for до 2h,
-            0 — до awake off, без --for — длительность, выбранная в DevDeck. Каждый прокси, раздача
+            0 — без таймера (выход из DevDeck, 20% заряда или перегрев всё равно завершают), без --for —
+            длительность, выбранная в DevDeck. Каждый прокси, раздача
             и «без сна» — блоки строк key: value (proxy list: name, type lan|remote, id, live, auth,
             active, endpoint; awake: status on|off|starting|stopping|recovering|failed,
             durationSeconds, remainingSeconds, message).

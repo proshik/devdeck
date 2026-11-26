@@ -146,7 +146,7 @@ enum AutomationCLI {
                     directory = absolute(value, from: currentDirectory)
                 }
             default:
-                if arg.hasPrefix("--") { return usage(L10n.automationUsageUnknownOption(arg)) }
+                if arg.hasPrefix("--") { return usage(L10n.automationUsageUnknownOption(optionName(arg))) }
                 positional.append(arg)
             }
         }
@@ -197,7 +197,7 @@ enum AutomationCLI {
             case "--directory", "--timeout":
                 return failure(L10n.automationUsageOptionNotApplicable(arg))
             default:
-                if arg.hasPrefix("--") { return failure(L10n.automationUsageUnknownOption(arg)) }
+                if arg.hasPrefix("--") { return failure(L10n.automationUsageUnknownOption(optionName(arg))) }
                 positional.append(arg)
             }
         }
@@ -239,12 +239,12 @@ enum AutomationCLI {
         var rest = Array(args.dropFirst())
         switch first {
         case "list", "status", "check":
-            if let extra = rest.first { return failure(extra.hasPrefix("--") ? L10n.automationUsageUnknownOption(extra)
+            if let extra = rest.first { return failure(extra.hasPrefix("--") ? L10n.automationUsageUnknownOption(optionName(extra))
                                                                               : L10n.automationUsageExtraArgument(extra)) }
             let action: AutomationProxyRequest.Action = first == "list" ? .list : first == "status" ? .status : .check
             return request(AutomationProxyRequest(action: action))
         case "use":
-            if let option = rest.first(where: { $0.hasPrefix("--") }) { return failure(L10n.automationUsageUnknownOption(option)) }
+            if let option = rest.first(where: { $0.hasPrefix("--") }) { return failure(L10n.automationUsageUnknownOption(optionName(option))) }
             guard let target = rest.first, !target.trimmingCharacters(in: .whitespaces).isEmpty else {
                 return failure(L10n.automationUsageMissingProxy)
             }
@@ -256,7 +256,7 @@ enum AutomationCLI {
             switch sub {
             case "on", "off", "status":
                 if let extra = rest.first {
-                    return failure(extra.hasPrefix("--") ? L10n.automationUsageUnknownOption(extra)
+                    return failure(extra.hasPrefix("--") ? L10n.automationUsageUnknownOption(optionName(extra))
                                                          : L10n.automationUsageExtraArgument(extra))
                 }
                 let action: AutomationProxyRequest.Action = sub == "on" ? .shareOn : sub == "off" ? .shareOff : .shareStatus
@@ -266,7 +266,7 @@ enum AutomationCLI {
                 var queue = rest[...]
                 while let arg = queue.popFirst() {
                     guard ["--port", "--engine", "--service-name", "--auth", "--username"].contains(arg) else {
-                        return failure(arg.hasPrefix("--") ? L10n.automationUsageUnknownOption(arg)
+                        return failure(arg.hasPrefix("--") ? L10n.automationUsageUnknownOption(optionName(arg))
                                                            : L10n.automationUsageExtraArgument(arg))
                     }
                     // An empty service name or username is a value: the host name, no username.
@@ -314,7 +314,7 @@ enum AutomationCLI {
         var rest = args.dropFirst()[...]
         while let arg = rest.popFirst() {
             guard arg == "--for" else {
-                return failure(arg.hasPrefix("--") ? L10n.automationUsageUnknownOption(arg) : L10n.automationUsageExtraArgument(arg))
+                return failure(arg.hasPrefix("--") ? L10n.automationUsageUnknownOption(optionName(arg)) : L10n.automationUsageExtraArgument(arg))
             }
             guard action == .on else { return failure(L10n.automationUsageForOnlyOn) }
             guard let value = rest.popFirst(), !value.isEmpty else { return failure(L10n.automationUsageMissingValue(arg)) }
@@ -353,6 +353,11 @@ enum AutomationCLI {
         guard digits.isEmpty, lastUnit != Int.max else { return nil }
         // Only a bare `0` means indefinitely: `0m` reads as a mistake.
         return (1...AwakeModel.maxSeconds).contains(total) ? total : nil
+    }
+
+    /// `--name=value` is echoed as `--name`: the value of an unknown option may be a password.
+    private static func optionName(_ argument: String) -> String {
+        argument.split(separator: "=", maxSplits: 1).first.map(String.init) ?? argument
     }
 
     private static func absolute(_ path: String, from currentDirectory: String) -> String {

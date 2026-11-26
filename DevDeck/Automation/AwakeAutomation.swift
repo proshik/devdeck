@@ -57,14 +57,15 @@ final class AwakeAutomation {
         if model.isBusy {
             if model.recovering { throw AutomationRefusal.awakeRecovering }
             if model.stopping { return AutomationFields.response([block()], code: AutomationExitCode.failed) }
-            // Already on or waiting for authorization: not started twice, the running session is kept.
-            return AutomationFields.response([block(message: model.isActive ? L10n.automationAwakeAlreadyOn
-                                                                            : L10n.awakeStarting)])
-        }
-        model.start(seconds: seconds)
-        guard model.isBusy else {
-            if model.thermalStop { throw AutomationRefusal.awakeThermal }
-            return AutomationFields.response([block()], code: AutomationExitCode.failed)
+            // Already on: not started twice, the running session is kept.
+            if model.isActive { return AutomationFields.response([block(message: L10n.automationAwakeAlreadyOn)]) }
+            // Waiting for an approval someone else asked for: wait for that same session below.
+        } else {
+            model.start(seconds: seconds)
+            guard model.isBusy else {
+                if model.thermalStop { throw AutomationRefusal.awakeThermal }
+                return AutomationFields.response([block()], code: AutomationExitCode.failed)
+            }
         }
         let deadline = ContinuousClock.now + startWait
         while model.isBusy, !model.isActive, ContinuousClock.now < deadline {
@@ -81,7 +82,11 @@ final class AwakeAutomation {
     }
 
     private func off() async throws -> AutomationResponse {
-        guard model.isBusy else { return AutomationFields.response([block()]) }
+        guard model.isBusy else {
+            // A helper that died mid-session leaves its journal: sleep may still be disabled.
+            let code = model.recoveryAvailable || model.error != nil ? AutomationExitCode.failed : AutomationExitCode.success
+            return AutomationFields.response([block()], code: code)
+        }
         if model.recovering { throw AutomationRefusal.awakeRecovering }
         model.stop()
         let deadline = ContinuousClock.now + stopWait
@@ -119,8 +124,8 @@ final class AwakeAutomation {
             status = "failed"; message = L10n.awakeError
         } else {
             status = "off"
-            message = model.error.map { _ in L10n.awakeRestoreFailed }
-                ?? (model.thermalStop ? L10n.awakeThermalStop : L10n.automationAwakeOff)
+            message = model.error != nil || model.recoveryAvailable ? L10n.awakeRestoreFailed
+                : model.thermalStop ? L10n.awakeThermalStop : L10n.automationAwakeOff
         }
         fields.add("status", status)
         fields.add("state", AutomationService.describe(model.state))

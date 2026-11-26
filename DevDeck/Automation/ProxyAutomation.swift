@@ -69,13 +69,32 @@ final class ProxyAutomation {
 
     private var processManager: ProcessManager? { proxy.processManager }
 
+    /// The LAN proxies the UI lists. `visibleProxies` also carries the active proxy when it is not
+    /// live — for a remote choice that is its synthetic loopback entry, which is not a LAN proxy.
+    private var lanProxies: [DiscoveredProxy] {
+        proxy.activeRemoteProxy == nil ? proxy.visibleProxies : proxy.discovered
+    }
+
+    /// A change the store cannot save must not be reported as done: refuse up front while
+    /// config.json does not decode (the store then keeps every change in memory only).
+    private func requireWritableConfig() throws {
+        guard let store = proxy.store, store.isFileDamaged else { return }
+        throw AutomationRefusal.configNotSaved(store.error ?? L10n.configChangesNotSaved)
+    }
+
+    /// After a change: the store reports a failed write through `error` and keeps the old config.
+    private func notSaved() -> AutomationResponse {
+        AutomationResponse(exitCode: AutomationExitCode.failed, stdout: "",
+                           stderr: AutomationRefusal.configNotSaved(proxy.store?.error ?? L10n.configChangesNotSaved).message)
+    }
+
     // MARK: list / status
 
     private func list() -> AutomationResponse {
         let config = config()
         let settings = config.settings
         var blocks: [AutomationFields] = []
-        for found in proxy.visibleProxies {
+        for found in lanProxies {
             var fields = AutomationFields()
             fields.add("name", found.name)
             fields.add("type", "lan")
@@ -201,10 +220,13 @@ final class ProxyAutomation {
     }
 
     private func use(_ target: String) async throws -> AutomationResponse {
+        try requireWritableConfig()
         if target == AutomationProxyRequest.noneTarget {
             let settings = config().settings
             if settings.activeRemoteProxyID != nil { proxy.setActiveRemoteProxy(nil) }
             if settings.activeProxyName != nil { proxy.setActiveProxy(nil) }
+            let after = config().settings
+            guard after.activeRemoteProxyID == nil, after.activeProxyName == nil else { return notSaved() }
             return AutomationFields.response([clientBlock(message: L10n.automationProxyCleared)])
         }
         switch try resolve(target) {
@@ -214,10 +236,12 @@ final class ProxyAutomation {
                 throw AutomationRefusal.proxyCredentialsMissing(found.name)
             }
             proxy.setActiveProxy(found)
+            guard config().settings.activeProxyName == found.name else { return notSaved() }
             return AutomationFields.response([clientBlock()])
         case .remote(let remote):
             guard let tunnel = tunnel(of: remote) else { throw AutomationRefusal.remoteTunnelMissing(remote.name) }
             proxy.setActiveRemoteProxy(remote)
+            guard config().settings.activeRemoteProxyID == remote.id else { return notSaved() }
             return try await awaitRemote(remote, tunnelID: tunnel.id)
         }
     }
@@ -225,7 +249,7 @@ final class ProxyAutomation {
     /// A name among the LAN proxies the UI lists and the remote proxies, or a remote proxy's UUID.
     private func resolve(_ query: String) throws -> Choice {
         let config = config()
-        let lan = proxy.visibleProxies.filter { $0.name == query }.map(Choice.lan)
+        let lan = lanProxies.filter { $0.name == query }.map(Choice.lan)
         let remote: [Choice]
         if let id = UUID(uuidString: query.trimmingCharacters(in: .whitespaces)),
            let match = config.remoteProxies.first(where: { $0.id == id }) {
@@ -236,7 +260,7 @@ final class ProxyAutomation {
         let matches = lan + remote
         switch matches.count {
         case 0:
-            let all = proxy.visibleProxies.map(Choice.lan) + config.remoteProxies.map(Choice.remote)
+            let all = lanProxies.map(Choice.lan) + config.remoteProxies.map(Choice.remote)
             throw AutomationRefusal.unknownProxy(query, all.map(Self.listing),
                                                  discoveryOn: config.settings.proxyDiscoveryEnabled)
         case 1: return matches[0]
@@ -300,7 +324,15 @@ final class ProxyAutomation {
         }
         var fields = AutomationFields()
         let code: Int32
-        switch proxy.clientCheck {
+        // The result is the shared check row's: another check of another proxy may have replaced it.
+        let checked = proxy.clientCheck
+        if proxy.activeProxy?.name != name, checked != .running {
+            fields.add("status", "failed")
+            fields.add("proxy", name)
+            fields.add("message", L10n.automationProxySelectionChanged)
+            return AutomationFields.response([fields], code: AutomationExitCode.failed)
+        }
+        switch checked {
         case .success(let ip):
             fields.add("status", "ok")
             fields.add("proxy", name)
@@ -318,7 +350,7 @@ final class ProxyAutomation {
             // `.idle`: the selection changed while the probe was out, which orphans it.
             fields.add("status", "failed")
             fields.add("proxy", name)
-            fields.add("message", proxy.clientCheck == .idle ? L10n.automationProxySelectionChanged
+            fields.add("message", checked == .idle ? L10n.automationProxySelectionChanged
                                                              : L10n.automationProxyCheckFailed(name ?? ""))
             code = AutomationExitCode.failed
         }
@@ -330,23 +362,40 @@ final class ProxyAutomation {
     private var shareIsUp: Bool { proxy.shareState == .running || proxy.shareState == .daemonRunning }
 
     private func shareOn() async throws -> AutomationResponse {
+        // Checked for a running share too: one started from the UI with auth but no username is open.
+        try requireStartable(config().proxy)
         if config().settings.proxyShareEnabled, proxy.shareState == .daemonRunning {
             return AutomationFields.response([shareBlock(message: L10n.automationShareAlreadyOn(config().proxy.port))])
         }
-        try requireStartable(config().proxy)
+        try requireWritableConfig()
+        // Turned off but still stopping: `startShare` would take the dying listener for a live one.
+        if !config().settings.proxyShareEnabled, shareIsUp {
+            try await waitWhileShareIsUp()
+            if shareIsUp {
+                return AutomationFields.response([shareBlock(message: L10n.automationShareStopPending)],
+                                                 code: AutomationExitCode.timedOut)
+            }
+        }
         proxy.setShareEnabled(true)
+        guard config().settings.proxyShareEnabled else { return notSaved() }
         return try await awaitShare()
+    }
+
+    private func waitWhileShareIsUp() async throws {
+        let deadline = ContinuousClock.now + stopWait
+        while shareIsUp, ContinuousClock.now < deadline {
+            try await Task.sleep(for: pollInterval)
+        }
     }
 
     private func shareOff() async throws -> AutomationResponse {
         guard config().settings.proxyShareEnabled || shareIsUp else {
             return AutomationFields.response([shareBlock()])
         }
+        try requireWritableConfig()
         proxy.setShareEnabled(false)
-        let deadline = ContinuousClock.now + stopWait
-        while shareIsUp, ContinuousClock.now < deadline {
-            try await Task.sleep(for: pollInterval)
-        }
+        guard !config().settings.proxyShareEnabled else { return notSaved() }
+        try await waitWhileShareIsUp()
         if shareIsUp {
             return AutomationFields.response([shareBlock(message: L10n.automationShareStopPending)],
                                              code: AutomationExitCode.timedOut)
@@ -366,13 +415,21 @@ final class ProxyAutomation {
         guard updated != saved else {
             return AutomationFields.response([shareBlock(restarted: false, message: L10n.automationShareUnchanged)])
         }
+        try requireWritableConfig()
         // `saveShare` restarts exactly when the Proxy page's Save would: enabled and up.
         let restarts = config().settings.proxyShareEnabled && shareIsUp
         proxy.saveShare(updated)
+        guard config().proxy == updated else { return notSaved() }
         guard restarts else {
             return AutomationFields.response([shareBlock(restarted: false, message: L10n.automationShareSaved)])
         }
-        return try await awaitShare(restarted: true)
+        let response = try await awaitShare(restarted: true)
+        // Another change replaced this one while its listener was coming up.
+        guard config().proxy == updated else {
+            return AutomationFields.response([shareBlock(restarted: true, message: L10n.automationShareSuperseded)],
+                                             code: AutomationExitCode.failed)
+        }
+        return response
     }
 
     /// What a person must fix in the UI before this share can start: gost, the password, the username.
@@ -437,7 +494,6 @@ final class ProxyAutomation {
         }
     }
 
-    private static func oneLine(_ text: String) -> String {
-        text.replacingOccurrences(of: "\t", with: " ").replacingOccurrences(of: "\n", with: " ")
-    }
+    /// Tabs separate the columns, so they go too (with every other control character).
+    private static func oneLine(_ text: String) -> String { AutomationFields.printable(text) }
 }

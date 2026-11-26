@@ -7,7 +7,15 @@ struct AutomationFields: Equatable {
 
     mutating func add(_ key: String, _ value: CustomStringConvertible?) {
         guard let value else { return }
-        lines.append("\(key): " + value.description.replacingOccurrences(of: "\n", with: " "))
+        lines.append("\(key): " + Self.printable(value.description))
+    }
+
+    /// One line, without control characters: names and addresses can come from a Bonjour
+    /// announcement on the network, and an escape sequence must not reach the terminal.
+    static func printable(_ text: String) -> String {
+        String(String.UnicodeScalarView(text.unicodeScalars.map {
+            $0.properties.generalCategory == .control ? " " : $0
+        }))
     }
 
     mutating func add(_ key: String, yes value: Bool?) {

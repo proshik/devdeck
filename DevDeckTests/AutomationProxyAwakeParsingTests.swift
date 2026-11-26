@@ -81,6 +81,10 @@ final class AutomationProxyAwakeParsingTests: XCTestCase {
                        L10n.automationUsage(L10n.automationUsageUnknownOption("--password")),
                        "passwords are never accepted")
         XCTAssertNotNil(usage(["proxy", "share", "set", "9999"]))
+        XCTAssertEqual(usage(["proxy", "share", "set", "--password=hunter2"]),
+                       L10n.automationUsage(L10n.automationUsageUnknownOption("--password")),
+                       "the value of an unknown option is never echoed")
+        XCTAssertFalse(usage(["run", "command", "x", "--token=hunter2"])?.contains("hunter2") ?? true)
     }
 
     // MARK: awake

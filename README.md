@@ -242,7 +242,7 @@ $DD automation proxy check                       # probe the chosen proxy, print
 $DD automation proxy share on|off|status
 $DD automation proxy share set --port 9999 --engine builtIn --auth on --username ann
 
-$DD automation awake on --for 30m                # 0 = until `awake off`; at most 2h
+$DD automation awake on --for 30m                # at most 2h; 0 = no timer
 $DD automation awake off
 $DD automation awake status                      # on/off and the seconds left
 ```
@@ -251,7 +251,9 @@ Answers are `key: value` lines on stdout (errors on stderr), exit codes are 0 do
 2 still running when the wait ran out, 3 refused, 4 DevDeck not running, 5 communication, 64 usage.
 A LAN proxy that needs credentials and a password-protected share take their password on the Proxy
 page only; remote proxies are added and edited there too. `awake on` asks for administrator
-approval like the popover button. `$DD automation help` has the details.
+approval like the popover button; without a timer the session still ends when DevDeck quits, at 20%
+battery or under heat. A tunnel or share reported as up means its daemon runs, as in the popover;
+`proxy check` is what proves the route. `$DD automation help` has the details.
 
 ## Remote proxy over SSH
 

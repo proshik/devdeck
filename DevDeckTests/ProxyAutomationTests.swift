@@ -34,7 +34,7 @@ final class ProxyAutomationTests: XCTestCase {
         exitIP = "203.0.113.7"
         manager = ProxyManager(discovering: discovery, advertiser: FakeProxyAdvertising(), credentials: credentials,
                                lanIP: { "192.168.1.42" }, gostPath: { _ in nil },
-                               exitIPProbe: { [box = exitIPBox] _ in box.value },
+                               exitIPProbe: { [box = exitIPBox] _ in box.probe() },
                                exitIPAttempts: 1, exitIPRetryDelay: .milliseconds(1),
                                envFile: FakePrivateFile(), shareConfigFile: FakePrivateFile(),
                                bridgeConfigFile: FakePrivateFile(url: URL(fileURLWithPath: "/fake/proxy-bridge.json")))
@@ -441,6 +441,83 @@ final class ProxyAutomationTests: XCTestCase {
         XCTAssertEqual(use.exitCode, AutomationExitCode.usage)
     }
 
+    // MARK: review round 1
+
+    func testANotLiveRemoteChoiceIsListedOnceAndResolvesByName() async throws {
+        addRemote(eager: false)
+        _ = await handle(.init(action: .use, target: "vds"), startWait: .milliseconds(50))
+        let list = blocks(await handle(.init(action: .list)))
+        XCTAssertEqual(list.count, 1, "the synthetic loopback entry is not a LAN proxy")
+        XCTAssertEqual(list[0]["type"], "remote")
+        let again = await handle(.init(action: .use, target: "vds"), startWait: .milliseconds(50))
+        XCTAssertNotEqual(again.exitCode, AutomationExitCode.refused, again.stderr)
+    }
+
+    func testACheckReplacedByAnotherProxysCheckFails() async throws {
+        await announce([lan("A"), lan("B")])
+        _ = await handle(.init(action: .use, target: "A"))
+        exitIPBox.delay = 0.3
+        let first = Task { await self.handle(.init(action: .check)) }
+        try await Task.sleep(for: .milliseconds(50))
+        manager.setActiveProxy(manager.visibleProxies.first { $0.name == "B" })
+        manager.checkActiveProxy()
+        let response = await first.value
+        XCTAssertEqual(response.exitCode, AutomationExitCode.failed, response.stdout)
+        XCTAssertEqual(blocks(response)[0]["message"], L10n.automationProxySelectionChanged)
+    }
+
+    func testShareOnRefusesARunningShareWithAuthButNoUsername() async throws {
+        runner.eagerScripts[ProxyShare.daemonID] = [.started(pid: nil)]
+        _ = await handle(.init(action: .shareOn))
+        try update { $0.proxy.authEnabled = true; $0.proxy.username = "" }
+        let response = await handle(.init(action: .shareOn))
+        XCTAssertEqual(response.exitCode, AutomationExitCode.refused)
+        XCTAssertEqual(response.stderr, AutomationRefusal.shareUsernameMissing.message)
+    }
+
+    func testShareOnWhileTheListenerIsStillStoppingStartsANewOne() async throws {
+        runner.eagerScripts[ProxyShare.daemonID] = [.started(pid: nil)]
+        runner.autoTerminateOnStopCode = nil   // read at launch: the listener takes its time to exit
+        _ = await handle(.init(action: .shareOn))
+        let dying = try XCTUnwrap(runner.controller(for: ProxyShare.daemonID))
+        manager.setShareEnabled(false)   // stop requested; the listener has not exited yet
+        let on = Task { await self.handle(.init(action: .shareOn)) }
+        try await Task.sleep(for: .milliseconds(50))
+        XCTAssertEqual(runner.startedCommandIDs.count, 1, "no start while the old listener is stopping")
+        dying.terminate(0)
+        let response = await on.value
+        XCTAssertEqual(response.exitCode, AutomationExitCode.success, response.stdout)
+        XCTAssertEqual(runner.startedCommandIDs.count, 2)
+        XCTAssertEqual(blocks(response)[0]["state"], "daemonRunning")
+    }
+
+    func testChangesAreRefusedWhileTheConfigFileDoesNotDecode() async throws {
+        await announce([lan("Office Mac")])
+        try Data("{ not json".utf8).write(to: dir.appendingPathComponent("config.json"))
+        store.reload()
+        XCTAssertTrue(store.isFileDamaged)
+        for request in [AutomationProxyRequest(action: .use, target: "Office Mac"), .init(action: .shareOn),
+                        .init(action: .shareSet, port: 8899)] {
+            let response = await handle(request)
+            XCTAssertEqual(response.exitCode, AutomationExitCode.refused, "\(request.action)")
+            XCTAssertTrue(response.stderr.hasPrefix(L10n.automationConfigNotSaved("").trimmingCharacters(in: .whitespaces)),
+                          response.stderr)
+        }
+        XCTAssertNil(store.config.settings.activeProxyName)
+        XCTAssertTrue(runner.startedCommandIDs.isEmpty)
+        let status = await handle(.init(action: .status))
+        XCTAssertEqual(status.exitCode, AutomationExitCode.success, "reading still works")
+    }
+
+    func testControlCharactersFromTheNetworkNeverReachTheOutput() async {
+        await announce([DiscoveredProxy(name: "evil\u{1B}[2J", host: "192.168.1.9", port: 1, authRequired: false,
+                                        exitIP: "1.2.3.4\u{07}", proto: "http", schema: proxyTXTSchemaVersion)])
+        let response = await handle(.init(action: .list))
+        XCTAssertFalse(response.stdout.unicodeScalars.contains { $0.properties.generalCategory == .control && $0 != "\n" })
+        let unknown = await handle(.init(action: .use, target: "x"))
+        XCTAssertFalse(unknown.stderr.contains("\u{1B}"))
+    }
+
     func testRouterReachesProxyAutomation() async {
         let router = AutomationRequestRouter(
             service: AutomationService(manager: processManager, config: { [unowned self] in self.store.config }),
@@ -456,8 +533,19 @@ final class ProxyAutomationTests: XCTestCase {
 private final class ExitIPBox: @unchecked Sendable {
     private let lock = NSLock()
     private var _value: String?
+    private var _delay: TimeInterval = 0
     var value: String? {
         get { lock.lock(); defer { lock.unlock() }; return _value }
         set { lock.lock(); _value = newValue; lock.unlock() }
+    }
+    /// Seconds the probe takes — lets a test overlap two checks.
+    var delay: TimeInterval {
+        get { lock.lock(); defer { lock.unlock() }; return _delay }
+        set { lock.lock(); _delay = newValue; lock.unlock() }
+    }
+    func probe() -> String? {
+        let pause = delay
+        if pause > 0 { Thread.sleep(forTimeInterval: pause) }
+        return value
     }
 }
